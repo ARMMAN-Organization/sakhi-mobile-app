@@ -1,0 +1,2 @@
+-keep class net.sqlcipher.** { *; }
+-keepattributes Signature, *Annotation*
