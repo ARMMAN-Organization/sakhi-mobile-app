@@ -6,10 +6,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import org.armman.sakhi.ui.theme.Dimens
 
 /** App-local primary action button following the style guide. */
 @Composable
 fun PrimaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-  Button(onClick = onClick, modifier = modifier.fillMaxWidth().height(48.dp)) { Text(text) }
+  Button(onClick = onClick, modifier = modifier.fillMaxWidth().height(Dimens.ButtonHeight)) { Text(text) }
 }

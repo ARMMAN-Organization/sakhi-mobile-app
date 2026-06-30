@@ -36,6 +36,7 @@ android {
 dependencies {
   implementation(libs.androidx.core.ktx)
   implementation(libs.androidx.lifecycle.runtime.ktx)
+  implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.activity.compose)
   implementation(libs.androidx.navigation.compose)
 
@@ -53,4 +54,7 @@ dependencies {
   implementation(libs.retrofit.gson)
   implementation(libs.okhttp.logging)
   implementation(libs.coroutines.android)
+
+  testImplementation(libs.junit)
+  testImplementation(libs.coroutines.test)
 }

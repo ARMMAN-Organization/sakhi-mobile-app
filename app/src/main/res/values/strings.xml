@@ -3,4 +3,6 @@
   <string name="home_title">Sakhi Home</string>
   <string name="home_subtitle">Welcome. Your work will appear here.</string>
   <string name="sync_now">Sync now</string>
+  <string name="syncing">Syncing…</string>
+  <string name="sync_complete">Synced</string>
 </resources>
