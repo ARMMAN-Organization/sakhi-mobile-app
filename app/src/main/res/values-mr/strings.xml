@@ -1,0 +1,8 @@
+<resources>
+  <string name="app_name">आरोग्य सखी</string>
+  <string name="home_title">सखी मुख्यपृष्ठ</string>
+  <string name="home_subtitle">स्वागत आहे. तुमचे काम येथे दिसेल.</string>
+  <string name="sync_now">आता सिंक करा</string>
+  <string name="syncing">सिंक करत आहे…</string>
+  <string name="sync_complete">सिंक झाले</string>
+</resources>
