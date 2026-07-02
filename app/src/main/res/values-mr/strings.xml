@@ -1,8 +1,34 @@
 <resources>
   <string name="app_name">आरोग्य सखी</string>
-  <string name="home_title">सखी मुख्यपृष्ठ</string>
-  <string name="home_subtitle">स्वागत आहे. तुमचे काम येथे दिसेल.</string>
-  <string name="sync_now">आता सिंक करा</string>
-  <string name="syncing">सिंक करत आहे…</string>
-  <string name="sync_complete">सिंक झाले</string>
+  <!-- Home dashboard -->
+  <string name="home_welcome">स्वागत, आरोग्य सखी</string>
+  <string name="home_profile_content_description">प्रोफाइल</string>
+  <string name="home_data_upload">डेटा अपलोड</string>
+  <string name="home_updated_on">%1$s रोजी अपडेट केले</string>
+  <string name="home_active_visits">सक्रिय भेटी</string>
+  <string name="home_open">खुल्या</string>
+  <string name="home_ending">(संपत आहेत)</string>
+  <string name="home_pending_referral">प्रलंबित रेफरल फॉलो-अप</string>
+  <string name="home_see_visit_tracker">भेट ट्रॅकर पहा</string>
+  <string name="home_active_beneficiaries">सक्रिय लाभार्थी</string>
+  <string name="home_mothers">माता</string>
+  <string name="home_infants">बालके</string>
+  <string name="home_all_beneficiaries">सर्व लाभार्थी</string>
+  <string name="home_register_new">नवीन नोंदणी</string>
+  <string name="home_error_load">डॅशबोर्ड लोड होऊ शकला नाही. कृपया पुन्हा प्रयत्न करा.</string>
+  <string name="home_retry">पुन्हा प्रयत्न करा</string>
+
+  <!-- Login -->
+  <string name="login_title">लॉगिन</string>
+  <string name="login_user_id_label">युजर आयडी</string>
+  <string name="login_user_id_placeholder">युजर आयडी प्रविष्ट करा</string>
+  <string name="login_password_label">पासवर्ड</string>
+  <string name="login_password_placeholder">पासवर्ड प्रविष्ट करा</string>
+  <string name="login_button">लॉगिन</string>
+  <string name="login_logo_content_description">आरोग्य सखी — गर्भधारणा आणि बाल संगोपन</string>
+  <string name="login_error_user_id_required">कृपया तुमचा युजर आयडी प्रविष्ट करा.</string>
+  <string name="login_error_password_required">कृपया तुमचा पासवर्ड प्रविष्ट करा.</string>
+  <string name="login_error_invalid_credentials">युजर आयडी किंवा पासवर्ड चुकीचा आहे. कृपया पुन्हा प्रयत्न करा.</string>
+  <string name="login_error_generic">काहीतरी चूक झाली. कृपया पुन्हा प्रयत्न करा.</string>
+  <string name="login_logout_success">तुम्ही यशस्वीरित्या लॉगआउट झाला आहात</string>
 </resources>
