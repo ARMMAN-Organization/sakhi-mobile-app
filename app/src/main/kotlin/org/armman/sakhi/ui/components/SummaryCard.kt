@@ -14,12 +14,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG400
 import org.armman.sakhi.ui.theme.SerifTitle
 import org.armman.sakhi.ui.theme.White
+import org.armman.sakhi.ui.theme.softShadow
 
 /**
  * White dashboard card with a bold title, optional trailing label
@@ -35,8 +35,7 @@ fun SummaryCard(
   Card(
     shape = RoundedCornerShape(Dimens.CardRadius),
     colors = CardDefaults.cardColors(containerColor = White),
-    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-    modifier = modifier.fillMaxWidth(),
+    modifier = modifier.fillMaxWidth().softShadow(cornerRadius = Dimens.CardRadius),
   ) {
     Column(modifier = Modifier.padding(Dimens.ItemSpacing)) {
       Row(

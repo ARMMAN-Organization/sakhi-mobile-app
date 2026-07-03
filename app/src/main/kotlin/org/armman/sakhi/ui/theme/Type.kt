@@ -32,11 +32,25 @@ val SerifTitle = TextStyle(
   fontSize = 18.sp,
 )
 
+/** Serif page titles (e.g. "My Beneficiaries") — measured 24px from the designs. */
+val SerifTitleLarge = TextStyle(
+  fontFamily = BaskervilleFamily,
+  fontWeight = FontWeight.Bold,
+  fontSize = 24.sp,
+)
+
 /** KPI number style measured from the dashboard designs (~40px, Cabin Bold). */
 val KpiNumber = TextStyle(
   fontFamily = CabinFamily,
   fontWeight = FontWeight.Bold,
   fontSize = 40.sp,
+)
+
+/** Large-button label on tablet — measured ~20px from the tablet designs. */
+val ButtonTextTablet = TextStyle(
+  fontFamily = CabinFamily,
+  fontWeight = FontWeight.SemiBold,
+  fontSize = 20.sp,
 )
 
 // Style-guide scale mapped onto Material3 tokens.

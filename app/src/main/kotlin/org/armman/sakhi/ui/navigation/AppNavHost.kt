@@ -6,12 +6,14 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import org.armman.sakhi.ui.beneficiaries.BeneficiariesScreen
 import org.armman.sakhi.ui.home.HomeScreen
 import org.armman.sakhi.ui.login.LoginScreen
 
 object Routes {
   const val LOGIN = "login?loggedOut={loggedOut}"
   const val HOME = "home"
+  const val BENEFICIARIES = "beneficiaries"
 
   /** Builds a login route, optionally showing the post-logout success banner. */
   fun login(loggedOut: Boolean = false) = "login?loggedOut=$loggedOut"
@@ -41,6 +43,13 @@ fun AppNavHost() {
         },
       )
     }
-    composable(Routes.HOME) { HomeScreen() }
+    composable(Routes.HOME) {
+      HomeScreen(
+        onAllBeneficiaries = { navController.navigate(Routes.BENEFICIARIES) },
+      )
+    }
+    composable(Routes.BENEFICIARIES) {
+      BeneficiariesScreen(onBack = { navController.popBackStack() })
+    }
   }
 }

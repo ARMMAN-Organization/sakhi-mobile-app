@@ -44,7 +44,10 @@ import java.util.Locale
  * Actions that lead to unbuilt screens are intentionally no-ops for now.
  */
 @Composable
-fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
+fun HomeScreen(
+  onAllBeneficiaries: () -> Unit = {},
+  viewModel: HomeViewModel = hiltViewModel(),
+) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
   Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
@@ -59,7 +62,10 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
         when (val state = uiState) {
           is HomeUiState.Loading -> HomeLoading()
           is HomeUiState.Error -> HomeError(onRetry = viewModel::loadSummary)
-          is HomeUiState.Success -> HomeContent(summary = state.summary)
+          is HomeUiState.Success -> HomeContent(
+            summary = state.summary,
+            onAllBeneficiaries = onAllBeneficiaries,
+          )
         }
       }
     }
@@ -77,25 +83,26 @@ private fun HomeHeader() {
     horizontalArrangement = Arrangement.SpaceBetween,
     modifier = Modifier
       .fillMaxWidth()
-      .padding(horizontal = Dimens.ItemSpacing, vertical = Dimens.ItemSpacing),
+      .padding(horizontal = Dimens.ItemSpacing, vertical = Dimens.ScreenPadding),
   ) {
     Column {
       Text(
         text = stringResource(R.string.home_welcome),
-        style = MaterialTheme.typography.titleMedium,
+        style = MaterialTheme.typography.titleLarge,
         color = NeutralG400,
       )
       Text(
         text = today,
         style = MaterialTheme.typography.labelSmall,
         color = NeutralG200,
+        modifier = Modifier.padding(top = 4.dp),
       )
     }
     Image(
       painter = painterResource(R.drawable.logo_arogya_sakhi),
       contentDescription = stringResource(R.string.home_profile_content_description),
       modifier = Modifier
-        .size(40.dp)
+        .size(52.dp)
         .clip(RoundedCornerShape(8.dp))
         .clickable { /* no-op: profile page not built yet */ },
     )

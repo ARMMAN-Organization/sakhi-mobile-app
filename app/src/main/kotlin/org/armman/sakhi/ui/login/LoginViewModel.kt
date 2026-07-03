@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.armman.sakhi.BuildConfig
 import org.armman.sakhi.R
 import org.armman.sakhi.data.auth.AuthRepository
 import org.armman.sakhi.data.auth.LoginFailureReason
@@ -35,7 +36,7 @@ class LoginViewModel @Inject constructor(
   private val authRepository: AuthRepository,
 ) : ViewModel() {
 
-  private val _uiState = MutableStateFlow(LoginUiState())
+  private val _uiState = MutableStateFlow(initialState())
   val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
   fun onUserIdChanged(value: String) {
@@ -81,5 +82,18 @@ class LoginViewModel @Inject constructor(
   private fun LoginFailureReason.toMessageRes(): Int = when (this) {
     LoginFailureReason.INVALID_CREDENTIALS -> R.string.login_error_invalid_credentials
     LoginFailureReason.UNKNOWN -> R.string.login_error_generic
+  }
+
+  private companion object {
+    // Dev convenience only: matches StaticAuthRepository; never compiled into release flows.
+    const val DEV_USER_ID = "sakhi01"
+    const val DEV_PASSWORD = "Sakhi@123"
+
+    /** Prefills the static dev credentials in debug builds; empty in release. */
+    fun initialState(): LoginUiState = if (BuildConfig.DEBUG) {
+      LoginUiState(userId = DEV_USER_ID, password = DEV_PASSWORD)
+    } else {
+      LoginUiState()
+    }
   }
 }

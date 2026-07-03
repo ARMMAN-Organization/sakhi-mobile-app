@@ -11,7 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -27,7 +27,7 @@ import org.armman.sakhi.ui.theme.NeutralG50
  */
 @Composable
 fun StatTile(
-  icon: ImageVector,
+  icon: Painter,
   value: AnnotatedString,
   caption: AnnotatedString,
   modifier: Modifier = Modifier,
@@ -39,7 +39,7 @@ fun StatTile(
       .padding(horizontal = Dimens.ItemSpacing, vertical = Dimens.TilePadding),
   ) {
     Icon(
-      imageVector = icon,
+      painter = icon,
       contentDescription = null,
       tint = NeutralG400,
       modifier = Modifier.size(32.dp),

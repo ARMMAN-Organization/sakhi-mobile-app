@@ -31,4 +31,40 @@
   <string name="login_error_invalid_credentials">User ID or password is incorrect. Please try again.</string>
   <string name="login_error_generic">Something went wrong. Please try again.</string>
   <string name="login_logout_success">You have logged out successfully</string>
+
+  <!-- Common -->
+  <string name="back">Back</string>
+  <string name="filter_apply">Apply</string>
+  <string name="filter_clear">Clear</string>
+  <string name="filter_close">Close filter</string>
+  <string name="filter_all_padas">All Padas</string>
+  <string name="filter_all_risks">All Risks</string>
+  <string name="risk_high">High Risk</string>
+  <string name="risk_moderate">Moderate Risk</string>
+  <string name="risk_mild">Mild Risk</string>
+  <string name="risk_low">Low Risk</string>
+
+  <!-- My Beneficiaries -->
+  <string name="beneficiaries_back_title">Dashboard</string>
+  <string name="beneficiaries_title">My Beneficiaries</string>
+  <string name="beneficiaries_search_hint">Search</string>
+  <string name="beneficiaries_voice_search">Voice search</string>
+  <string name="beneficiaries_tab_active">Active</string>
+  <string name="beneficiaries_tab_journey_complete">Journey Complete</string>
+  <string name="beneficiaries_tab_closed">Closed</string>
+  <string name="beneficiaries_subtab_all">All</string>
+  <string name="beneficiaries_subtab_open">Open</string>
+  <string name="beneficiaries_subtab_pending_referral">Pending Referral</string>
+  <string name="beneficiaries_subtab_missed">Missed</string>
+  <string name="beneficiaries_date_label">Date</string>
+  <string name="beneficiaries_month_all">All months</string>
+  <string name="beneficiaries_days_remaining">%1$d days remaining</string>
+  <string name="beneficiaries_schedule_date">Schedule Date : %1$s</string>
+  <string name="beneficiaries_sch_date">Sch Date : %1$s</string>
+  <string name="beneficiaries_call">Call</string>
+  <string name="beneficiaries_see_profile">See Profile</string>
+  <string name="beneficiaries_filter_pada">Pada</string>
+  <string name="beneficiaries_filter_risk">Risk</string>
+  <string name="beneficiaries_empty">No beneficiaries match the current filters.</string>
+  <string name="beneficiaries_error_load">We couldn\'t load your beneficiaries. Please try again.</string>
 </resources>

@@ -56,10 +56,11 @@ class LoginViewModelTest {
   }
 
   @Test
-  fun `initial state is empty with no errors`() {
+  fun `initial state prefills dev credentials in debug and has no errors`() {
+    // Unit tests run against the debug variant, so the dev prefill is expected.
     val state = viewModel.uiState.value
-    assertEquals("", state.userId)
-    assertEquals("", state.password)
+    assertEquals("sakhi01", state.userId)
+    assertEquals("Sakhi@123", state.password)
     assertFalse(state.isSubmitting)
     assertNull(state.userIdError)
     assertNull(state.passwordError)
@@ -69,6 +70,7 @@ class LoginViewModelTest {
 
   @Test
   fun `blank user id blocks submit with field error`() = runTest(dispatcher) {
+    viewModel.onUserIdChanged("")
     viewModel.onPasswordChanged("secret")
     viewModel.onLoginClicked()
     dispatcher.scheduler.advanceUntilIdle()
@@ -80,6 +82,7 @@ class LoginViewModelTest {
   @Test
   fun `blank password blocks submit with field error`() = runTest(dispatcher) {
     viewModel.onUserIdChanged("sakhi01")
+    viewModel.onPasswordChanged("")
     viewModel.onLoginClicked()
     dispatcher.scheduler.advanceUntilIdle()
 
@@ -89,6 +92,8 @@ class LoginViewModelTest {
 
   @Test
   fun `both fields blank shows both errors`() = runTest(dispatcher) {
+    viewModel.onUserIdChanged("")
+    viewModel.onPasswordChanged("")
     viewModel.onLoginClicked()
     dispatcher.scheduler.advanceUntilIdle()
 
