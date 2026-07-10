@@ -1,8 +1,141 @@
 <resources>
   <string name="app_name">Arogya Sakhi</string>
-  <string name="home_title">Sakhi Home</string>
-  <string name="home_subtitle">Welcome. Your work will appear here.</string>
-  <string name="sync_now">Sync now</string>
-  <string name="syncing">Syncing…</string>
-  <string name="sync_complete">Synced</string>
+  <!-- Home dashboard -->
+  <string name="home_welcome">Welcome, Arogya Sakhi</string>
+  <string name="home_profile_content_description">Profile</string>
+  <string name="home_data_upload">Data Upload</string>
+  <string name="home_updated_on">Updated %1$s</string>
+  <string name="home_active_visits">Active Visits</string>
+  <string name="home_open">Open</string>
+  <string name="home_ending">(Ending)</string>
+  <string name="home_pending_referral">Pending Referral Follow-up</string>
+  <string name="home_see_visit_tracker">See Visit Tracker</string>
+  <string name="home_active_beneficiaries">Active Beneficiaries</string>
+  <string name="home_mothers">Mothers</string>
+  <string name="home_infants">Infants</string>
+  <string name="home_all_beneficiaries">All Beneficiaries</string>
+  <string name="home_register_new">Register New</string>
+  <string name="home_error_load">We couldn\'t load your dashboard. Please try again.</string>
+  <string name="home_retry">Retry</string>
+
+  <!-- Login -->
+  <string name="login_title">Login</string>
+  <string name="login_user_id_label">User ID</string>
+  <string name="login_user_id_placeholder">Enter User ID</string>
+  <string name="login_password_label">Password</string>
+  <string name="login_password_placeholder">Enter Password</string>
+  <string name="login_button">Login</string>
+  <string name="login_logo_content_description">Arogya Sakhi — Pregnancy and Child Care</string>
+  <string name="login_error_user_id_required">Please enter your User ID.</string>
+  <string name="login_error_password_required">Please enter your password.</string>
+  <string name="login_error_invalid_credentials">User ID or password is incorrect. Please try again.</string>
+  <string name="login_error_generic">Something went wrong. Please try again.</string>
+  <string name="login_logout_success">You have logged out successfully</string>
+
+  <!-- Common -->
+  <string name="back">Back</string>
+  <string name="filter_apply">Apply</string>
+  <string name="filter_clear">Clear</string>
+  <string name="filter_close">Close filter</string>
+  <string name="filter_all_padas">All Padas</string>
+  <string name="filter_all_risks">All Risks</string>
+  <string name="risk_high">High Risk</string>
+  <string name="risk_moderate">Moderate Risk</string>
+  <string name="risk_mild">Mild Risk</string>
+  <string name="risk_low">Low Risk</string>
+
+  <!-- My Beneficiaries -->
+  <string name="beneficiaries_back_title">Dashboard</string>
+  <string name="beneficiaries_title">My Beneficiaries</string>
+  <string name="beneficiaries_search_hint">Search</string>
+  <string name="beneficiaries_voice_search">Voice search</string>
+  <string name="beneficiaries_tab_active">Active</string>
+  <string name="beneficiaries_tab_journey_complete">Journey Complete</string>
+  <string name="beneficiaries_tab_closed">Closed</string>
+  <string name="beneficiaries_subtab_all">All</string>
+  <string name="beneficiaries_subtab_open">Open</string>
+  <string name="beneficiaries_subtab_pending_referral">Pending Referral</string>
+  <string name="beneficiaries_subtab_missed">Missed</string>
+  <string name="beneficiaries_date_label">Date</string>
+  <string name="beneficiaries_month_all">All months</string>
+  <string name="beneficiaries_days_remaining">%1$d days remaining</string>
+  <string name="beneficiaries_schedule_date">Schedule Date : %1$s</string>
+  <string name="beneficiaries_sch_date">Sch Date : %1$s</string>
+  <string name="beneficiaries_call">Call</string>
+  <string name="beneficiaries_see_profile">See Profile</string>
+  <string name="beneficiaries_filter_pada">Pada</string>
+  <string name="beneficiaries_filter_risk">Risk</string>
+  <string name="beneficiaries_empty">No beneficiaries match the current filters.</string>
+  <string name="beneficiaries_error_load">We couldn\'t load your beneficiaries. Please try again.</string>
+
+  <!-- Visit Tracker -->
+  <string name="visit_tracker_title">Visit Tracker</string>
+  <string name="visit_tracker_select_padas">Select Padas for Today\'s Visit (%1$d)</string>
+  <string name="visit_tracker_open">Open</string>
+  <string name="visit_tracker_referral_follow_up">Referral Follow-up</string>
+  <string name="visit_tracker_women">Women</string>
+  <string name="visit_tracker_child">Child</string>
+  <string name="visit_tracker_see_visits">See Visits</string>
+  <string name="visit_tracker_pada_heading">Pada - %1$s</string>
+  <string name="visit_tracker_tab_open">Open (%1$d)</string>
+  <string name="visit_tracker_tab_referral">Referral Follow Up (%1$d)</string>
+  <string name="visit_tracker_empty">No visits match your search.</string>
+  <string name="visit_tracker_error_load">We couldn\'t load today\'s visits. Please try again.</string>
+  <plurals name="visit_tracker_visits_remaining">
+    <item quantity="one">%d visit remaining</item>
+    <item quantity="other">%d visits remaining</item>
+  </plurals>
+
+  <!-- Profile -->
+  <string name="profile_back_title">Home Page</string>
+  <string name="profile_id">ID: %1$s</string>
+  <string name="profile_choose_language">Choose Language</string>
+  <string name="profile_language_english">English</string>
+  <string name="profile_language_marathi">मराठी</string>
+  <string name="profile_label_project">Project</string>
+  <string name="profile_label_card">Card</string>
+  <string name="profile_label_mobile">Mobile Number</string>
+  <string name="profile_label_account">Account Number</string>
+  <string name="profile_learn_more">Learn More</string>
+  <string name="profile_learn_more_sub">Expand your knowledge</string>
+  <string name="profile_restore_data">Restore Data</string>
+  <string name="profile_restore_data_sub">Restore Data on device</string>
+  <string name="profile_update_forms">Update Forms</string>
+  <string name="profile_update_forms_sub">Download new updates</string>
+  <string name="profile_check_app_updates">Check App Updates</string>
+  <string name="profile_check_app_updates_sub">Download new app updates</string>
+  <string name="profile_logout">Logout</string>
+  <string name="profile_version">Version : %1$s</string>
+  <string name="profile_error_load">We couldn\'t load your profile. Please try again.</string>
+
+  <!-- Beneficiary Profile (CR-014) -->
+  <string name="beneficiary_profile_back_title">See Beneficiaries</string>
+  <string name="beneficiary_profile_name_age">%1$s | %2$s</string>
+  <string name="beneficiary_profile_edit">Edit</string>
+  <string name="beneficiary_profile_label_village">Village</string>
+  <string name="beneficiary_profile_label_pada">Pada</string>
+  <string name="beneficiary_profile_label_husband">Husband\'s Name</string>
+  <string name="beneficiary_profile_label_mobile">Mobile Number</string>
+  <string name="beneficiary_profile_label_lmp">LMP</string>
+  <string name="beneficiary_profile_label_edd">EDD</string>
+  <string name="beneficiary_profile_label_dob">DOB</string>
+  <string name="beneficiary_profile_label_weight">Weight</string>
+  <string name="beneficiary_profile_label_risk">Risk Status</string>
+  <string name="beneficiary_profile_label_diagnosis">Diagnosis</string>
+  <string name="beneficiary_profile_last_visit_stats">Last Visit Stats</string>
+  <string name="beneficiary_profile_state_active">Active</string>
+  <string name="beneficiary_profile_state_journey_complete">Journey Complete</string>
+  <string name="beneficiary_profile_state_closed">Closed</string>
+  <string name="beneficiary_profile_coming_soon">This screen is coming soon</string>
+  <string name="beneficiary_profile_error_load">We couldn\'t load this beneficiary. Please try again.</string>
+  <string name="beneficiary_profile_see_visits">See Visits</string>
+  <string name="beneficiary_profile_visit_open">Open</string>
+  <string name="beneficiary_profile_visit_complete">Complete</string>
+  <string name="beneficiary_profile_referral_incomplete">Referral Followup Incomplete</string>
+  <string name="beneficiary_profile_start_visit">Start Visit</string>
+  <string name="beneficiary_profile_fill_form">Fill Form</string>
+  <string name="beneficiary_profile_see_data">See Data</string>
+  <string name="beneficiary_profile_referral">Referral</string>
+  <string name="beneficiary_profile_delivery_form">Delivery Form</string>
+  <string name="beneficiary_profile_closure_form">Closure Form</string>
 </resources>

@@ -7,29 +7,38 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.armman.sakhi.data.dashboard.DashboardRepository
+import org.armman.sakhi.data.dashboard.DashboardSummary
 import javax.inject.Inject
 
-/** UI state for the Home screen — covers loading, error, empty and success. */
+/** UI state for the Home dashboard — loading, error and success. */
 sealed interface HomeUiState {
-  data object Idle : HomeUiState
-  data object Syncing : HomeUiState
-  data object Synced : HomeUiState
-  data class Error(val message: String) : HomeUiState
+  data object Loading : HomeUiState
+  data class Success(val summary: DashboardSummary) : HomeUiState
+  data object Error : HomeUiState
 }
 
 @HiltViewModel
-class HomeViewModel @Inject constructor() : ViewModel() {
-  private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Idle)
+class HomeViewModel @Inject constructor(
+  private val dashboardRepository: DashboardRepository,
+) : ViewModel() {
+
+  private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
   val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
-  fun onSyncClicked() {
+  init {
+    loadSummary()
+  }
+
+  /** Loads (or reloads after an error) the dashboard summary. */
+  fun loadSummary() {
+    _uiState.value = HomeUiState.Loading
     viewModelScope.launch {
-      _uiState.value = HomeUiState.Syncing
-      try {
-        // TODO: invoke sync repository once the data layer exists.
-        _uiState.value = HomeUiState.Synced
+      _uiState.value = try {
+        HomeUiState.Success(dashboardRepository.getSummary())
       } catch (e: Exception) {
-        _uiState.value = HomeUiState.Error(e.message ?: "Sync failed")
+        // Generic error state for the UI; technical detail must not leak to users.
+        HomeUiState.Error
       }
     }
   }
