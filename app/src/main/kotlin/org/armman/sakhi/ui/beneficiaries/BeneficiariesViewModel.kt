@@ -23,13 +23,14 @@ enum class VisitSubTab { ALL, OPEN, PENDING_REFERRAL, MISSED }
 enum class OpenFilter { NONE, PADA, RISK }
 
 /**
- * UI state for My Beneficiaries. [beneficiaries] already has every active
- * filter applied; option lists feed the filter popups.
+ * UI state for My Beneficiaries. [listsByTab] holds each tab's list with all
+ * active filters applied — every tab is present so the swipe pager can show
+ * the adjacent page's real content mid-gesture.
  */
 data class BeneficiariesUiState(
   val isLoading: Boolean = true,
   val hasError: Boolean = false,
-  val beneficiaries: List<Beneficiary> = emptyList(),
+  val listsByTab: Map<BeneficiaryStatus, List<Beneficiary>> = emptyMap(),
   val selectedTab: BeneficiaryStatus = BeneficiaryStatus.ACTIVE,
   val selectedSubTab: VisitSubTab = VisitSubTab.ALL,
   val searchQuery: String = "",
@@ -39,7 +40,11 @@ data class BeneficiariesUiState(
   val monthOptions: List<YearMonth> = emptyList(),
   val selectedMonth: YearMonth? = null,
   val openFilter: OpenFilter = OpenFilter.NONE,
-)
+) {
+  /** Convenience: the currently selected tab's filtered list. */
+  val beneficiaries: List<Beneficiary>
+    get() = listsByTab[selectedTab].orEmpty()
+}
 
 @HiltViewModel
 class BeneficiariesViewModel @Inject constructor(
@@ -132,22 +137,29 @@ class BeneficiariesViewModel @Inject constructor(
     refreshList()
   }
 
-  /** Applies tab, sub-tab, search, pada, risk and month filters (AND semantics). */
+  /**
+   * Recomputes every tab's list with search/pada/risk filters (AND semantics);
+   * the sub-tab applies only to ACTIVE and the month only to JOURNEY_COMPLETE.
+   */
   private fun refreshList() {
     val s = _uiState.value
-    val filtered = allBeneficiaries.filter { b ->
-      b.status == s.selectedTab &&
-        (s.selectedTab != BeneficiaryStatus.ACTIVE || s.selectedSubTab.matches(b.visitState)) &&
-        (s.searchQuery.isBlank() || b.name.contains(s.searchQuery.trim(), ignoreCase = true)) &&
+    val common = allBeneficiaries.filter { b ->
+      (s.searchQuery.isBlank() || b.name.contains(s.searchQuery.trim(), ignoreCase = true)) &&
         (s.selectedPadas.isEmpty() || b.pada in s.selectedPadas) &&
-        (s.selectedRisks.isEmpty() || b.riskLevel in s.selectedRisks) &&
-        (
-          s.selectedTab != BeneficiaryStatus.JOURNEY_COMPLETE ||
-            s.selectedMonth == null ||
-            b.journeyCompletedIn == s.selectedMonth
-          )
+        (s.selectedRisks.isEmpty() || b.riskLevel in s.selectedRisks)
     }
-    _uiState.update { it.copy(beneficiaries = filtered) }
+    val lists = BeneficiaryStatus.entries.associateWith { status ->
+      common.filter { b ->
+        b.status == status &&
+          (status != BeneficiaryStatus.ACTIVE || s.selectedSubTab.matches(b.visitState)) &&
+          (
+            status != BeneficiaryStatus.JOURNEY_COMPLETE ||
+              s.selectedMonth == null ||
+              b.journeyCompletedIn == s.selectedMonth
+            )
+      }
+    }
+    _uiState.update { it.copy(listsByTab = lists) }
   }
 
   private fun VisitSubTab.matches(visitState: VisitState?): Boolean = when (this) {

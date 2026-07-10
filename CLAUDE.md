@@ -1,5 +1,11 @@
 # sakhi-mobile-app — Standard Development Workflow
 
+> **SESSION BOOTSTRAP:** first read the workspace root `../CLAUDE.md` and
+> `../docs/claude-context.md` for current project state. Design source =
+> `../docs/project-docs/Arogya Sakhi - Revamp/` (per-section boards; **build to the
+> CURRENT purple frames**, orange = superseded). Don't ask the user to re-explain
+> context that lives there.
+
 This file complements `.claude/CLAUDE.md` (architecture & code standards). The workflow below
 is MANDATORY for every develop/modify/refactor request. Never skip a step. Never start coding
 before Steps 2 AND 3 are explicitly approved by the user.

@@ -46,4 +46,10 @@ class StaticAuthRepositoryTest {
     val result = repository.login(LoginRequest(userId = "sakhi01", password = "sakhi@123"))
     assertTrue(result is LoginResult.Failure)
   }
+
+  @Test
+  fun `logout is idempotent and never throws`() = runTest {
+    repository.logout()
+    repository.logout() // Second call must be safe.
+  }
 }

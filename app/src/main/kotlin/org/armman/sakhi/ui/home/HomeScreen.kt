@@ -46,13 +46,15 @@ import java.util.Locale
 @Composable
 fun HomeScreen(
   onAllBeneficiaries: () -> Unit = {},
+  onSeeVisitTracker: () -> Unit = {},
+  onProfile: () -> Unit = {},
   viewModel: HomeViewModel = hiltViewModel(),
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
   Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
-      HomeHeader()
+      HomeHeader(onProfile = onProfile)
       // White rounded-top sheet — all content below the header sits on it (per design).
       Surface(
         color = White,
@@ -65,6 +67,7 @@ fun HomeScreen(
           is HomeUiState.Success -> HomeContent(
             summary = state.summary,
             onAllBeneficiaries = onAllBeneficiaries,
+            onSeeVisitTracker = onSeeVisitTracker,
           )
         }
       }
@@ -74,7 +77,7 @@ fun HomeScreen(
 
 /** Lavender header: welcome title + today's date, profile avatar on the right. */
 @Composable
-private fun HomeHeader() {
+private fun HomeHeader(onProfile: () -> Unit) {
   val today = remember {
     LocalDate.now().format(DateTimeFormatter.ofPattern("EEE, d MMM", Locale.getDefault()))
   }
@@ -104,7 +107,7 @@ private fun HomeHeader() {
       modifier = Modifier
         .size(52.dp)
         .clip(RoundedCornerShape(8.dp))
-        .clickable { /* no-op: profile page not built yet */ },
+        .clickable(onClick = onProfile),
     )
   }
 }

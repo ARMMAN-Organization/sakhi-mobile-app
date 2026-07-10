@@ -57,6 +57,7 @@ import java.util.Locale
 internal fun HomeContent(
   summary: DashboardSummary,
   onAllBeneficiaries: () -> Unit = {},
+  onSeeVisitTracker: () -> Unit = {},
 ) {
   Column(modifier = Modifier.fillMaxSize()) {
     Column(
@@ -67,7 +68,7 @@ internal fun HomeContent(
         .padding(horizontal = Dimens.ItemSpacing, vertical = Dimens.ScreenPadding),
     ) {
       SakhiRow(summary)
-      ActiveVisitsCard(summary)
+      ActiveVisitsCard(summary, onSeeVisitTracker)
       ActiveBeneficiariesCard(summary)
     }
     BottomActionBar(onAllBeneficiaries = onAllBeneficiaries)
@@ -158,7 +159,7 @@ private fun DataUploadPill(pendingCount: Int) {
 }
 
 @Composable
-private fun ActiveVisitsCard(summary: DashboardSummary) {
+private fun ActiveVisitsCard(summary: DashboardSummary, onSeeVisitTracker: () -> Unit) {
   val visits = summary.activeVisits
   val month = visits.month.format(DateTimeFormatter.ofPattern("MMM yyyy", Locale.getDefault()))
   val isTablet = LocalConfiguration.current.screenWidthDp >= Dimens.TabletMinWidthDp
@@ -192,7 +193,7 @@ private fun ActiveVisitsCard(summary: DashboardSummary) {
     // mobile: full card width (per the respective designs).
     PrimaryButton(
       text = stringResource(R.string.home_see_visit_tracker),
-      onClick = { /* no-op: visit tracker not built yet */ },
+      onClick = onSeeVisitTracker,
       trailingIcon = painterResource(R.drawable.ic_arrow_right),
       fullWidth = !isTablet,
       height = if (isTablet) Dimens.ButtonHeightTablet else Dimens.ButtonHeight,

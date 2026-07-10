@@ -24,5 +24,12 @@ val StatusSuccess = Color(0xFF2E7D32)
 // Derived surface tint for success banners (StatusSuccess on a near-white wash).
 val StatusSuccessSurface = Color(0xFFF1F8F2)
 
+// Informational (blue) — used for the "Active" state chip on the beneficiary profile.
+val Information = Color(0xFF1D79E5)
+val InformationSurface = Color(0xFFE8F1FC)
+
+// Light red wash for high-risk diagnosis chips / abnormal stat tiles.
+val RiskHighSurface = Color(0xFFFCE9E9)
+
 // Soft shadow tint for cards/bars (black at ~15% opacity, per design shadows).
 val ShadowTint = Color(0x26000000)

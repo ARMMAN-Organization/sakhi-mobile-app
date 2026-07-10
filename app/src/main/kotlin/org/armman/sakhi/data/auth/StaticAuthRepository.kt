@@ -31,6 +31,11 @@ class StaticAuthRepository @Inject constructor() : AuthRepository {
     }
   }
 
+  override suspend fun logout() {
+    // Static impl holds no session state; the real impl will revoke the
+    // refresh token and clear the encrypted credential cache. Idempotent.
+  }
+
   private companion object {
     const val NETWORK_LATENCY_MS = 800L
     const val VALID_USER_ID = "sakhi01"

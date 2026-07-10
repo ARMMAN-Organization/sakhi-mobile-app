@@ -32,7 +32,7 @@ import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.components.RiskBadge
 import org.armman.sakhi.ui.components.SecondaryButton
 import org.armman.sakhi.ui.theme.Dimens
-import org.armman.sakhi.ui.theme.NeutralG10
+import org.armman.sakhi.ui.theme.NeutralG50
 import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG400
 import org.armman.sakhi.ui.theme.PrimarySurface
@@ -88,7 +88,8 @@ fun BeneficiaryCard(
           contentAlignment = Alignment.Center,
           modifier = Modifier
             .size(Dimens.AvatarSize)
-            .background(NeutralG10, CircleShape),
+            // G50 instead of G10 — G10 is invisible against the white card.
+            .background(NeutralG50, CircleShape),
         ) {
           Icon(
             painter = painterResource(

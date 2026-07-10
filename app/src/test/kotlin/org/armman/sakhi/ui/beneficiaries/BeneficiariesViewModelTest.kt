@@ -211,6 +211,53 @@ class BeneficiariesViewModelTest {
   }
 
   @Test
+  fun `listsByTab holds all three statuses simultaneously`() {
+    val viewModel = createViewModel()
+    val lists = viewModel.uiState.value.listsByTab
+
+    assertEquals(listOf("a1", "a2", "a3"), lists[BeneficiaryStatus.ACTIVE]?.map { it.id })
+    assertEquals(listOf("j1", "j2"), lists[BeneficiaryStatus.JOURNEY_COMPLETE]?.map { it.id })
+    assertEquals(listOf("c1"), lists[BeneficiaryStatus.CLOSED]?.map { it.id })
+  }
+
+  @Test
+  fun `search and pada filters apply to every tab list at once`() {
+    val viewModel = createViewModel()
+
+    viewModel.onTogglePada("Jamsar")
+    viewModel.onApplyFilters()
+    val lists = viewModel.uiState.value.listsByTab
+
+    assertEquals(listOf("a1"), lists[BeneficiaryStatus.ACTIVE]?.map { it.id })
+    assertEquals(listOf("j1"), lists[BeneficiaryStatus.JOURNEY_COMPLETE]?.map { it.id })
+    assertTrue(lists[BeneficiaryStatus.CLOSED].orEmpty().isEmpty())
+  }
+
+  @Test
+  fun `month filter affects only the Journey Complete list`() {
+    val viewModel = createViewModel()
+
+    viewModel.onMonthSelected(YearMonth.of(2026, 4))
+    val lists = viewModel.uiState.value.listsByTab
+
+    assertEquals(3, lists[BeneficiaryStatus.ACTIVE]?.size)
+    assertEquals(listOf("j1"), lists[BeneficiaryStatus.JOURNEY_COMPLETE]?.map { it.id })
+    assertEquals(1, lists[BeneficiaryStatus.CLOSED]?.size)
+  }
+
+  @Test
+  fun `sub-tab filter affects only the Active list`() {
+    val viewModel = createViewModel()
+
+    viewModel.onSubTabSelected(VisitSubTab.OPEN)
+    val lists = viewModel.uiState.value.listsByTab
+
+    assertEquals(listOf("a1"), lists[BeneficiaryStatus.ACTIVE]?.map { it.id })
+    assertEquals(2, lists[BeneficiaryStatus.JOURNEY_COMPLETE]?.size)
+    assertEquals(1, lists[BeneficiaryStatus.CLOSED]?.size)
+  }
+
+  @Test
   fun `pada and month options are derived from data`() {
     val viewModel = createViewModel()
     val state = viewModel.uiState.value

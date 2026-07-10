@@ -67,4 +67,75 @@
   <string name="beneficiaries_filter_risk">जोखीम</string>
   <string name="beneficiaries_empty">सध्याच्या फिल्टरशी जुळणारे लाभार्थी नाहीत.</string>
   <string name="beneficiaries_error_load">लाभार्थी लोड होऊ शकले नाहीत. कृपया पुन्हा प्रयत्न करा.</string>
+
+  <!-- Visit Tracker -->
+  <string name="visit_tracker_title">भेट ट्रॅकर</string>
+  <string name="visit_tracker_select_padas">आजच्या भेटीसाठी पाडे निवडा (%1$d)</string>
+  <string name="visit_tracker_open">खुल्या</string>
+  <string name="visit_tracker_referral_follow_up">रेफरल फॉलो-अप</string>
+  <string name="visit_tracker_women">महिला</string>
+  <string name="visit_tracker_child">बालक</string>
+  <string name="visit_tracker_see_visits">भेटी पहा</string>
+  <string name="visit_tracker_pada_heading">पाडा - %1$s</string>
+  <string name="visit_tracker_tab_open">खुल्या (%1$d)</string>
+  <string name="visit_tracker_tab_referral">रेफरल फॉलो अप (%1$d)</string>
+  <string name="visit_tracker_empty">तुमच्या शोधाशी जुळणाऱ्या भेटी नाहीत.</string>
+  <string name="visit_tracker_error_load">आजच्या भेटी लोड होऊ शकल्या नाहीत. कृपया पुन्हा प्रयत्न करा.</string>
+  <plurals name="visit_tracker_visits_remaining">
+    <item quantity="one">%d भेट शिल्लक</item>
+    <item quantity="other">%d भेटी शिल्लक</item>
+  </plurals>
+
+  <!-- Profile -->
+  <string name="profile_back_title">मुख्यपृष्ठ</string>
+  <string name="profile_id">आयडी: %1$s</string>
+  <string name="profile_choose_language">भाषा निवडा</string>
+  <string name="profile_language_english">English</string>
+  <string name="profile_language_marathi">मराठी</string>
+  <string name="profile_label_project">प्रकल्प</string>
+  <string name="profile_label_card">कार्ड</string>
+  <string name="profile_label_mobile">मोबाइल नंबर</string>
+  <string name="profile_label_account">खाते क्रमांक</string>
+  <string name="profile_learn_more">अधिक जाणून घ्या</string>
+  <string name="profile_learn_more_sub">तुमचे ज्ञान वाढवा</string>
+  <string name="profile_restore_data">डेटा पुनर्संचयित करा</string>
+  <string name="profile_restore_data_sub">डिव्हाइसवर डेटा पुनर्संचयित करा</string>
+  <string name="profile_update_forms">फॉर्म अपडेट करा</string>
+  <string name="profile_update_forms_sub">नवीन अपडेट डाउनलोड करा</string>
+  <string name="profile_check_app_updates">अ‍ॅप अपडेट तपासा</string>
+  <string name="profile_check_app_updates_sub">नवीन अ‍ॅप अपडेट डाउनलोड करा</string>
+  <string name="profile_logout">लॉगआउट</string>
+  <string name="profile_version">आवृत्ती : %1$s</string>
+  <string name="profile_error_load">प्रोफाइल लोड होऊ शकले नाही. कृपया पुन्हा प्रयत्न करा.</string>
+
+  <!-- Beneficiary Profile (CR-014) -->
+  <string name="beneficiary_profile_back_title">लाभार्थी पहा</string>
+  <string name="beneficiary_profile_name_age">%1$s | %2$s</string>
+  <string name="beneficiary_profile_edit">संपादित करा</string>
+  <string name="beneficiary_profile_label_village">गाव</string>
+  <string name="beneficiary_profile_label_pada">पाडा</string>
+  <string name="beneficiary_profile_label_husband">पतीचे नाव</string>
+  <string name="beneficiary_profile_label_mobile">मोबाइल नंबर</string>
+  <string name="beneficiary_profile_label_lmp">LMP</string>
+  <string name="beneficiary_profile_label_edd">EDD</string>
+  <string name="beneficiary_profile_label_dob">जन्मतारीख</string>
+  <string name="beneficiary_profile_label_weight">वजन</string>
+  <string name="beneficiary_profile_label_risk">जोखीम स्थिती</string>
+  <string name="beneficiary_profile_label_diagnosis">निदान</string>
+  <string name="beneficiary_profile_last_visit_stats">मागील भेटीची माहिती</string>
+  <string name="beneficiary_profile_state_active">सक्रिय</string>
+  <string name="beneficiary_profile_state_journey_complete">प्रवास पूर्ण</string>
+  <string name="beneficiary_profile_state_closed">बंद</string>
+  <string name="beneficiary_profile_coming_soon">ही स्क्रीन लवकरच येत आहे</string>
+  <string name="beneficiary_profile_error_load">लाभार्थी लोड होऊ शकला नाही. कृपया पुन्हा प्रयत्न करा.</string>
+  <string name="beneficiary_profile_see_visits">भेटी पहा</string>
+  <string name="beneficiary_profile_visit_open">सुरू</string>
+  <string name="beneficiary_profile_visit_complete">पूर्ण</string>
+  <string name="beneficiary_profile_referral_incomplete">संदर्भ पाठपुरावा अपूर्ण</string>
+  <string name="beneficiary_profile_start_visit">भेट सुरू करा</string>
+  <string name="beneficiary_profile_fill_form">फॉर्म भरा</string>
+  <string name="beneficiary_profile_see_data">डेटा पहा</string>
+  <string name="beneficiary_profile_referral">संदर्भ</string>
+  <string name="beneficiary_profile_delivery_form">प्रसूती फॉर्म</string>
+  <string name="beneficiary_profile_closure_form">समाप्ती फॉर्म</string>
 </resources>

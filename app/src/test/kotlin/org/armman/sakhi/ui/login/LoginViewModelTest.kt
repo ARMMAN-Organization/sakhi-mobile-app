@@ -38,6 +38,8 @@ class LoginViewModelTest {
       lastRequest = request
       return result
     }
+
+    override suspend fun logout() { /* no session state in the fake */ }
   }
 
   private lateinit var repository: FakeAuthRepository

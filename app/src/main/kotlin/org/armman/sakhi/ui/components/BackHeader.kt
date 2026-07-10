@@ -37,6 +37,7 @@ fun BackHeader(
   subtitle: String,
   onBack: () -> Unit,
   modifier: Modifier = Modifier,
+  onAvatarClick: (() -> Unit)? = null,
 ) {
   Row(
     verticalAlignment = Alignment.CenterVertically,
@@ -73,7 +74,7 @@ fun BackHeader(
       modifier = Modifier
         .size(52.dp)
         .clip(RoundedCornerShape(8.dp))
-        .clickable { /* no-op: profile page not built yet */ },
+        .clickable(enabled = onAvatarClick != null) { onAvatarClick?.invoke() },
     )
   }
 }

@@ -7,4 +7,7 @@ package org.armman.sakhi.data.auth
  */
 interface AuthRepository {
   suspend fun login(request: LoginRequest): LoginResult
+
+  /** Clears the local session. Idempotent; must never throw for a clean UX. */
+  suspend fun logout()
 }

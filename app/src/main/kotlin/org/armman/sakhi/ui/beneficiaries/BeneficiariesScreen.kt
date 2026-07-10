@@ -36,7 +36,7 @@ import org.armman.sakhi.R
 import org.armman.sakhi.data.beneficiary.Beneficiary
 import org.armman.sakhi.data.beneficiary.BeneficiaryStatus
 import org.armman.sakhi.ui.components.AppIcons
-import org.armman.sakhi.ui.components.AppTabRow
+import org.armman.sakhi.ui.components.AppTabPager
 import org.armman.sakhi.ui.components.BackHeader
 import org.armman.sakhi.ui.components.ChoiceChip
 import org.armman.sakhi.ui.components.PrimaryButton
@@ -57,6 +57,8 @@ import java.util.Locale
 @Composable
 fun BeneficiariesScreen(
   onBack: () -> Unit,
+  onProfile: () -> Unit = {},
+  onSeeProfile: (String) -> Unit = {},
   viewModel: BeneficiariesViewModel = hiltViewModel(),
 ) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -71,6 +73,7 @@ fun BeneficiariesScreen(
         title = stringResource(R.string.beneficiaries_back_title),
         subtitle = today,
         onBack = onBack,
+        onAvatarClick = onProfile,
       )
       Surface(
         color = White,
@@ -83,16 +86,32 @@ fun BeneficiariesScreen(
             when {
               state.isLoading -> Loading()
               state.hasError -> LoadError(onRetry = viewModel::loadBeneficiaries)
-              else -> BeneficiaryList(
-                state = state,
-                onCall = { beneficiary ->
-                  // ACTION_DIAL needs no runtime permission and works offline.
-                  context.startActivity(
-                    Intent(Intent.ACTION_DIAL, Uri.parse("tel:${beneficiary.phoneNumber}")),
-                  )
-                },
-                viewModel = viewModel,
-              )
+              else -> AppTabPager(
+                tabs = listOf(
+                  stringResource(R.string.beneficiaries_tab_active),
+                  stringResource(R.string.beneficiaries_tab_journey_complete),
+                  stringResource(R.string.beneficiaries_tab_closed),
+                ),
+                selectedIndex = state.selectedTab.ordinal,
+                onTabSelected = { viewModel.onTabSelected(BeneficiaryStatus.entries[it]) },
+                tabRowModifier = Modifier.padding(
+                  start = Dimens.ItemSpacing,
+                  top = Dimens.ItemSpacing,
+                ),
+              ) { page ->
+                BeneficiaryList(
+                  state = state,
+                  status = BeneficiaryStatus.entries[page],
+                  onCall = { beneficiary ->
+                    // ACTION_DIAL needs no runtime permission and works offline.
+                    context.startActivity(
+                      Intent(Intent.ACTION_DIAL, Uri.parse("tel:${beneficiary.phoneNumber}")),
+                    )
+                  },
+                  onSeeProfile = onSeeProfile,
+                  viewModel = viewModel,
+                )
+              }
             }
           }
           FilterOverlay(state, viewModel, Modifier.align(Alignment.BottomCenter))
@@ -153,25 +172,18 @@ private fun ListHeader(state: BeneficiariesUiState, viewModel: BeneficiariesView
       )
     }
   }
-  AppTabRow(
-    tabs = listOf(
-      stringResource(R.string.beneficiaries_tab_active),
-      stringResource(R.string.beneficiaries_tab_journey_complete),
-      stringResource(R.string.beneficiaries_tab_closed),
-    ),
-    selectedIndex = state.selectedTab.ordinal,
-    onTabSelected = { viewModel.onTabSelected(BeneficiaryStatus.entries[it]) },
-    modifier = Modifier.padding(start = Dimens.ItemSpacing, top = Dimens.ItemSpacing),
-  )
 }
 
-/** Sub-tabs / month row + scrollable card list + empty state. */
+/** One pager page: sub-tabs / month row + that tab's card list + empty state. */
 @Composable
 private fun BeneficiaryList(
   state: BeneficiariesUiState,
+  status: BeneficiaryStatus,
   onCall: (Beneficiary) -> Unit,
+  onSeeProfile: (String) -> Unit,
   viewModel: BeneficiariesViewModel,
 ) {
+  val beneficiaries = state.listsByTab[status].orEmpty()
   LazyColumn(
     verticalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
     contentPadding = PaddingValues(
@@ -182,20 +194,20 @@ private fun BeneficiaryList(
     ),
     modifier = Modifier.fillMaxSize(),
   ) {
-    if (state.selectedTab == BeneficiaryStatus.ACTIVE) {
+    if (status == BeneficiaryStatus.ACTIVE) {
       item { SubTabRow(state, viewModel) }
     }
-    if (state.selectedTab == BeneficiaryStatus.JOURNEY_COMPLETE) {
+    if (status == BeneficiaryStatus.JOURNEY_COMPLETE) {
       item { MonthFilterRow(state, viewModel) }
     }
-    if (state.beneficiaries.isEmpty()) {
+    if (beneficiaries.isEmpty()) {
       item { EmptyState() }
     }
-    items(state.beneficiaries, key = { it.id }) { beneficiary ->
+    items(beneficiaries, key = { it.id }) { beneficiary ->
       BeneficiaryCard(
         beneficiary = beneficiary,
         onCall = onCall,
-        onSeeProfile = { /* no-op: profile page not built yet */ },
+        onSeeProfile = { onSeeProfile(beneficiary.id) },
       )
     }
   }
