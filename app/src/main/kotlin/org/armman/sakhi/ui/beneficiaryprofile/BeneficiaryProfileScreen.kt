@@ -111,6 +111,7 @@ private fun ProfileContent(
       IdentityCard(profile = profile, isTablet = isTablet, onEdit = onComingSoon)
       LastVisitStatsCard(
         stats = profile.lastVisitStats,
+        isTablet = isTablet,
         modifier = Modifier.padding(top = Dimens.ItemSpacing),
       )
       if (profile.visits.isNotEmpty()) {
@@ -123,6 +124,7 @@ private fun ProfileContent(
         profile.visits.forEach { visit ->
           VisitHistoryCard(
             visit = visit,
+            isTablet = isTablet,
             onAction = onComingSoon,
             modifier = Modifier.padding(top = Dimens.ItemSpacing),
           )

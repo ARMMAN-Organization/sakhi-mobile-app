@@ -43,6 +43,10 @@
   <string name="risk_moderate">Moderate Risk</string>
   <string name="risk_mild">Mild Risk</string>
   <string name="risk_low">Low Risk</string>
+  <string name="risk_high_short">High</string>
+  <string name="risk_moderate_short">Moderate</string>
+  <string name="risk_mild_short">Mild</string>
+  <string name="risk_low_short">Low</string>
 
   <!-- My Beneficiaries -->
   <string name="beneficiaries_back_title">Dashboard</string>
@@ -115,7 +119,11 @@
   <string name="beneficiary_profile_label_village">Village</string>
   <string name="beneficiary_profile_label_pada">Pada</string>
   <string name="beneficiary_profile_label_husband">Husband\'s Name</string>
-  <string name="beneficiary_profile_label_mobile">Mobile Number</string>
+  <string name="beneficiary_profile_label_mobile">Mobile No</string>
+  <string name="beneficiary_profile_label_state">State</string>
+  <string name="beneficiary_profile_label_risk_short">Risk</string>
+  <!-- Inline "Label :" prefix on the mobile identity card, e.g. "Village :". -->
+  <string name="beneficiary_profile_inline_label">%1$s :</string>
   <string name="beneficiary_profile_label_lmp">LMP</string>
   <string name="beneficiary_profile_label_edd">EDD</string>
   <string name="beneficiary_profile_label_dob">DOB</string>
@@ -130,7 +138,9 @@
   <string name="beneficiary_profile_error_load">We couldn\'t load this beneficiary. Please try again.</string>
   <string name="beneficiary_profile_see_visits">See Visits</string>
   <string name="beneficiary_profile_visit_open">Open</string>
-  <string name="beneficiary_profile_visit_complete">Complete</string>
+  <string name="beneficiary_profile_visit_complete">Completed</string>
+  <string name="beneficiary_profile_visit_complete_short">Complete</string>
+  <string name="beneficiary_profile_schedule_date">Schedule Date : %1$s</string>
   <string name="beneficiary_profile_referral_incomplete">Referral Followup Incomplete</string>
   <string name="beneficiary_profile_start_visit">Start Visit</string>
   <string name="beneficiary_profile_fill_form">Fill Form</string>
@@ -138,4 +148,171 @@
   <string name="beneficiary_profile_referral">Referral</string>
   <string name="beneficiary_profile_delivery_form">Delivery Form</string>
   <string name="beneficiary_profile_closure_form">Closure Form</string>
+
+  <!-- Enrollment form (CR-015) -->
+  <string name="enrollment_back_title">Home Page</string>
+  <string name="enrollment_title">Enrollment Form</string>
+  <string name="enrollment_register_as">Register New Beneficiary as :</string>
+  <string name="enrollment_type_child">Child</string>
+  <string name="enrollment_type_pregnant_woman">Pregnant Woman</string>
+  <string name="enrollment_tab_consent">Consent</string>
+  <string name="enrollment_tab_personal_info">Personal\nInfo</string>
+  <string name="enrollment_tab_health_history">Health\nHistory</string>
+  <string name="enrollment_tab_summary">Summary</string>
+  <string name="enrollment_consent_instruction">Please explain the program to the beneficiary and ask for their voluntary consent.</string>
+  <string name="enrollment_consent_welcome">Welcome to Arogyasakhi Program!</string>
+  <string name="enrollment_consent_ensure">Ensure that the beneficiary</string>
+  <string name="enrollment_consent_share_personal">Is willing to share personal info</string>
+  <string name="enrollment_consent_share_health">Is willing to share health history</string>
+  <string name="enrollment_consent_diagnostic">Is willing to participate in diagnostic tests</string>
+  <string name="enrollment_consent_referral">Understands the logic for referral</string>
+  <string name="enrollment_consent_play_guidelines">Play consent guidelines</string>
+  <string name="enrollment_consent_take_photo">Take photo of consent form</string>
+  <string name="enrollment_consent_play_video">Play welcome video</string>
+  <string name="enrollment_consent_retake_photo">Retake photo of consent form</string>
+  <string name="enrollment_consent_photo_captured">Photo captured</string>
+  <string name="enrollment_consent_refused">Consent was not received — the enrollment cannot continue.</string>
+  <string name="enrollment_next_personal_info">Personal Info</string>
+  <string name="enrollment_step_pending">This section is coming soon</string>
+  <string name="enrollment_complete_title">Enrollment Complete!</string>
+  <string name="enrollment_start_visit_form">Start Visit Form</string>
+  <string name="enrollment_coming_soon">This feature is coming soon</string>
+  <string name="enrollment_exit_title">Leave enrollment?</string>
+  <string name="enrollment_exit_message">Your entries will be lost if you leave now.</string>
+  <string name="enrollment_exit_cancel">Stay</string>
+  <string name="enrollment_exit_confirm">Leave</string>
+
+  <!-- Enrollment — Personal Info step (CR-015b) -->
+  <string name="enrollment_pi_instruction">Please enter all details related to the beneficiary. Ensure the beneficiary gives correct details</string>
+  <string name="enrollment_pi_first_name">Beneficiary First Name</string>
+  <string name="enrollment_pi_middle_name">Beneficiary Middle Name</string>
+  <string name="enrollment_pi_last_name">Beneficiary Last Name</string>
+  <string name="enrollment_pi_name_placeholder">Type name here</string>
+  <string name="enrollment_pi_dob">Date of Birth</string>
+  <string name="enrollment_pi_dob_placeholder">Select date of birth</string>
+  <string name="enrollment_pi_age">Age</string>
+  <string name="enrollment_pi_age_placeholder">Or type age in years</string>
+  <string name="enrollment_pi_education">Education</string>
+  <string name="enrollment_pi_education_placeholder">Select Education</string>
+  <string name="enrollment_pi_partner_education">Partner’s Education</string>
+  <string name="enrollment_pi_partner_occupation">Partner’s Occupation</string>
+  <string name="enrollment_pi_select_placeholder">Select</string>
+  <string name="enrollment_pi_address">Address</string>
+  <string name="enrollment_pi_address_placeholder">Type House number, Gali number, landmark</string>
+  <string name="enrollment_pi_mobile">Beneficiary Mobile Number</string>
+  <string name="enrollment_pi_mobile_placeholder">Type beneficiary’s phone number here</string>
+  <string name="enrollment_phone_prefix">+91</string>
+  <string name="enrollment_pi_phone_owner">Who owns the phone?</string>
+  <string name="enrollment_pi_network">Availability of Mobile Network</string>
+  <string name="enrollment_pi_years_in_village">Since when have you been staying in this village? (years)</string>
+  <string name="enrollment_pi_years_placeholder">Type number of years</string>
+  <string name="enrollment_pi_migration">Household migration pattern</string>
+  <string name="enrollment_pi_income">Family income per month</string>
+  <string name="enrollment_pi_religion">Religion</string>
+  <string name="enrollment_pi_category">Category</string>
+  <string name="enrollment_pi_household">Family members in household (incl. children under 5)</string>
+  <string name="enrollment_pi_household_placeholder">Type count (2–15)</string>
+  <string name="enrollment_pi_children_under5">Children under 5 years in household</string>
+  <string name="enrollment_pi_children_placeholder">Type count</string>
+  <string name="enrollment_pi_state">Name of the State</string>
+  <string name="enrollment_pi_district">Name of District</string>
+  <string name="enrollment_pi_block">Name of Block/Taluka</string>
+  <string name="enrollment_pi_village">Name of the Revenue Village/Grampanchayat</string>
+  <string name="enrollment_pi_pada">Beneficiary Pada name</string>
+  <string name="enrollment_pi_phc">Beneficiary PHC name</string>
+  <string name="enrollment_pi_sub_centre">Name of Sub Center</string>
+  <string name="enrollment_pi_lmp_known">Does the woman know her LMP?</string>
+  <string name="enrollment_pi_yes">Yes</string>
+  <string name="enrollment_pi_no">No</string>
+  <string name="enrollment_pi_lmp">Date of LMP</string>
+  <string name="enrollment_pi_lmp_placeholder">Enter LMP</string>
+  <string name="enrollment_pi_edd">EDD (auto-calculated)</string>
+  <string name="enrollment_pi_ga">Gestational age (weeks)</string>
+  <string name="enrollment_pi_banner">Complete all necessary fields</string>
+  <string name="enrollment_pi_back">Back</string>
+  <string name="enrollment_pi_next_health_history">Health History</string>
+  <!-- Field validation messages -->
+  <string name="enrollment_error_required">This field is compulsory</string>
+  <string name="enrollment_error_lmp_future">LMP cannot be in the future</string>
+  <string name="enrollment_error_lmp_recent">LMP must be more than 30 days before registration</string>
+  <string name="enrollment_error_lmp_old">LMP must be less than 240 days before registration</string>
+  <string name="enrollment_error_name_chars">Only letters and spaces are allowed</string>
+  <string name="enrollment_error_age_range">Age must be between 10 and 50 years</string>
+  <string name="enrollment_error_mobile">Enter a valid 10-digit mobile number</string>
+  <string name="enrollment_error_household_range">Must be between 2 and 15</string>
+  <string name="enrollment_error_children_exceed">Cannot be more than family members</string>
+  <string name="enrollment_error_years">Enter a valid number of years</string>
+
+  <!-- Enrollment — Summary step (CR-015d) -->
+  <string name="enrollment_summary_title">Review Details</string>
+  <string name="enrollment_summary_personal_info">Personal Info</string>
+  <string name="enrollment_summary_edit">Edit</string>
+  <string name="enrollment_next_summary">Summary</string>
+  <string name="enrollment_submit">Submit</string>
+  <string name="enrollment_data_saved">Data has been saved</string>
+  <string name="enrollment_submit_error">Could not save the enrollment. Please try again.</string>
+
+  <!-- Enrollment — Health History step (CR-015c, Excel Q35–65) -->
+  <string name="enrollment_hh_instruction">Record the beneficiary’s current pregnancy, obstetric and medical history.</string>
+  <string name="enrollment_hh_section_current">Current Pregnancy</string>
+  <string name="enrollment_hh_section_obstetric">Past Obstetric History</string>
+  <string name="enrollment_hh_section_last_pregnancy">Last Pregnancy</string>
+  <string name="enrollment_hh_section_medical">Self &amp; Family Medical History</string>
+
+  <string name="enrollment_hh_trimester">Trimester of pregnancy</string>
+  <string name="enrollment_hh_trimester_first">First trimester</string>
+  <string name="enrollment_hh_trimester_second">Second trimester</string>
+  <string name="enrollment_hh_trimester_third">Third trimester</string>
+  <string name="enrollment_hh_planned">Is this pregnancy planned?</string>
+  <string name="enrollment_hh_took_treatment">Did you take any medical treatment to become pregnant this time?</string>
+  <string name="enrollment_hh_treatment_type">Treatment type</string>
+  <string name="enrollment_hh_rch_status">Enrolled in RCH?</string>
+  <string name="enrollment_hh_rch_number">RCH number</string>
+  <string name="enrollment_hh_rch_number_placeholder">Enter RCH number</string>
+  <string name="enrollment_hh_anc_status">Has the woman received ANC check-ups during this pregnancy?</string>
+  <string name="enrollment_hh_anc1_date">ANC-1 date</string>
+  <string name="enrollment_hh_anc1_date_placeholder">Select ANC-1 date</string>
+  <string name="enrollment_hh_anc_conditions">High-risk conditions identified at last ANC check-up</string>
+  <string name="enrollment_hh_td">Td doses received</string>
+  <string name="enrollment_hh_td_none">None received yet</string>
+  <string name="enrollment_hh_td1">Td-1</string>
+  <string name="enrollment_hh_td2">Td-2</string>
+  <string name="enrollment_hh_td_booster">Td-Booster</string>
+  <string name="enrollment_hh_td_date_placeholder">Select date</string>
+
+  <string name="enrollment_hh_gravida">Gravida (total pregnancies incl. current)</string>
+  <string name="enrollment_hh_para">Para (births after 24 weeks)</string>
+  <string name="enrollment_hh_living_children">Living children</string>
+  <string name="enrollment_hh_abortions">Abortions (losses before 24 weeks)</string>
+  <string name="enrollment_hh_still_births">Still births</string>
+  <string name="enrollment_hh_dead_children">Dead children</string>
+  <string name="enrollment_hh_count_placeholder">Enter a number</string>
+
+  <string name="enrollment_hh_last_pregnancy_when">When was your last pregnancy?</string>
+  <string name="enrollment_hh_delivery_complications">Complications during previous birth/delivery</string>
+  <string name="enrollment_hh_delivery_duration">Duration of last delivery</string>
+  <string name="enrollment_hh_delivery_type">Type of last delivery</string>
+  <string name="enrollment_hh_delivery_place">Where was the last delivery conducted?</string>
+  <string name="enrollment_hh_delivery_outcome">Last delivery outcome</string>
+  <string name="enrollment_hh_birth_weight">Weight of the child at birth</string>
+
+  <string name="enrollment_hh_self_conditions">Have you been diagnosed with any of these conditions?</string>
+  <string name="enrollment_hh_long_term_meds">Are you currently taking any long-term medicines?</string>
+  <string name="enrollment_hh_sickle_cell">Sickle Cell disease / trait status</string>
+  <string name="enrollment_hh_substance_use">Substance use before or during this pregnancy</string>
+  <string name="enrollment_hh_family_history">Family history of acute or chronic illness?</string>
+  <string name="enrollment_hh_family_conditions">Applicable family conditions</string>
+  <string name="enrollment_hh_malnutrition">Any children in the household treated for malnutrition?</string>
+  <string name="enrollment_hh_remarks">Remarks</string>
+  <string name="enrollment_hh_remarks_placeholder">Optional notes</string>
+
+  <string name="enrollment_hh_error_count">Enter a valid number in range</string>
+  <string name="enrollment_hh_error_anc1_date">ANC-1 date must be after LMP and not in the future</string>
+  <string name="enrollment_hh_error_td_future">Dose date cannot be in the future</string>
+  <string name="enrollment_hh_error_td_order">Dose dates must follow Td-1 → Td-2 → Booster</string>
+  <string name="enrollment_hh_error_para">Para cannot exceed Gravida</string>
+  <string name="enrollment_hh_error_abortions">Abortions cannot exceed Gravida</string>
+  <string name="enrollment_hh_error_dead">Cannot exceed living children</string>
+  <string name="enrollment_hh_error_gravida_total">Gravida must equal Para + Abortions + 1</string>
+  <string name="enrollment_summary_health_history">Health History</string>
 </resources>

@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Marathi options — same order as values/arrays.xml (codes must match). -->
+<resources>
+  <string-array name="enrollment_phone_owner_options">
+    <item>स्वतः</item>
+    <item>पती</item>
+    <item>कुटुंबातील सदस्य</item>
+    <item>आशा</item>
+    <item>शेजारी</item>
+  </string-array>
+  <string-array name="enrollment_network_options">
+    <item>नेटवर्क नाही</item>
+    <item>खूप कमकुवत नेटवर्क (१० मिनिटे चालावे लागते)</item>
+    <item>ठराविक वेळी घराबाहेर नेटवर्क मिळते</item>
+    <item>नेहमी फक्त घराबाहेरच नेटवर्क मिळते</item>
+    <item>पूर्ण नेटवर्क उपलब्ध</item>
+  </string-array>
+  <string-array name="enrollment_education_options">
+    <item>औपचारिक शिक्षण नाही</item>
+    <item>प्राथमिक शिक्षण (इयत्ता १–५)</item>
+    <item>उच्च प्राथमिक / माध्यमिक (इयत्ता ६–९)</item>
+    <item>१० वी उत्तीर्ण</item>
+    <item>१२ वी उत्तीर्ण</item>
+    <item>पदविका</item>
+    <item>पदवीधर</item>
+    <item>पदव्युत्तर आणि त्यापुढील</item>
+  </string-array>
+  <string-array name="enrollment_occupation_options">
+    <item>मजुरी</item>
+    <item>खाजगी नोकरी</item>
+    <item>सरकारी नोकरी</item>
+    <item>व्यवसाय</item>
+    <item>शेतकरी</item>
+    <item>इतर</item>
+  </string-array>
+  <string-array name="enrollment_migration_options">
+    <item>कायमचे स्थलांतर</item>
+    <item>हंगामी स्थलांतर (ठराविक महिन्यांत कामासाठी बाहेर)</item>
+    <item>चक्रीय स्थलांतर (दोन ठिकाणांदरम्यान वारंवार)</item>
+    <item>रोजगारासाठी तात्पुरते स्थलांतर</item>
+    <item>संकटामुळे विस्थापन (आपत्ती, संघर्ष, निष्कासन)</item>
+  </string-array>
+  <string-array name="enrollment_income_options">
+    <item>≤१००००</item>
+    <item>१०००१–१५०००</item>
+    <item>१५००१–२००००</item>
+    <item>२०००१–२५०००</item>
+    <item>&gt;२५०००</item>
+  </string-array>
+  <string-array name="enrollment_religion_options">
+    <item>बौद्ध</item>
+    <item>ख्रिश्चन</item>
+    <item>हिंदू</item>
+    <item>जैन</item>
+    <item>मुस्लिम</item>
+    <item>शीख</item>
+    <item>इतर</item>
+  </string-array>
+  <string-array name="enrollment_category_options">
+    <item>खुला (जनरल)</item>
+    <item>ओबीसी</item>
+    <item>इतर</item>
+    <item>अनुसूचित जाती (SC)</item>
+    <item>अनुसूचित जमाती (ST)</item>
+  </string-array>
+
+  <!-- Health History (CR-015c). Same order/codes as values/arrays.xml.
+       Clinical terms pending native-speaker QA before release. -->
+  <string-array name="enrollment_yesno_options">
+    <item>होय</item>
+    <item>नाही</item>
+  </string-array>
+  <string-array name="enrollment_planned_options">
+    <item>होय</item>
+    <item>नाही</item>
+    <item>उत्तर नाही</item>
+  </string-array>
+  <string-array name="enrollment_treatment_type_options">
+    <item>प्रजनन उपचार</item>
+    <item>IVF</item>
+    <item>ओव्ह्युलेशन इंडक्शन</item>
+    <item>हार्मोनल उपचार</item>
+    <item>इतर</item>
+  </string-array>
+  <string-array name="enrollment_rch_options">
+    <item>नोंदणीकृत – RCH कार्ड उपलब्ध</item>
+    <item>नोंदणीकृत – भेटीवेळी RCH कार्ड उपलब्ध नाही</item>
+    <item>RCH अंतर्गत नोंदणी नाही</item>
+    <item>नोंदणी स्थिती माहित नाही</item>
+  </string-array>
+  <string-array name="enrollment_anc_status_options">
+    <item>अद्याप ANC सुरू केले नाही</item>
+    <item>ANC-1 पूर्ण झाले</item>
+  </string-array>
+  <string-array name="enrollment_anc_condition_options">
+    <item>तपासणीत कोणतीही वैद्यकीय स्थिती आढळली नाही</item>
+    <item>उच्च रक्तदाब (High BP)</item>
+    <item>मधुमेह (गर्भधारणेपूर्वीचा)</item>
+    <item>गर्भधारणेतील मधुमेह (मागील गर्भधारणेत)</item>
+    <item>थायरॉईड विकार</item>
+    <item>हृदयविकार</item>
+    <item>अपस्मार / झटके</item>
+    <item>दमा / दीर्घकालीन श्वसनविकार</item>
+    <item>मूत्रपिंड विकार</item>
+    <item>यकृत विकार</item>
+    <item>रक्तक्षय (तीव्र / वारंवार)</item>
+    <item>क्षयरोग (सध्याचा किंवा पूर्वीचा)</item>
+    <item>HIV / AIDS</item>
+    <item>हिपॅटायटीस B</item>
+    <item>मानसिक आरोग्य स्थिती</item>
+    <item>माहित नाही</item>
+  </string-array>
+  <string-array name="enrollment_last_pregnancy_when_options">
+    <item>3 वर्षांपेक्षा कमी</item>
+    <item>3 वर्षांपेक्षा जास्त</item>
+  </string-array>
+  <string-array name="enrollment_delivery_complication_options">
+    <item>होय, गर्भपात</item>
+    <item>होय, प्रसूतीदरम्यान गुंतागुंत</item>
+    <item>होय, प्रसूतीदरम्यान बाळाशी संबंधित गुंतागुंत</item>
+    <item>गुंतागुंत नाही</item>
+  </string-array>
+  <string-array name="enrollment_delivery_duration_options">
+    <item>पूर्ण कालावधी</item>
+    <item>मुदतीनंतर</item>
+    <item>मुदतपूर्व</item>
+  </string-array>
+  <string-array name="enrollment_delivery_type_options">
+    <item>सिझेरियन</item>
+    <item>फोर्सेप</item>
+    <item>सामान्य</item>
+  </string-array>
+  <string-array name="enrollment_delivery_place_options">
+    <item>CHC</item>
+    <item>जिल्हा रुग्णालय</item>
+    <item>घर</item>
+    <item>इतर शासकीय रुग्णालय</item>
+    <item>PHC</item>
+    <item>खाजगी रुग्णालय</item>
+    <item>मान्यताप्राप्त खाजगी रुग्णालय</item>
+    <item>ग्रामीण रुग्णालय</item>
+    <item>उपजिल्हा रुग्णालय</item>
+    <item>उपकेंद्र</item>
+  </string-array>
+  <string-array name="enrollment_delivery_outcome_options">
+    <item>जिवंत जन्म</item>
+    <item>मृत जन्म</item>
+  </string-array>
+  <string-array name="enrollment_birth_weight_options">
+    <item>2.5 किलोपेक्षा कमी</item>
+    <item>2.5 किलोपेक्षा जास्त</item>
+  </string-array>
+  <string-array name="enrollment_self_condition_options">
+    <item>कोणतीही ज्ञात वैद्यकीय स्थिती नाही</item>
+    <item>उच्च रक्तदाब (High BP)</item>
+    <item>मधुमेह (गर्भधारणेपूर्वीचा)</item>
+    <item>गर्भधारणेतील मधुमेह (मागील गर्भधारणेत)</item>
+    <item>थायरॉईड विकार</item>
+    <item>हृदयविकार</item>
+    <item>अपस्मार / झटके</item>
+    <item>दमा / दीर्घकालीन श्वसनविकार</item>
+    <item>मूत्रपिंड विकार</item>
+    <item>थॅलेसेमिया</item>
+    <item>यकृत विकार</item>
+    <item>रक्तक्षय (तीव्र / वारंवार)</item>
+    <item>क्षयरोग (सध्याचा किंवा पूर्वीचा)</item>
+    <item>HIV / AIDS</item>
+    <item>हिपॅटायटीस B</item>
+    <item>मानसिक आरोग्य स्थिती</item>
+    <item>माहित नाही</item>
+  </string-array>
+  <string-array name="enrollment_long_term_med_options">
+    <item>कोणतेही दीर्घकालीन औषध घेत नाही</item>
+    <item>रक्तदाबाचे औषध घेत आहे</item>
+    <item>मधुमेहाचे औषध घेत आहे</item>
+    <item>थायरॉईडचे औषध घेत आहे</item>
+    <item>अपस्मारविरोधी औषध घेत आहे</item>
+    <item>क्षयरोगविरोधी औषध घेत आहे</item>
+    <item>HIV औषध घेत आहे</item>
+    <item>इतर</item>
+  </string-array>
+  <string-array name="enrollment_sickle_cell_options">
+    <item>तपासणी केली, निकाल सामान्य</item>
+    <item>सिकल सेल ट्रेट (SCT वाहक)</item>
+    <item>सिकल सेल आजार (SCD)</item>
+    <item>पूर्वी तपासले पण निकाल उपलब्ध नाही</item>
+    <item>अद्याप तपासले नाही</item>
+    <item>माहित नाही / जागरूक नाही</item>
+  </string-array>
+  <string-array name="enrollment_substance_use_options">
+    <item>नाही</item>
+    <item>तंबाखू चघळणे (गुटखा, खैनी, मिश्री इ.)</item>
+    <item>धूम्रपान तंबाखू (बिडी, सिगारेट)</item>
+    <item>मद्यपान</item>
+    <item>इतर</item>
+    <item>पूर्वी वापर, गर्भधारणा कळल्यावर बंद</item>
+    <item>माहित नाही / सांगू इच्छित नाही</item>
+  </string-array>
+  <string-array name="enrollment_family_condition_options">
+    <item>उच्च रक्तदाब (High BP)</item>
+    <item>मधुमेह</item>
+    <item>हृदयविकार</item>
+    <item>थायरॉईड विकार</item>
+    <item>दमा / दीर्घकालीन श्वसनविकार</item>
+    <item>मूत्रपिंड विकार</item>
+    <item>क्षयरोग (TB)</item>
+    <item>HIV / AIDS</item>
+    <item>हिपॅटायटीस B किंवा C</item>
+    <item>कुष्ठरोग</item>
+    <item>थॅलेसेमिया</item>
+    <item>सिकल सेल आजार</item>
+    <item>हिमोफिलिया</item>
+    <item>जन्मजात विकृती / जन्मदोष</item>
+    <item>बौद्धिक किंवा विकासात्मक अपंगत्व</item>
+  </string-array>
+  <string-array name="enrollment_malnutrition_options">
+    <item>होय</item>
+    <item>नाही</item>
+    <item>मुले नाहीत</item>
+  </string-array>
+</resources>

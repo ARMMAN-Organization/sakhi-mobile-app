@@ -9,6 +9,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import org.armman.sakhi.ui.beneficiaries.BeneficiariesScreen
 import org.armman.sakhi.ui.beneficiaryprofile.BeneficiaryProfileScreen
+import org.armman.sakhi.ui.enrollment.EnrollmentScreen
 import org.armman.sakhi.ui.home.HomeScreen
 import org.armman.sakhi.ui.login.LoginScreen
 import org.armman.sakhi.ui.profile.ProfileScreen
@@ -23,6 +24,7 @@ object Routes {
   const val PADA_VISITS = "visit-tracker/{pada}"
   const val PROFILE = "profile"
   const val BENEFICIARY_PROFILE = "beneficiary/{id}"
+  const val ENROLLMENT = "enrollment"
 
   /** Builds a login route, optionally showing the post-logout success banner. */
   fun login(loggedOut: Boolean = false) = "login?loggedOut=$loggedOut"
@@ -63,6 +65,7 @@ fun AppNavHost() {
         onAllBeneficiaries = { navController.navigate(Routes.BENEFICIARIES) },
         onSeeVisitTracker = { navController.navigate(Routes.VISIT_TRACKER) },
         onProfile = { navController.navigate(Routes.PROFILE) },
+        onRegisterNew = { navController.navigate(Routes.ENROLLMENT) },
       )
     }
     composable(Routes.PROFILE) {
@@ -98,6 +101,13 @@ fun AppNavHost() {
         onBack = { navController.popBackStack() },
         onProfile = { navController.navigate(Routes.PROFILE) },
         onSeeProfile = { id -> navController.navigate(Routes.beneficiaryProfile(id)) },
+      )
+    }
+    composable(Routes.ENROLLMENT) {
+      EnrollmentScreen(
+        // popBackStack from COMPLETE also lands Home — stepper is a single destination.
+        onBack = { navController.popBackStack() },
+        onProfile = { navController.navigate(Routes.PROFILE) },
       )
     }
     composable(

@@ -33,18 +33,27 @@ private data class RiskStyle(
   val content: Color,
   val icon: ImageVector,
   val labelRes: Int,
+  val shortLabelRes: Int,
 )
 
 private fun RiskLevel.style(): RiskStyle = when (this) {
-  RiskLevel.HIGH -> RiskStyle(RiskHigh, White, Icons.Filled.Warning, R.string.risk_high)
-  RiskLevel.MODERATE -> RiskStyle(RiskModerate, White, Icons.Filled.Warning, R.string.risk_moderate)
-  RiskLevel.MILD -> RiskStyle(RiskMild, NeutralG400, Icons.Filled.Warning, R.string.risk_mild)
-  RiskLevel.LOW -> RiskStyle(RiskLow, White, Icons.Filled.Check, R.string.risk_low)
+  RiskLevel.HIGH ->
+    RiskStyle(RiskHigh, White, Icons.Filled.Warning, R.string.risk_high, R.string.risk_high_short)
+  RiskLevel.MODERATE ->
+    RiskStyle(RiskModerate, White, Icons.Filled.Warning, R.string.risk_moderate, R.string.risk_moderate_short)
+  RiskLevel.MILD ->
+    RiskStyle(RiskMild, NeutralG400, Icons.Filled.Warning, R.string.risk_mild, R.string.risk_mild_short)
+  RiskLevel.LOW ->
+    RiskStyle(RiskLow, White, Icons.Filled.Check, R.string.risk_low, R.string.risk_low_short)
 }
 
-/** Risk badge: colored container with warning/check icon and label. */
+/**
+ * Risk badge: colored container with warning/check icon and label.
+ * [compact] drops the "Risk" suffix (e.g. "High") for tight layouts like the
+ * profile stat strip.
+ */
 @Composable
-fun RiskBadge(riskLevel: RiskLevel, modifier: Modifier = Modifier) {
+fun RiskBadge(riskLevel: RiskLevel, modifier: Modifier = Modifier, compact: Boolean = false) {
   val style = riskLevel.style()
   Row(
     verticalAlignment = Alignment.CenterVertically,
@@ -59,7 +68,7 @@ fun RiskBadge(riskLevel: RiskLevel, modifier: Modifier = Modifier) {
       modifier = Modifier.size(16.dp),
     )
     Text(
-      text = stringResource(style.labelRes),
+      text = stringResource(if (compact) style.shortLabelRes else style.labelRes),
       style = MaterialTheme.typography.labelLarge,
       color = style.content,
       modifier = Modifier.padding(start = 6.dp),

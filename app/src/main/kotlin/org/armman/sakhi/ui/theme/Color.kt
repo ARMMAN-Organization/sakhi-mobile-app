@@ -31,5 +31,11 @@ val InformationSurface = Color(0xFFE8F1FC)
 // Light red wash for high-risk diagnosis chips / abnormal stat tiles.
 val RiskHighSurface = Color(0xFFFCE9E9)
 
+// Even lighter red wash — the "Last Visit Stats" card background per the board.
+val RiskHighSurfaceSubtle = Color(0xFFFDF4F1)
+
+// Light grey wash of the consent video placeholder (Enrollment form design).
+val VideoPlaceholderSurface = Color(0xFFEEEEEE)
+
 // Soft shadow tint for cards/bars (black at ~15% opacity, per design shadows).
 val ShadowTint = Color(0x26000000)
