@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Enrollment dropdown options — order defines the 1-based codes stored in
+     the backend (Excel "Revised App Form Final 20.3.26"). NEVER reorder. -->
+<resources>
+  <string-array name="enrollment_phone_owner_options">
+    <item>Self</item>
+    <item>Husband</item>
+    <item>Family member</item>
+    <item>ASHA</item>
+    <item>Neighbour</item>
+  </string-array>
+  <string-array name="enrollment_network_options">
+    <item>No Network</item>
+    <item>Very Poor Network (10 minutes walk to reach)</item>
+    <item>Network available outside the home at specific times</item>
+    <item>Network available only outside home all time</item>
+    <item>Full Network Available</item>
+  </string-array>
+  <string-array name="enrollment_education_options">
+    <item>No formal education</item>
+    <item>Primary education (Class 1–5)</item>
+    <item>Upper primary / Middle school (Class 6–9)</item>
+    <item>10th Pass</item>
+    <item>12th Pass</item>
+    <item>Diploma</item>
+    <item>Graduate (College degree)</item>
+    <item>Post Graduate and above</item>
+  </string-array>
+  <string-array name="enrollment_occupation_options">
+    <item>Labour</item>
+    <item>Private Job</item>
+    <item>Government Job</item>
+    <item>Business</item>
+    <item>Farmer</item>
+    <item>Other</item>
+  </string-array>
+  <string-array name="enrollment_migration_options">
+    <item>Permanent migration</item>
+    <item>Seasonal migration (leave for work during specific months)</item>
+    <item>Circular migration (move between two places repeatedly)</item>
+    <item>Temporary migration for employment</item>
+    <item>Displacement due to crisis (disaster, conflict, eviction)</item>
+  </string-array>
+  <string-array name="enrollment_income_options">
+    <item>≤10000</item>
+    <item>10001–15000</item>
+    <item>15001–20000</item>
+    <item>20001–25000</item>
+    <item>&gt;25000</item>
+  </string-array>
+  <string-array name="enrollment_religion_options">
+    <item>Buddhist</item>
+    <item>Christian</item>
+    <item>Hindu</item>
+    <item>Jain</item>
+    <item>Muslim</item>
+    <item>Sikh</item>
+    <item>Other</item>
+  </string-array>
+  <string-array name="enrollment_category_options">
+    <item>General</item>
+    <item>OBC</item>
+    <item>Other</item>
+    <item>SC</item>
+    <item>ST</item>
+  </string-array>
+
+  <!-- Health History (CR-015c, Excel Q35–65). Order = 1-based codes. NEVER reorder. -->
+  <string-array name="enrollment_yesno_options">
+    <item>Yes</item>
+    <item>No</item>
+  </string-array>
+  <string-array name="enrollment_planned_options">
+    <item>Yes</item>
+    <item>No</item>
+    <item>No answer</item>
+  </string-array>
+  <string-array name="enrollment_treatment_type_options">
+    <item>Fertility treatment</item>
+    <item>IVF</item>
+    <item>Ovulation induction</item>
+    <item>Hormonal treatment</item>
+    <item>Other</item>
+  </string-array>
+  <string-array name="enrollment_rch_options">
+    <item>Registered – RCH card available</item>
+    <item>Registered – RCH card not available at visit</item>
+    <item>Not registered under RCH</item>
+    <item>Registration status not known</item>
+  </string-array>
+  <string-array name="enrollment_anc_status_options">
+    <item>Not started ANC yet</item>
+    <item>ANC-1 completed</item>
+  </string-array>
+  <string-array name="enrollment_anc_condition_options">
+    <item>No known medical condition identified during check up</item>
+    <item>Hypertension (High BP)</item>
+    <item>Diabetes (Pre-gestational)</item>
+    <item>Gestational diabetes (in previous pregnancy)</item>
+    <item>Thyroid disorder</item>
+    <item>Heart disease</item>
+    <item>Epilepsy / Seizure disorder</item>
+    <item>Asthma / Chronic respiratory disease</item>
+    <item>Kidney disease</item>
+    <item>Liver disease</item>
+    <item>Anemia (severe / recurrent)</item>
+    <item>Tuberculosis (current or past)</item>
+    <item>HIV / AIDS</item>
+    <item>Hepatitis B</item>
+    <item>Mental health condition</item>
+    <item>Don’t know</item>
+  </string-array>
+  <string-array name="enrollment_last_pregnancy_when_options">
+    <item>Less than 3 years ago</item>
+    <item>More than 3 years ago</item>
+  </string-array>
+  <string-array name="enrollment_delivery_complication_options">
+    <item>Yes, Miscarriage</item>
+    <item>Yes, during delivery complications</item>
+    <item>Yes, complications with baby during delivery</item>
+    <item>No complications</item>
+  </string-array>
+  <string-array name="enrollment_delivery_duration_options">
+    <item>Full Term</item>
+    <item>Post Term</item>
+    <item>Pre Term</item>
+  </string-array>
+  <string-array name="enrollment_delivery_type_options">
+    <item>Caesarian</item>
+    <item>Forcep</item>
+    <item>Normal</item>
+  </string-array>
+  <string-array name="enrollment_delivery_place_options">
+    <item>CHC</item>
+    <item>District Hospital</item>
+    <item>Home</item>
+    <item>Other government Hospital</item>
+    <item>PHC</item>
+    <item>Private Hospital</item>
+    <item>Recognized Private Hospital</item>
+    <item>Rural Hospital</item>
+    <item>Sub District Hospital</item>
+    <item>Sub centre</item>
+  </string-array>
+  <string-array name="enrollment_delivery_outcome_options">
+    <item>Live birth</item>
+    <item>Still birth</item>
+  </string-array>
+  <string-array name="enrollment_birth_weight_options">
+    <item>Less than 2.5 kg</item>
+    <item>Greater than 2.5 kg</item>
+  </string-array>
+  <string-array name="enrollment_self_condition_options">
+    <item>No known medical condition</item>
+    <item>Hypertension (High BP)</item>
+    <item>Diabetes (Pre-gestational)</item>
+    <item>Gestational diabetes (in previous pregnancy)</item>
+    <item>Thyroid disorder</item>
+    <item>Heart disease</item>
+    <item>Epilepsy / Seizure disorder</item>
+    <item>Asthma / Chronic respiratory disease</item>
+    <item>Kidney disease</item>
+    <item>Thalassemia</item>
+    <item>Liver disease</item>
+    <item>Anemia (severe / recurrent)</item>
+    <item>Tuberculosis (current or past)</item>
+    <item>HIV / AIDS</item>
+    <item>Hepatitis B</item>
+    <item>Mental health condition</item>
+    <item>Don’t know</item>
+  </string-array>
+  <string-array name="enrollment_long_term_med_options">
+    <item>Not taking any long-term medication</item>
+    <item>Taking medication for BP</item>
+    <item>Taking medication for diabetes</item>
+    <item>Taking thyroid medication</item>
+    <item>Taking anti-epileptic drugs</item>
+    <item>Taking anti-TB drugs</item>
+    <item>Taking HIV drugs</item>
+    <item>Other</item>
+  </string-array>
+  <string-array name="enrollment_sickle_cell_options">
+    <item>Tested and result is normal</item>
+    <item>Sickle Cell Trait (SCT carrier)</item>
+    <item>Sickle Cell Disease (SCD)</item>
+    <item>Tested earlier but result not available</item>
+    <item>Not tested yet</item>
+    <item>Don’t know / Not aware</item>
+  </string-array>
+  <string-array name="enrollment_substance_use_options">
+    <item>No</item>
+    <item>Chewing tobacco (gutkha, khaini, mishri, etc.)</item>
+    <item>Smoking tobacco (bidi, cigarette)</item>
+    <item>Alcohol use</item>
+    <item>Other</item>
+    <item>Used earlier but stopped after knowing about pregnancy</item>
+    <item>Don’t know / Not willing to disclose</item>
+  </string-array>
+  <string-array name="enrollment_family_condition_options">
+    <item>Hypertension (High BP)</item>
+    <item>Diabetes</item>
+    <item>Heart disease</item>
+    <item>Thyroid disorders</item>
+    <item>Asthma / Chronic respiratory disease</item>
+    <item>Kidney disease</item>
+    <item>Tuberculosis (TB)</item>
+    <item>HIV / AIDS</item>
+    <item>Hepatitis B or C</item>
+    <item>Leprosy</item>
+    <item>Thalassemia</item>
+    <item>Sickle cell disease</item>
+    <item>Hemophilia</item>
+    <item>Congenital anomalies / Birth defects</item>
+    <item>Intellectual or developmental disability</item>
+  </string-array>
+  <string-array name="enrollment_malnutrition_options">
+    <item>Yes</item>
+    <item>No</item>
+    <item>No children</item>
+  </string-array>
+</resources>

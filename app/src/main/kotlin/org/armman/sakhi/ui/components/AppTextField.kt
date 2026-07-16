@@ -34,6 +34,8 @@ fun AppTextField(
   keyboardActions: KeyboardActions = KeyboardActions.Default,
   visualTransformation: VisualTransformation = VisualTransformation.None,
   enabled: Boolean = true,
+  singleLine: Boolean = true,
+  minLines: Int = 1,
 ) {
   Column(modifier = modifier.fillMaxWidth()) {
     Text(
@@ -47,7 +49,8 @@ fun AppTextField(
       onValueChange = onValueChange,
       placeholder = { Text(placeholder, color = NeutralG100) },
       isError = errorText != null,
-      singleLine = true,
+      singleLine = singleLine,
+      minLines = minLines,
       enabled = enabled,
       keyboardOptions = keyboardOptions,
       keyboardActions = keyboardActions,

@@ -9,3 +9,6 @@ captures/
 *.keystore
 !debug.keystore
 *.pdf
+.DS_Store
+.kotlin/
+.fuse_hidden*

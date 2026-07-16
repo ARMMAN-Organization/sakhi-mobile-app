@@ -4,10 +4,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -38,12 +41,17 @@ import org.armman.sakhi.ui.theme.softShadow
 /**
  * One "See Visits" history card. Header = visit label + right-side status chip
  * (days-remaining for OPEN, "Referral Followup Incomplete" for a pending
- * referral). Body = state + date meta on the left and the primary action on the
- * right. All actions are stubbed via [onAction] until their screens exist.
+ * referral). All actions are stubbed via [onAction] until their screens exist.
+ *
+ * Body per the design boards:
+ * - Tablet: one line — state | 📅 date | risk chip … action button (right).
+ * - Mobile: state | 📅 date, then risk chip (left) + action button (right)
+ *   on a second line.
  */
 @Composable
 fun VisitHistoryCard(
   visit: ProfileVisit,
+  isTablet: Boolean,
   onAction: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
@@ -71,14 +79,55 @@ fun VisitHistoryCard(
       color = NeutralG50,
       modifier = Modifier.padding(vertical = Dimens.SmallSpacing),
     )
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.SpaceBetween,
-      modifier = Modifier.fillMaxWidth(),
-    ) {
-      MetaColumn(visit, modifier = Modifier.weight(1f))
-      ActionButton(action = visit.action, enabled = visit.startable(), onClick = onAction)
+    if (isTablet) {
+      // Single line: meta, divider + risk chip, action pinned right.
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+      ) {
+        MetaRow(visit, isTablet = true)
+        if (visit.riskLabel != null) {
+          MetaPipe()
+          SolidRiskChip(visit.riskLabel)
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        ActionButton(action = visit.action, enabled = visit.startable(), onClick = onAction)
+      }
+    } else {
+      MetaRow(visit, isTablet = false)
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(top = Dimens.SmallSpacing),
+      ) {
+        if (visit.riskLabel != null) SolidRiskChip(visit.riskLabel)
+        Spacer(modifier = Modifier.weight(1f))
+        ActionButton(action = visit.action, enabled = visit.startable(), onClick = onAction)
+      }
     }
+  }
+}
+
+/** Solid red risk chip (warning icon + white label) per the design. */
+@Composable
+private fun SolidRiskChip(label: String) {
+  Row(
+    verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier
+      .background(RiskHigh, RoundedCornerShape(6.dp))
+      .padding(horizontal = 10.dp, vertical = 6.dp),
+  ) {
+    Icon(
+      imageVector = Icons.Filled.Warning,
+      contentDescription = null,
+      tint = White,
+      modifier = Modifier.size(16.dp),
+    )
+    Text(
+      text = label,
+      style = MaterialTheme.typography.labelLarge,
+      color = White,
+      modifier = Modifier.padding(start = 6.dp),
+    )
   }
 }
 
@@ -104,55 +153,51 @@ private fun StatusChip(visit: ProfileVisit) {
   }
 }
 
+/** State | 📅 date — calendar icon sits next to the date, per the design. */
 @Composable
-private fun MetaColumn(visit: ProfileVisit, modifier: Modifier = Modifier) {
-  Column(modifier = modifier) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-      val stateLabel = if (visit.state == ProfileVisitState.OPEN) {
-        R.string.beneficiary_profile_visit_open
-      } else {
-        R.string.beneficiary_profile_visit_complete
-      }
-      Text(
-        text = stringResource(stateLabel),
-        style = MaterialTheme.typography.titleMedium,
-        color = NeutralG400,
-      )
-      Text(
-        text = "|",
-        style = MaterialTheme.typography.bodyMedium,
-        color = NeutralG200,
-        modifier = Modifier.padding(horizontal = Dimens.SmallSpacing),
-      )
-      Icon(
-        painter = painterResource(R.drawable.ic_calendar_dots),
-        contentDescription = null,
-        tint = NeutralG200,
-        modifier = Modifier.size(16.dp),
-      )
-      Text(
-        text = if (visit.state == ProfileVisitState.OPEN) {
-          stringResource(R.string.beneficiaries_sch_date, visit.dateLabel)
-        } else {
-          visit.dateLabel
-        },
-        style = MaterialTheme.typography.bodyMedium,
-        color = NeutralG400,
-        modifier = Modifier.padding(start = 4.dp),
-      )
+private fun MetaRow(visit: ProfileVisit, isTablet: Boolean, modifier: Modifier = Modifier) {
+  Row(verticalAlignment = Alignment.CenterVertically, modifier = modifier) {
+    val stateLabel = if (visit.state == ProfileVisitState.OPEN) {
+      R.string.beneficiary_profile_visit_open
+    } else if (isTablet) {
+      R.string.beneficiary_profile_visit_complete_short
+    } else {
+      R.string.beneficiary_profile_visit_complete
     }
-    if (visit.riskLabel != null) {
-      Text(
-        text = visit.riskLabel,
-        style = MaterialTheme.typography.labelLarge,
-        color = RiskHigh,
-        modifier = Modifier
-          .padding(top = Dimens.SmallSpacing)
-          .background(RiskHighSurface, RoundedCornerShape(6.dp))
-          .padding(horizontal = 10.dp, vertical = 4.dp),
-      )
-    }
+    Text(
+      text = stringResource(stateLabel),
+      style = MaterialTheme.typography.titleMedium,
+      color = NeutralG400,
+    )
+    MetaPipe()
+    Icon(
+      painter = painterResource(R.drawable.ic_calendar_dots),
+      contentDescription = null,
+      tint = NeutralG200,
+      modifier = Modifier.size(16.dp),
+    )
+    Text(
+      text = when {
+        visit.state != ProfileVisitState.OPEN -> visit.dateLabel
+        // Tablet board abbreviates the label; mobile spells it out.
+        isTablet -> stringResource(R.string.beneficiaries_sch_date, visit.dateLabel)
+        else -> stringResource(R.string.beneficiary_profile_schedule_date, visit.dateLabel)
+      },
+      style = MaterialTheme.typography.bodyMedium,
+      color = NeutralG400,
+      modifier = Modifier.padding(start = 4.dp),
+    )
   }
+}
+
+@Composable
+private fun MetaPipe() {
+  Text(
+    text = "|",
+    style = MaterialTheme.typography.bodyMedium,
+    color = NeutralG200,
+    modifier = Modifier.padding(horizontal = Dimens.SmallSpacing),
+  )
 }
 
 @Composable
@@ -169,6 +214,7 @@ private fun ActionButton(action: ProfileVisitAction, enabled: Boolean, onClick: 
     ProfileVisitAction.FILL_FORM -> PrimaryButton(
       text = stringResource(R.string.beneficiary_profile_fill_form),
       onClick = onClick,
+      trailingIcon = painterResource(R.drawable.ic_arrow_right),
       fullWidth = false,
       height = Dimens.SmallButtonHeight,
     )

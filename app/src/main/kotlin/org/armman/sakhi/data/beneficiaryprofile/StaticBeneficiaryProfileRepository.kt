@@ -24,10 +24,10 @@ class StaticBeneficiaryProfileRepository @Inject constructor() : BeneficiaryProf
   private companion object {
     const val NETWORK_LATENCY_MS = 500L
 
-    /** Mother stat set: Hb, BP, Temp, Weight (all flagged abnormal in the design). */
+    /** Mother stat set per the board: Hb, BP, Temp, Weight (all abnormal). */
     val MOTHER_STATS = listOf(
       VitalStat(value = "9 (12)", caption = "Low Hb.", abnormal = true),
-      VitalStat(value = "80 (60)-140 (120)", caption = "High BP.", abnormal = true),
+      VitalStat(value = "80 (60)- 140 (120)", caption = "High BP.", abnormal = true),
       VitalStat(value = "101 (98.7)", caption = "High Temp.", abnormal = true),
       VitalStat(value = "45 (60)", caption = "Low Weight", abnormal = true),
     )
@@ -100,6 +100,9 @@ class StaticBeneficiaryProfileRepository @Inject constructor() : BeneficiaryProf
       riskLevel = risk,
       lmp = "1 Dec 2025",
       edd = "1 Sep 2026",
+      // Profile stat strip shows DOB | Weight for every beneficiary type.
+      dob = "10 Nov 2000",
+      weight = "45 Kg",
       diagnoses = listOf("Sickle Cell", "Chronic Diabetes"),
       lastVisitStats = MOTHER_STATS,
       visits = VISITS,

@@ -58,6 +58,7 @@ internal fun HomeContent(
   summary: DashboardSummary,
   onAllBeneficiaries: () -> Unit = {},
   onSeeVisitTracker: () -> Unit = {},
+  onRegisterNew: () -> Unit = {},
 ) {
   Column(modifier = Modifier.fillMaxSize()) {
     Column(
@@ -71,7 +72,7 @@ internal fun HomeContent(
       ActiveVisitsCard(summary, onSeeVisitTracker)
       ActiveBeneficiariesCard(summary)
     }
-    BottomActionBar(onAllBeneficiaries = onAllBeneficiaries)
+    BottomActionBar(onAllBeneficiaries = onAllBeneficiaries, onRegisterNew = onRegisterNew)
   }
 }
 
@@ -246,7 +247,7 @@ private fun totalWithRisk(total: Int, highRisk: Int, isTablet: Boolean) = buildA
 
 /** Fixed bottom bar: All Beneficiaries navigates; Register New is a no-op for now. */
 @Composable
-private fun BottomActionBar(onAllBeneficiaries: () -> Unit) {
+private fun BottomActionBar(onAllBeneficiaries: () -> Unit, onRegisterNew: () -> Unit) {
   Surface(color = White, modifier = Modifier.softShadow()) {
     Column {
       HorizontalDivider(thickness = 1.dp, color = NeutralG50)
@@ -261,7 +262,7 @@ private fun BottomActionBar(onAllBeneficiaries: () -> Unit) {
         )
         SecondaryButton(
           text = stringResource(R.string.home_register_new),
-          onClick = { /* no-op: enrolment flow not built yet */ },
+          onClick = onRegisterNew,
           trailingIcon = painterResource(R.drawable.ic_plus),
           modifier = Modifier.weight(1f),
         )
