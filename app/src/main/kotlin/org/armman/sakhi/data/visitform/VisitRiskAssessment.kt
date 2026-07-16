@@ -145,7 +145,6 @@ object VisitRiskAssessment {
 
   /** Q12–16, Q23–32 — Tests card rows, skipping any blank/inapplicable field, sorted worst-first. */
   fun buildTestsFindings(state: VisitDataState): List<VisitRiskFinding> = buildList {
-    val weight = state.weightKg.toDoubleOrNull()
     val height = (state.heightLockedCm?.toDouble()) ?: state.heightCm.toDoubleOrNull()
     val systolic = state.bpSystolic.toDoubleOrNull()
     val diastolic = state.bpDiastolic.toDoubleOrNull()

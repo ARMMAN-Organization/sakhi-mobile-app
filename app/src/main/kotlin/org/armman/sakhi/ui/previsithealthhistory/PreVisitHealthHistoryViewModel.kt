@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -64,6 +65,8 @@ class PreVisitHealthHistoryViewModel @Inject constructor(
         val profile = profileRepository.getBeneficiary(beneficiaryId)
         val history = historyRepository.getHealthHistory(beneficiaryId, visitId)
         _uiState.update { it.copy(isLoading = false, profile = profile, history = history) }
+      } catch (e: CancellationException) {
+        throw e
       } catch (e: Exception) {
         // Generic error state for the UI; technical detail must not leak to users.
         _uiState.update { it.copy(isLoading = false, hasError = true) }

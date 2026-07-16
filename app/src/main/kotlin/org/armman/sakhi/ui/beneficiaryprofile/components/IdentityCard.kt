@@ -191,7 +191,7 @@ private fun InlineFieldList(fields: List<LabelValue>, modifier: Modifier = Modif
 }
 
 /**
- * Mobile stat strip: State | Risk | LMP | EDD (DOB | Weight for a child),
+ * Mobile stat strip: Status | Risk | DOB | Weight,
  * separated by thin vertical dividers per the design.
  */
 @Composable

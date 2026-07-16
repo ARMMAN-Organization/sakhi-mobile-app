@@ -245,7 +245,7 @@ private fun totalWithRisk(total: Int, highRisk: Int, isTablet: Boolean) = buildA
   }
 }
 
-/** Fixed bottom bar: All Beneficiaries navigates; Register New is a no-op for now. */
+/** Fixed bottom bar: All Beneficiaries and Register New each navigate via their callbacks. */
 @Composable
 private fun BottomActionBar(onAllBeneficiaries: () -> Unit, onRegisterNew: () -> Unit) {
   Surface(color = White, modifier = Modifier.softShadow()) {

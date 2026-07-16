@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -97,6 +98,8 @@ class VisitFormViewModel @Inject constructor(
             comorbidities = context.comorbidities,
           )
         }
+      } catch (e: CancellationException) {
+        throw e
       } catch (e: Exception) {
         _uiState.update { it.copy(isLoading = false, hasError = true) }
       }
