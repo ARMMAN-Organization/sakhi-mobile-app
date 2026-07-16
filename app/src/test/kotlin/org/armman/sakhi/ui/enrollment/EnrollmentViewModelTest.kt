@@ -882,6 +882,13 @@ class EnrollmentViewModelTest {
   }
 
   @Test
+  fun `HH-2 planned pregnancy stores code`() {
+    reachHealthHistory()
+    viewModel.setPlannedPregnancy(2)
+    assertEquals(2, hh().plannedPregnancy)
+  }
+
+  @Test
   fun `HH-3 treatment type shown only when treatment taken`() {
     reachHealthHistory()
     viewModel.setTookTreatment(false)
@@ -1145,5 +1152,30 @@ class EnrollmentViewModelTest {
       assertTrue(tdNone)
       assertTrue(1 in selfConditions)
     }
+  }
+
+  @Test
+  fun `HH-28 treatment type auto-clears when treatment unchecked before summary`() {
+    // Reviewer scenario: select "took treatment" → fill type → go back →
+    // uncheck → advance to summary → submit. The stale type must not persist.
+    reachHealthHistory()
+    viewModel.setTookTreatment(true)
+    viewModel.setTreatmentType(2)
+    assertEquals(2, hh().treatmentType)
+
+    viewModel.goBack() // to Personal Info, retaining the draft
+    assertEquals(EnrollmentStep.PERSONAL_INFO, viewModel.uiState.value.currentStep)
+    viewModel.goToStep(EnrollmentStep.HEALTH_HISTORY)
+
+    viewModel.setTookTreatment(false) // unticking clears the conditional answer
+    assertNull(hh().treatmentType)
+
+    completeHealthHistory() // re-sets tookTreatment(false); rest of the mandatory fields
+    viewModel.goToSummary()
+    viewModel.submit()
+    idle()
+
+    // The persisted record — built via the mapper — carries no stale treatment type.
+    assertNull(enrollmentRepository.saved.single().healthHistory.treatmentType)
   }
 }

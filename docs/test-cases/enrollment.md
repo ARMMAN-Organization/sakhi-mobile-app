@@ -236,6 +236,7 @@ condition as its own Boolean ("separate variable per condition" developer note);
 | HH-25 | ☑ `complete step advances to summary` | All mandatory valid → `currentStep = SUMMARY`, `furthestStep` updated. |
 | HH-26 | ☑ `back to personal info retains health history draft` | `goBack()` → PERSONAL_INFO; returning to Health History shows entered values. |
 | HH-27 | ☑ `submitted record carries health history answers` | After completing HH and submitting, the saved `EnrollmentRecord` contains Q35–65 (codes/booleans), consistent with SM-7. |
+| HH-28 | ☑ `treatment type auto-clears when treatment unchecked before summary` | Given "took treatment" selected and Q38 treatment type filled; When the user goes back, unticks "took treatment", then advances to Summary and submits; Then the persisted `EnrollmentRecord.healthHistory.treatmentType` is `null` (no stale conditional answer). |
 
 ## 2. Compose UI — spec (batched visual QA)
 
@@ -291,6 +292,11 @@ detection, risk tagging, PDF/consent-photo upload.
 | SM-11 | ☑ `exit after submit clears draft` | Given COMPLETE after successful submit; When `exitEnrollment()`; Then in-memory draft resets; the saved record remains in the repository. |
 
 ## 2. Repository — `StaticEnrollmentRepositoryTest` (unit)
+
+> The shared `record(...)` fixture is a **fully valid post-validation snapshot**
+> (first pregnancy, `gravida = 1`; conditional fields consistent with their gating
+> answers) so the repository tests reflect real app invariants — a shape the
+> ViewModel could actually emit after passing validation.
 
 | # | Name | Given / When / Then |
 |---|---|---|

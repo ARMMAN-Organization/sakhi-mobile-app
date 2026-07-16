@@ -98,13 +98,19 @@ class StaticEnrollmentRepositoryTest {
         consentReceived = null,
         photoUri = "content://photo.jpg",
       ),
+      // A fully valid post-validation snapshot — first pregnancy (gravida = 1),
+      // so the last-pregnancy block is legitimately absent. Conditional fields
+      // are consistent with their gating answers (RCH card available ⇒ number
+      // present; ANC not started ⇒ no ANC-1 details) and the mandatory
+      // multi-selects carry their "none/no" codes, mirroring what the
+      // ViewModel would produce after passing validation.
       healthHistory = HealthHistorySnapshot(
         trimester = 2,
         plannedPregnancy = 1,
         tookTreatment = false,
         treatmentType = null,
         rchStatus = 1,
-        rchNumber = null,
+        rchNumber = "RCH-000123",
         ancStatus = 1,
         anc1Date = null,
         ancConditions = emptySet(),
@@ -112,9 +118,9 @@ class StaticEnrollmentRepositoryTest {
         td1Date = null,
         td2Date = null,
         tdBoosterDate = null,
-        gravida = 2,
-        para = 1,
-        livingChildren = 1,
+        gravida = 1,
+        para = 0,
+        livingChildren = 0,
         abortions = 0,
         stillBirths = 0,
         deadChildren = null,
@@ -125,10 +131,10 @@ class StaticEnrollmentRepositoryTest {
         lastDeliveryPlace = null,
         lastDeliveryOutcome = null,
         birthWeight = null,
-        selfConditions = emptySet(),
-        longTermMeds = emptySet(),
+        selfConditions = setOf(1),
+        longTermMeds = setOf(1),
         sickleCell = 1,
-        substanceUse = emptySet(),
+        substanceUse = setOf(1),
         familyHistory = false,
         familyConditions = emptySet(),
         malnutrition = null,
