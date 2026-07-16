@@ -5,13 +5,13 @@ package org.armman.sakhi.data.auth
  * planned auth-service contract so the future Retrofit DTO maps 1:1.
  */
 data class LoginRequest(
-  val userId: String,
+  val username: String,
   val password: String,
 )
 
 /** Authenticated Sakhi session as the auth API is expected to return it. */
 data class UserSession(
-  val userId: String,
+  val username: String,
   val displayName: String,
   val role: String,
   val accessToken: String,

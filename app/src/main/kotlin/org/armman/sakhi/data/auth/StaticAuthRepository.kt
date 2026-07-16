@@ -15,12 +15,12 @@ class StaticAuthRepository @Inject constructor() : AuthRepository {
   override suspend fun login(request: LoginRequest): LoginResult {
     delay(NETWORK_LATENCY_MS) // Simulate a round trip so the loading state is visible.
     return if (
-      request.userId.equals(VALID_USER_ID, ignoreCase = true) &&
+      request.username.equals(VALID_USERNAME, ignoreCase = true) &&
       request.password == VALID_PASSWORD
     ) {
       LoginResult.Success(
         UserSession(
-          userId = VALID_USER_ID,
+          username = VALID_USERNAME,
           displayName = "Sunita Pawar",
           role = "SAKHI",
           accessToken = "static-token",
@@ -38,7 +38,7 @@ class StaticAuthRepository @Inject constructor() : AuthRepository {
 
   private companion object {
     const val NETWORK_LATENCY_MS = 800L
-    const val VALID_USER_ID = "sakhi01"
+    const val VALID_USERNAME = "sakhi01"
     const val VALID_PASSWORD = "Sakhi@123"
   }
 }

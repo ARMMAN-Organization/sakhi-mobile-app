@@ -42,7 +42,7 @@ import org.armman.sakhi.ui.theme.White
 
 /**
  * Login screen per the "Arogya Sakhi - Revamp" Figma (mobile 375x812):
- * logo, title, User ID + Password fields, pill Login button, and a
+ * logo, title, Username + Password fields, pill Login button, and a
  * success banner shown when the user arrives here right after logging out.
  */
 @Composable
@@ -88,11 +88,11 @@ fun LoginScreen(
         )
         Spacer(Modifier.height(32.dp))
         AppTextField(
-          value = state.userId,
-          onValueChange = viewModel::onUserIdChanged,
-          label = stringResource(R.string.login_user_id_label),
-          placeholder = stringResource(R.string.login_user_id_placeholder),
-          errorText = state.userIdError?.let { stringResource(it) },
+          value = state.username,
+          onValueChange = viewModel::onUsernameChanged,
+          label = stringResource(R.string.login_username_label),
+          placeholder = stringResource(R.string.login_username_placeholder),
+          errorText = state.usernameError?.let { stringResource(it) },
           enabled = !state.isSubmitting,
           keyboardOptions = KeyboardOptions(
             keyboardType = KeyboardType.Text,

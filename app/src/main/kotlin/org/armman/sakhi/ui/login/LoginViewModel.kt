@@ -22,10 +22,10 @@ import javax.inject.Inject
  * they localize with the rest of the app (EN/Marathi).
  */
 data class LoginUiState(
-  val userId: String = "",
+  val username: String = "",
   val password: String = "",
   val isSubmitting: Boolean = false,
-  @StringRes val userIdError: Int? = null,
+  @StringRes val usernameError: Int? = null,
   @StringRes val passwordError: Int? = null,
   @StringRes val loginError: Int? = null,
   val loginSucceeded: Boolean = false,
@@ -39,8 +39,8 @@ class LoginViewModel @Inject constructor(
   private val _uiState = MutableStateFlow(initialState())
   val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
-  fun onUserIdChanged(value: String) {
-    _uiState.update { it.copy(userId = value, userIdError = null, loginError = null) }
+  fun onUsernameChanged(value: String) {
+    _uiState.update { it.copy(username = value, usernameError = null, loginError = null) }
   }
 
   fun onPasswordChanged(value: String) {
@@ -51,10 +51,10 @@ class LoginViewModel @Inject constructor(
     val state = _uiState.value
     if (state.isSubmitting) return
 
-    val userIdError = if (state.userId.isBlank()) R.string.login_error_user_id_required else null
+    val usernameError = if (state.username.isBlank()) R.string.login_error_username_required else null
     val passwordError = if (state.password.isBlank()) R.string.login_error_password_required else null
-    if (userIdError != null || passwordError != null) {
-      _uiState.update { it.copy(userIdError = userIdError, passwordError = passwordError) }
+    if (usernameError != null || passwordError != null) {
+      _uiState.update { it.copy(usernameError = usernameError, passwordError = passwordError) }
       return
     }
 
@@ -62,7 +62,7 @@ class LoginViewModel @Inject constructor(
     _uiState.update { it.copy(isSubmitting = true, loginError = null) }
     viewModelScope.launch {
       val result = authRepository.login(
-        LoginRequest(userId = state.userId.trim(), password = state.password),
+        LoginRequest(username = state.username.trim(), password = state.password),
       )
       when (result) {
         is LoginResult.Success ->
@@ -86,12 +86,12 @@ class LoginViewModel @Inject constructor(
 
   private companion object {
     // Dev convenience only: matches StaticAuthRepository; never compiled into release flows.
-    const val DEV_USER_ID = "sakhi01"
+    const val DEV_USERNAME = "sakhi01"
     const val DEV_PASSWORD = "Sakhi@123"
 
     /** Prefills the static dev credentials in debug builds; empty in release. */
     fun initialState(): LoginUiState = if (BuildConfig.DEBUG) {
-      LoginUiState(userId = DEV_USER_ID, password = DEV_PASSWORD)
+      LoginUiState(username = DEV_USERNAME, password = DEV_PASSWORD)
     } else {
       LoginUiState()
     }
