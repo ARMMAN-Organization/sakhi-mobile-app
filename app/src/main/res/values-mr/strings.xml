@@ -20,15 +20,15 @@
 
   <!-- Login -->
   <string name="login_title">लॉगिन</string>
-  <string name="login_user_id_label">युजर आयडी</string>
-  <string name="login_user_id_placeholder">युजर आयडी प्रविष्ट करा</string>
+  <string name="login_username_label">युजरनेम</string>
+  <string name="login_username_placeholder">युजरनेम प्रविष्ट करा</string>
   <string name="login_password_label">पासवर्ड</string>
   <string name="login_password_placeholder">पासवर्ड प्रविष्ट करा</string>
   <string name="login_button">लॉगिन</string>
   <string name="login_logo_content_description">आरोग्य सखी — गर्भधारणा आणि बाल संगोपन</string>
-  <string name="login_error_user_id_required">कृपया तुमचा युजर आयडी प्रविष्ट करा.</string>
+  <string name="login_error_username_required">कृपया तुमचा युजरनेम प्रविष्ट करा.</string>
   <string name="login_error_password_required">कृपया तुमचा पासवर्ड प्रविष्ट करा.</string>
-  <string name="login_error_invalid_credentials">युजर आयडी किंवा पासवर्ड चुकीचा आहे. कृपया पुन्हा प्रयत्न करा.</string>
+  <string name="login_error_invalid_credentials">युजरनेम किंवा पासवर्ड चुकीचा आहे. कृपया पुन्हा प्रयत्न करा.</string>
   <string name="login_error_generic">काहीतरी चूक झाली. कृपया पुन्हा प्रयत्न करा.</string>
   <string name="login_logout_success">तुम्ही यशस्वीरित्या लॉगआउट झाला आहात</string>
 
@@ -314,4 +314,139 @@
   <string name="enrollment_hh_error_dead">जिवंत मुलांपेक्षा जास्त असू शकत नाही</string>
   <string name="enrollment_hh_error_gravida_total">ग्रॅव्हिडा = पॅरा + गर्भपात + 1 असावे</string>
   <string name="enrollment_summary_health_history">आरोग्य इतिहास</string>
+
+  <!-- Pre-Visit Health History (FR-S-4.6, CR-016a) — MR translations flagged for native QA -->
+  <string name="previsit_back_title">लाभार्थी पहा</string>
+  <string name="previsit_summary_title">सारांश</string>
+  <string name="previsit_name_age">%1$s | %2$s</string>
+  <string name="previsit_village_pada">गाव | पाडा : %1$s | %2$s</string>
+  <string name="previsit_husband_name">पतीचे नाव : %1$s</string>
+  <string name="previsit_mobile_no">मोबाईल क्रमांक : %1$s</string>
+  <string name="previsit_risk_factor_title">%1$s - %2$s</string>
+  <string name="previsit_see_profile">प्रोफाइल पहा</string>
+  <string name="previsit_start_visit">भेट सुरू करा</string>
+  <string name="previsit_error_load">या लाभार्थ्याचा आरोग्य इतिहास लोड करता आला नाही. कृपया पुन्हा प्रयत्न करा.</string>
+
+  <!-- ANC Visit Form (CR-016) — MR translations flagged for native QA -->
+  <string name="visit_form_coming_soon">हे वैशिष्ट्य लवकरच येत आहे</string>
+  <string name="visit_form_back_title">भेट ट्रॅकर</string>
+  <string name="visit_form_title">%1$s फॉर्म</string>
+  <string name="visit_form_tab_visit_data">भेट डेटा</string>
+  <string name="visit_form_tab_summary">सारांश</string>
+  <string name="visit_form_tab_health_info">आरोग्य\nमाहिती</string>
+  <string name="visit_form_tab_referral">संदर्भ</string>
+  <string name="visit_form_subtab_tests">चाचण्या</string>
+  <string name="visit_form_subtab_symptoms">लक्षणे</string>
+  <string name="visit_form_subtab_history">इतिहास</string>
+  <string name="visit_form_step_pending">हा विभाग लवकरच येत आहे</string>
+  <string name="visit_form_back">मागे</string>
+  <string name="visit_form_next_summary">सारांश</string>
+  <string name="visit_form_next_health_info">आरोग्य माहिती</string>
+  <string name="visit_form_next_referral">संदर्भ</string>
+  <string name="visit_form_submit">सबमिट करा</string>
+  <string name="visit_form_exit_title">भेट फॉर्म सोडायचा?</string>
+  <string name="visit_form_exit_message">या भेटीत आंशिक जतन नाही — आता सोडल्यास सर्व नोंदी गमावल्या जातील.</string>
+  <string name="visit_form_exit_cancel">थांबा</string>
+  <string name="visit_form_exit_confirm">सोडा</string>
+
+  <!-- ANC Visit Form — Visit Data fields (CR-016b) — MR translations flagged for native QA -->
+  <string name="visit_form_error_load">या भेटीचा डेटा लोड करता आला नाही. कृपया पुन्हा प्रयत्न करा.</string>
+  <string name="visit_form_vd_banner">सर्व आवश्यक फील्ड पूर्ण करा</string>
+  <string name="visit_form_error_required">हे फील्ड आवश्यक आहे</string>
+  <string name="visit_form_error_range">वैध श्रेणीत मूल्य भरा</string>
+  <string name="visit_form_error_date_future">तारीख भविष्यातील असू शकत नाही</string>
+  <string name="visit_form_error_date_too_early">तारीख LMP / आधीच्या डोसच्या तारखेनंतर असावी</string>
+  <string name="visit_form_hb_confirm_prompt">हे मागील भेटीपेक्षा खूप वेगळे आहे. कृपया मूल्याची पुष्टी करा किंवा चाचणी पुन्हा करा.</string>
+  <string name="visit_form_hb_confirm_action">मूल्याची पुष्टी करा</string>
+
+  <string name="visit_form_critical_danger_sign">धोक्याचे लक्षण आढळले — भेट थांबवा आणि लाभार्थ्याला ताबडतोब आरोग्य केंद्रात घेऊन जा.</string>
+  <string name="visit_form_critical_hypertension">लक्षणांसह तीव्र उच्च रक्तदाब — भेट थांबवा आणि लाभार्थ्याला ताबडतोब आरोग्य केंद्रात घेऊन जा.</string>
+  <string name="visit_form_critical_anaemia">चक्करसह तीव्र अशक्तपणा — भेट थांबवा आणि लाभार्थ्याला ताबडतोब आरोग्य केंद्रात घेऊन जा.</string>
+  <string name="visit_form_critical_hypoglycaemia">लक्षणांसह अत्यंत कमी रक्तशर्करा — भेट थांबवा आणि लाभार्थ्याला ताबडतोब आरोग्य केंद्रात घेऊन जा.</string>
+  <string name="visit_form_critical_title">तातडीची सूचना</string>
+  <string name="visit_form_critical_close">बंद करा आणि भेट संपवा</string>
+
+  <string name="visit_form_vd_section_tracking">भेट नोंद</string>
+  <string name="visit_form_vd_visit_date">भेटीची तारीख</string>
+  <string name="visit_form_vd_met_beneficiary">तुम्ही लाभार्थ्याला भेटीसाठी भेटू शकलात का?</string>
+  <string name="visit_form_vd_not_met_reason">नाही असल्यास, कारण नमूद करा</string>
+
+  <string name="visit_form_vd_section_dating">गर्भावस्था कालावधी</string>
+  <string name="visit_form_vd_rch_number">RCH क्रमांक</string>
+  <string name="visit_form_vd_lmp">LMP</string>
+  <string name="visit_form_vd_has_sonography">LMP तारीख निश्चित करण्यासाठी तुमच्याकडे सोनोग्राफी अहवाल आहे का?</string>
+  <string name="visit_form_vd_sonography_upload">सोनोग्राफी अहवालाचे छायाचित्र अपलोड करा</string>
+  <string name="visit_form_vd_gestational_age">सद्य गर्भावस्था कालावधी (आठवडे)</string>
+  <string name="visit_form_vd_edd">EDD</string>
+
+  <string name="visit_form_vd_height">उंची (सेमी)</string>
+  <string name="visit_form_vd_weight">सध्याचे वजन (किलो)</string>
+  <string name="visit_form_vd_bmi">BMI</string>
+  <string name="visit_form_vd_muac">दंडाचा घेर (सेमी)</string>
+  <string name="visit_form_vd_bp_systolic">रक्तदाब — सिस्टोलिक</string>
+  <string name="visit_form_vd_bp_diastolic">रक्तदाब — डायस्टोलिक</string>
+  <string name="visit_form_vd_temperature">शरीराचे तापमान (°F)</string>
+  <string name="visit_form_vd_hemoglobin">हिमोग्लोबिन (g/dl)</string>
+  <string name="visit_form_vd_last_meal">शेवटच्या जेवणापासून तास</string>
+  <string name="visit_form_vd_blood_glucose">रक्तशर्करा (mg/dl)</string>
+  <string name="visit_form_vd_urine_test">लघवी तपासणी</string>
+  <string name="visit_form_vd_fetal_movements">गर्भाची हालचाल</string>
+  <string name="visit_form_vd_fetal_heart_rate">गर्भाच्या हृदयाचे ठोके</string>
+  <string name="visit_form_vd_fundal_height">फंडल उंची (सेमी)</string>
+  <string name="visit_form_vd_count_placeholder">मूल्य भरा</string>
+
+  <string name="visit_form_vd_danger_signs">मागील भेटीपासून तुम्हाला यापैकी काही जाणवले आहे का?</string>
+  <string name="visit_form_vd_palm_nails">तळहात आणि नखे तपासा</string>
+  <string name="visit_form_vd_sclera">डोळ्याचा पांढरा भाग तपासा</string>
+  <string name="visit_form_vd_skin">त्वचा तपासा</string>
+  <string name="visit_form_vd_swelling">सूज</string>
+  <string name="visit_form_vd_dehydration">निर्जलीकरण</string>
+
+  <string name="visit_form_vd_section_supplements">पूरक आहार आणि पालन</string>
+  <string name="visit_form_vd_td">लसीकरण स्थिती (Td)</string>
+  <string name="visit_form_vd_td_none">अद्याप घेतलेले नाही</string>
+  <string name="visit_form_vd_td1">Td-1</string>
+  <string name="visit_form_vd_td2">Td-2</string>
+  <string name="visit_form_vd_td_booster">Td-बूस्टर</string>
+  <string name="visit_form_vd_td_date_placeholder">डोसची तारीख निवडा</string>
+
+  <string name="visit_form_vd_food_consumed">गेल्या 24 तासांत तुम्ही यापैकी कोणते पदार्थ खाल्ले?</string>
+  <string name="visit_form_vd_food_avoided">तुम्ही यापैकी कोणते पदार्थ खाणे टाळता?</string>
+  <string name="visit_form_vd_taking_ifa">तुम्ही IFA गोळ्या घेत आहात का?</string>
+  <string name="visit_form_vd_ifa_tablets">मागील भेटीपासून तुम्ही किती IFA गोळ्या घेतल्या?</string>
+  <string name="visit_form_vd_ifa_reasons">नाही असल्यास, IFA गोळ्या न घेण्याची कारणे</string>
+  <string name="visit_form_vd_calcium">कॅल्शियम गोळ्या मिळाल्या आणि घेतल्या का?</string>
+
+  <string name="visit_form_vd_section_birth_prep">प्रसूती तयारी आणि मानसिक आरोग्य</string>
+  <string name="visit_form_vd_visited_facility">मागील भेटीपासून तुम्ही आरोग्य केंद्राला भेट दिली आहे का?</string>
+  <string name="visit_form_vd_last_anc_date">आरोग्य केंद्रातील शेवटच्या ANC भेटीची तारीख भरा</string>
+  <string name="visit_form_vd_delivery_place">सल्ला दिलेले प्रसूती ठिकाण</string>
+  <string name="visit_form_vd_sickle_cell">सिकल सेल</string>
+  <string name="visit_form_vd_family_planning">प्रसूतीनंतर महिला कोणती कुटुंब नियोजन पद्धत वापरण्याचा विचार करत आहे?</string>
+  <string name="visit_form_vd_feeling_stressed">बहुतेक दिवस दुःखी, चिंताग्रस्त किंवा तणावग्रस्त वाटते का?</string>
+  <string name="visit_form_vd_family_support">गरोदरपणात पुरेसा कौटुंबिक आधार आहे का?</string>
+  <string name="visit_form_vd_planning_migration">गरोदरपणात तुम्ही दुसऱ्या ठिकाणी स्थलांतर करणार आहात का?</string>
+  <string name="visit_form_vd_usg_done">मागील भेटीपासून USG केले आहे का?</string>
+  <string name="visit_form_vd_usg_date">USG ची तारीख</string>
+  <string name="visit_form_vd_usg_type">USG चा प्रकार</string>
+  <string name="visit_form_vd_usg_finding">USG निष्कर्ष</string>
+  <string name="visit_form_vd_transport_shared">वाहतुकीचा संपर्क कुटुंबाला दिला आणि जतन केला आहे का?</string>
+  <string name="visit_form_vd_funds_arranged">कुटुंबाने प्रसूती/आपत्कालीन खर्चासाठी निधीची व्यवस्था केली आहे का?</string>
+  <string name="visit_form_vd_birth_companion">प्रसूती/आपत्कालीन प्रसंगासाठी सोबती निश्चित केला आहे का?</string>
+  <string name="visit_form_vd_remarks">शेरा</string>
+  <string name="visit_form_vd_remarks_placeholder">पर्यायी टिपा</string>
+  <string name="visit_form_vd_section_counselling">समुपदेशन यादी</string>
+  <string name="visit_form_vd_counselling">सखी म्हणून, तुम्ही लाभार्थ्याला खालील बाबींवर मार्गदर्शन केले आहे का?</string>
+
+  <string name="visit_form_take_photo">छायाचित्र घ्या</string>
+  <string name="visit_form_retake_photo">छायाचित्र पुन्हा घ्या</string>
+
+  <!-- ANC Visit Form — Summary tab (CR-016c) — MR translations flagged for native QA -->
+  <string name="visit_form_vs_risk_identified">ओळखलेला धोका</string>
+  <string name="visit_form_vs_no_conditions">कोणतीही ज्ञात स्थिती नाही</string>
+  <string name="visit_form_vs_edit">संपादित करा</string>
+  <string name="visit_form_vs_tests_title">तपासण्या</string>
+  <string name="visit_form_vs_symptoms_title">लक्षणे</string>
+  <string name="visit_form_vs_bp">रक्तदाब</string>
+  <string name="visit_form_vs_reference_range">(%1$s)</string>
 </resources>

@@ -4,4 +4,7 @@
   <files-path
     name="enrollment_captures"
     path="enrollment/" />
+  <files-path
+    name="visitform_captures"
+    path="visitform/" />
 </paths>

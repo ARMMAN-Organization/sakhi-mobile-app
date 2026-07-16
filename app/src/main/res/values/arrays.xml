@@ -218,4 +218,124 @@
     <item>No</item>
     <item>No children</item>
   </string-array>
+
+  <!-- ANC Visit Form (CR-016b) — "ANC visit form" Excel tab, Q1-56. Order = backend codes, NEVER reorder. -->
+  <string-array name="visit_form_not_met_reason_options">
+    <item>Woman migrated, status known</item>
+    <item>Woman migrated, status unknown</item>
+    <item>Woman not available (gone out, hospitalization)</item>
+    <item>Woman busy for the check up</item>
+    <item>Other</item>
+  </string-array>
+  <string-array name="visit_form_danger_sign_options">
+    <item>Severe abdominal pain</item>
+    <item>Bleeding from vagina</item>
+    <item>Abnormal vaginal discharge (foul smelling and yellow)</item>
+    <item>Vomiting for more than 24 hours</item>
+    <item>Convulsions</item>
+    <item>Severe headaches, blurred vision</item>
+    <item>Dizziness</item>
+    <item>Breathlessness</item>
+    <item>Palpitation</item>
+    <item>Increased frequency of urination</item>
+    <item>Vaginal itching</item>
+    <item>Burning micturition</item>
+    <item>No abnormal signs and symptoms</item>
+  </string-array>
+  <string-array name="visit_form_palm_nails_options">
+    <item>Pale</item>
+    <item>Yellow</item>
+    <item>Normal</item>
+  </string-array>
+  <string-array name="visit_form_swelling_options">
+    <item>No swelling</item>
+    <item>Swollen hands</item>
+    <item>Swollen feet</item>
+    <item>Swollen face</item>
+  </string-array>
+  <string-array name="visit_form_dehydration_options">
+    <item>Dry tongue</item>
+    <item>Loss of skin turgor</item>
+    <item>No</item>
+  </string-array>
+  <string-array name="visit_form_urine_test_options">
+    <item>Normal</item>
+    <item>Infection</item>
+    <item>Sugar</item>
+    <item>Protein</item>
+  </string-array>
+  <string-array name="visit_form_fetal_movements_options">
+    <item>Absent</item>
+    <item>Present</item>
+  </string-array>
+  <string-array name="visit_form_food_options">
+    <item>Cereals (nachni, bajra, jwari, gahu, rice etc.)</item>
+    <item>Pulses/legumes (tur dal, chana, moong, etc.)</item>
+    <item>Nuts and seeds (ground nuts, almond etc.)</item>
+    <item>Dairy products / milk products (paneer, dahi, taak, etc.)</item>
+    <item>Fruits</item>
+    <item>Vegetables</item>
+    <item>Green vegetables</item>
+    <item>Other vitamin A-rich fruits and vegetables (mango, papaya, pumpkin, carrot)</item>
+    <item>Eggs</item>
+    <item>Poultry/meat/fish</item>
+  </string-array>
+  <string-array name="visit_form_ifa_reason_options">
+    <item>Forgot to take</item>
+    <item>Due to side effects (constipation, black stool, nausea)</item>
+    <item>Misconception about IFA</item>
+    <item>Tablets not available</item>
+    <item>Other</item>
+  </string-array>
+  <string-array name="visit_form_delivery_place_options">
+    <item>Civil Hospital</item>
+    <item>Sub-district Hospital</item>
+    <item>Rural Hospital</item>
+    <item>Primary Health Centre</item>
+    <item>Subcentre</item>
+    <item>Pvt. Hospital</item>
+    <item>Other</item>
+  </string-array>
+  <string-array name="visit_form_sickle_cell_options">
+    <item>Tested and result is normal</item>
+    <item>Sickle Cell Trait (SCT carrier)</item>
+    <item>Sickle Cell Disease (SCD)</item>
+    <item>Tested earlier but result not available</item>
+    <item>Not tested yet</item>
+    <item>Don\'t know / Not aware</item>
+  </string-array>
+  <string-array name="visit_form_family_planning_options">
+    <item>Condoms</item>
+    <item>Oral contraceptive pills (Mala-N or other)</item>
+    <item>Emergency contraceptive pills</item>
+    <item>Injectable contraceptives (Antara)</item>
+    <item>IUCD (Copper-T)</item>
+    <item>Lactational Amenorrhea Method (LAM)</item>
+    <item>Safe period, calendar method</item>
+    <item>Withdrawal method (coitus interruptus)</item>
+    <item>Female sterilization (Tubectomy)</item>
+    <item>Male sterilization (Vasectomy, NSSK)</item>
+    <item>Not using any contraceptive method</item>
+  </string-array>
+  <string-array name="visit_form_usg_type_options">
+    <item>Routine USG</item>
+    <item>Anomaly scan</item>
+    <item>Doppler USG</item>
+    <item>Other</item>
+  </string-array>
+  <string-array name="visit_form_usg_finding_options">
+    <item>Abnormal</item>
+    <item>Normal</item>
+  </string-array>
+  <string-array name="visit_form_counselling_options">
+    <item>Birth preparedness &amp; complication readiness</item>
+    <item>Nutrition during pregnancy</item>
+    <item>IFA &amp; calcium compliance</item>
+    <item>Danger signs awareness</item>
+    <item>Rest &amp; workload reduction</item>
+    <item>Hygiene and sanitation practices</item>
+    <item>Institutional delivery benefits</item>
+    <item>Dangers of substance abuse</item>
+    <item>Family planning methods</item>
+  </string-array>
 </resources>
