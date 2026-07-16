@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.android)
@@ -5,6 +7,16 @@ plugins {
   alias(libs.plugins.kotlin.kapt)
   alias(libs.plugins.hilt)
 }
+
+// Per-developer API base URL override (e.g. a teammate's ngrok tunnel while auth-service has no
+// stable dev/staging host yet). Set API_BASE_URL in local.properties (gitignored, never
+// committed); falls back to the placeholder prod host for CI/release builds where it's absent.
+val localProperties = Properties().apply {
+  val file = rootProject.file("local.properties")
+  if (file.exists()) file.inputStream().use { load(it) }
+}
+val apiBaseUrl: String = localProperties.getProperty("API_BASE_URL")
+  ?: "https://api.arogyasakhi.armman.org/api/v1/"
 
 android {
   namespace = "org.armman.sakhi"
@@ -16,7 +28,7 @@ android {
     targetSdk = 34
     versionCode = 1
     versionName = "0.1.0"
-    buildConfigField("String", "API_BASE_URL", "\"https://api.arogyasakhi.armman.org/v1/\"")
+    buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
   }
 
   buildTypes {
@@ -56,6 +68,7 @@ dependencies {
   implementation(libs.retrofit.gson)
   implementation(libs.okhttp.logging)
   implementation(libs.coroutines.android)
+  implementation(libs.androidx.security.crypto)
 
   testImplementation(libs.junit)
   testImplementation(libs.coroutines.test)

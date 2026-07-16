@@ -14,6 +14,7 @@ okhttp = "4.12.0"
 coroutines = "1.8.1"
 mobileCore = "0.1.0"
 junit = "4.13.2"
+securityCrypto = "1.1.0-alpha06"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -37,6 +38,7 @@ coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutin
 coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 armman-mobile-core = { group = "org.armman", name = "mobile-core", version.ref = "mobileCore" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

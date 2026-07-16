@@ -20,16 +20,21 @@
 
   <!-- Login -->
   <string name="login_title">लॉगिन</string>
-  <string name="login_user_id_label">युजर आयडी</string>
-  <string name="login_user_id_placeholder">युजर आयडी प्रविष्ट करा</string>
+  <string name="login_username_label">युजरनेम</string>
+  <string name="login_username_placeholder">युजरनेम प्रविष्ट करा</string>
   <string name="login_password_label">पासवर्ड</string>
   <string name="login_password_placeholder">पासवर्ड प्रविष्ट करा</string>
   <string name="login_button">लॉगिन</string>
   <string name="login_logo_content_description">आरोग्य सखी — गर्भधारणा आणि बाल संगोपन</string>
-  <string name="login_error_user_id_required">कृपया तुमचा युजर आयडी प्रविष्ट करा.</string>
+  <string name="login_error_username_required">कृपया तुमचे युजरनेम प्रविष्ट करा.</string>
   <string name="login_error_password_required">कृपया तुमचा पासवर्ड प्रविष्ट करा.</string>
-  <string name="login_error_invalid_credentials">युजर आयडी किंवा पासवर्ड चुकीचा आहे. कृपया पुन्हा प्रयत्न करा.</string>
+  <string name="login_error_invalid_credentials">युजरनेम किंवा पासवर्ड चुकीचा आहे. कृपया पुन्हा प्रयत्न करा.</string>
   <string name="login_error_generic">काहीतरी चूक झाली. कृपया पुन्हा प्रयत्न करा.</string>
+  <string name="login_error_network">सर्व्हरशी संपर्क होऊ शकला नाही. कृपया तुमचे इंटरनेट कनेक्शन तपासा आणि पुन्हा प्रयत्न करा.</string>
+  <string name="login_error_wrong_role">हे खाते सखी म्हणून सेट केलेले नाही. कृपया तुमच्या सुपरवायझरशी संपर्क करा.</string>
+  <string name="login_error_offline_no_cache">इंटरनेट कनेक्शन नाही. ऑफलाइन लॉगिन करण्यासाठी कृपया आधी एकदा इंटरनेटसह लॉगिन करा.</string>
+  <string name="login_password_show_content_description">पासवर्ड दाखवा</string>
+  <string name="login_password_hide_content_description">पासवर्ड लपवा</string>
   <string name="login_logout_success">तुम्ही यशस्वीरित्या लॉगआउट झाला आहात</string>
 
   <!-- Common -->

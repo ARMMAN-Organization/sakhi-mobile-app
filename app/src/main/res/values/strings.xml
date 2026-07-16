@@ -20,16 +20,21 @@
 
   <!-- Login -->
   <string name="login_title">Login</string>
-  <string name="login_user_id_label">User ID</string>
-  <string name="login_user_id_placeholder">Enter User ID</string>
+  <string name="login_username_label">Username</string>
+  <string name="login_username_placeholder">Enter Username</string>
   <string name="login_password_label">Password</string>
   <string name="login_password_placeholder">Enter Password</string>
   <string name="login_button">Login</string>
   <string name="login_logo_content_description">Arogya Sakhi — Pregnancy and Child Care</string>
-  <string name="login_error_user_id_required">Please enter your User ID.</string>
+  <string name="login_error_username_required">Please enter your username.</string>
   <string name="login_error_password_required">Please enter your password.</string>
-  <string name="login_error_invalid_credentials">User ID or password is incorrect. Please try again.</string>
+  <string name="login_error_invalid_credentials">Username or password is incorrect. Please try again.</string>
   <string name="login_error_generic">Something went wrong. Please try again.</string>
+  <string name="login_error_network">Couldn\'t reach the server. Check your connection and try again.</string>
+  <string name="login_error_wrong_role">This account isn\'t set up as a Sakhi. Please contact your Supervisor.</string>
+  <string name="login_error_offline_no_cache">No internet connection. Please connect once and log in before you can log in offline.</string>
+  <string name="login_password_show_content_description">Show password</string>
+  <string name="login_password_hide_content_description">Hide password</string>
   <string name="login_logout_success">You have logged out successfully</string>
 
   <!-- Common -->
