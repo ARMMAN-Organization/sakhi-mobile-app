@@ -120,7 +120,7 @@
   <string name="beneficiary_profile_label_pada">Pada</string>
   <string name="beneficiary_profile_label_husband">Husband\'s Name</string>
   <string name="beneficiary_profile_label_mobile">Mobile No</string>
-  <string name="beneficiary_profile_label_state">State</string>
+  <string name="beneficiary_profile_label_state">Status</string>
   <string name="beneficiary_profile_label_risk_short">Risk</string>
   <!-- Inline "Label :" prefix on the mobile identity card, e.g. "Village :". -->
   <string name="beneficiary_profile_inline_label">%1$s :</string>
@@ -307,7 +307,7 @@
   <string name="enrollment_hh_remarks_placeholder">Optional notes</string>
 
   <string name="enrollment_hh_error_count">Enter a valid number in range</string>
-  <string name="enrollment_hh_error_anc1_date">ANC-1 date must be after LMP and not in the future</string>
+  <string name="enrollment_hh_error_anc1_date">ANC-1 date cannot be in the future</string>
   <string name="enrollment_hh_error_td_future">Dose date cannot be in the future</string>
   <string name="enrollment_hh_error_td_order">Dose dates must follow Td-1 → Td-2 → Booster</string>
   <string name="enrollment_hh_error_para">Para cannot exceed Gravida</string>

@@ -306,7 +306,7 @@
   <string name="enrollment_hh_remarks_placeholder">पर्यायी टिपा</string>
 
   <string name="enrollment_hh_error_count">वैध संख्या भरा</string>
-  <string name="enrollment_hh_error_anc1_date">ANC-1 तारीख LMP नंतर व भविष्यातील नसावी</string>
+  <string name="enrollment_hh_error_anc1_date">ANC-1 तारीख भविष्यातील नसावी</string>
   <string name="enrollment_hh_error_td_future">डोसची तारीख भविष्यातील असू शकत नाही</string>
   <string name="enrollment_hh_error_td_order">डोसच्या तारखा Td-1 → Td-2 → बूस्टर क्रमाने असाव्यात</string>
   <string name="enrollment_hh_error_para">पॅरा ग्रॅव्हिडापेक्षा जास्त असू शकत नाही</string>

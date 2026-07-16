@@ -57,8 +57,8 @@ private data class LabelValue(val label: String, val value: String, val purple: 
  *
  * Mobile (per the purple Figma board): header (avatar, name|age, Edit), a
  * single-column inline "Label : Value" list (Village/Pada/Husband/Mobile),
- * a State | Risk | LMP | EDD stat strip with vertical dividers, then a
- * full-width Diagnosis chip row. Child variant swaps LMP/EDD for DOB/Weight.
+ * a Status | Risk | DOB | Weight stat strip with vertical dividers, then a
+ * full-width Diagnosis chip row.
  *
  * Tablet keeps the wider 3-column grid layout per the tablet frame.
  */
@@ -191,7 +191,7 @@ private fun InlineFieldList(fields: List<LabelValue>, modifier: Modifier = Modif
 }
 
 /**
- * Mobile stat strip: State | Risk | LMP | EDD (DOB | Weight for a child),
+ * Mobile stat strip: Status | Risk | DOB | Weight,
  * separated by thin vertical dividers per the design.
  */
 @Composable
