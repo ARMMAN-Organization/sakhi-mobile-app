@@ -48,6 +48,7 @@ class StaticBeneficiaryProfileRepository @Inject constructor() : BeneficiaryProf
         action = ProfileVisitAction.START_VISIT,
         daysRemaining = 2,
         startable = false, // Not due yet — Start Visit disabled per design.
+        hasPreVisitHistory = true, // v1-v3 completed — prior data exists.
       ),
       ProfileVisit(
         id = "v3",
@@ -57,6 +58,7 @@ class StaticBeneficiaryProfileRepository @Inject constructor() : BeneficiaryProf
         action = ProfileVisitAction.FILL_FORM,
         referralIncomplete = true,
         riskLabel = "High Risk",
+        hasPreVisitHistory = true, // v1-v2 completed — prior data exists.
       ),
       ProfileVisit(
         id = "v2",
@@ -65,6 +67,7 @@ class StaticBeneficiaryProfileRepository @Inject constructor() : BeneficiaryProf
         dateLabel = "24 Apr 2025",
         action = ProfileVisitAction.SEE_DATA,
         riskLabel = "High Risk",
+        hasPreVisitHistory = true, // v1 completed — prior data exists.
       ),
       ProfileVisit(
         id = "v1",
@@ -72,6 +75,7 @@ class StaticBeneficiaryProfileRepository @Inject constructor() : BeneficiaryProf
         state = ProfileVisitState.COMPLETED,
         dateLabel = "24 Apr 2025",
         action = ProfileVisitAction.SEE_DATA,
+        hasPreVisitHistory = false, // The beneficiary's actual first visit — no prior data.
       ),
       ProfileVisit(
         id = "enrollment",
