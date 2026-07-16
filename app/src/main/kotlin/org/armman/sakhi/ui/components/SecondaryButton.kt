@@ -26,6 +26,7 @@ fun SecondaryButton(
   onClick: () -> Unit,
   modifier: Modifier = Modifier,
   trailingIcon: Painter? = null,
+  leadingIcon: Painter? = null,
   enabled: Boolean = true,
   height: Dp = Dimens.ButtonHeight,
 ) {
@@ -40,6 +41,15 @@ fun SecondaryButton(
   ) {
     // Style guide: large buttons use Body 1 (16sp); tablet designs use 20sp.
     val isTablet = LocalConfiguration.current.screenWidthDp >= Dimens.TabletMinWidthDp
+    if (leadingIcon != null) {
+      Icon(
+        painter = leadingIcon,
+        contentDescription = null,
+        modifier = Modifier
+          .padding(end = Dimens.SmallSpacing)
+          .size(if (isTablet) 20.dp else 16.dp),
+      )
+    }
     Text(
       text,
       style = if (isTablet) ButtonTextTablet else MaterialTheme.typography.titleMedium,

@@ -48,6 +48,10 @@
   <string name="risk_moderate">मध्यम जोखीम</string>
   <string name="risk_mild">सौम्य जोखीम</string>
   <string name="risk_low">कमी जोखीम</string>
+  <string name="risk_high_short">उच्च</string>
+  <string name="risk_moderate_short">मध्यम</string>
+  <string name="risk_mild_short">सौम्य</string>
+  <string name="risk_low_short">कमी</string>
 
   <!-- My Beneficiaries -->
   <string name="beneficiaries_back_title">डॅशबोर्ड</string>
@@ -120,7 +124,10 @@
   <string name="beneficiary_profile_label_village">गाव</string>
   <string name="beneficiary_profile_label_pada">पाडा</string>
   <string name="beneficiary_profile_label_husband">पतीचे नाव</string>
-  <string name="beneficiary_profile_label_mobile">मोबाइल नंबर</string>
+  <string name="beneficiary_profile_label_mobile">मोबाइल नं</string>
+  <string name="beneficiary_profile_label_state">स्थिती</string>
+  <string name="beneficiary_profile_label_risk_short">जोखीम</string>
+  <string name="beneficiary_profile_inline_label">%1$s :</string>
   <string name="beneficiary_profile_label_lmp">LMP</string>
   <string name="beneficiary_profile_label_edd">EDD</string>
   <string name="beneficiary_profile_label_dob">जन्मतारीख</string>
@@ -135,7 +142,9 @@
   <string name="beneficiary_profile_error_load">लाभार्थी लोड होऊ शकला नाही. कृपया पुन्हा प्रयत्न करा.</string>
   <string name="beneficiary_profile_see_visits">भेटी पहा</string>
   <string name="beneficiary_profile_visit_open">सुरू</string>
-  <string name="beneficiary_profile_visit_complete">पूर्ण</string>
+  <string name="beneficiary_profile_visit_complete">पूर्ण झाले</string>
+  <string name="beneficiary_profile_visit_complete_short">पूर्ण</string>
+  <string name="beneficiary_profile_schedule_date">नियोजित तारीख : %1$s</string>
   <string name="beneficiary_profile_referral_incomplete">संदर्भ पाठपुरावा अपूर्ण</string>
   <string name="beneficiary_profile_start_visit">भेट सुरू करा</string>
   <string name="beneficiary_profile_fill_form">फॉर्म भरा</string>
@@ -143,4 +152,306 @@
   <string name="beneficiary_profile_referral">संदर्भ</string>
   <string name="beneficiary_profile_delivery_form">प्रसूती फॉर्म</string>
   <string name="beneficiary_profile_closure_form">समाप्ती फॉर्म</string>
+
+  <!-- Enrollment form (CR-015) -->
+  <string name="enrollment_back_title">मुख्य स्क्रीन</string>
+  <string name="enrollment_title">नोंदणी फॉर्म</string>
+  <string name="enrollment_register_as">नवीन लाभार्थी म्हणून नोंदणी करा :</string>
+  <string name="enrollment_type_child">बालक</string>
+  <string name="enrollment_type_pregnant_woman">गर्भवती महिला</string>
+  <string name="enrollment_tab_consent">संमती</string>
+  <string name="enrollment_tab_personal_info">वैयक्तिक\nमाहिती</string>
+  <string name="enrollment_tab_health_history">आरोग्य\nइतिहास</string>
+  <string name="enrollment_tab_summary">सारांश</string>
+  <string name="enrollment_consent_instruction">कृपया लाभार्थ्याला कार्यक्रमाची माहिती द्या आणि त्यांची ऐच्छिक संमती घ्या.</string>
+  <string name="enrollment_consent_welcome">आरोग्यसखी कार्यक्रमात आपले स्वागत आहे!</string>
+  <string name="enrollment_consent_ensure">लाभार्थी खालील गोष्टींसाठी तयार असल्याची खात्री करा</string>
+  <string name="enrollment_consent_share_personal">वैयक्तिक माहिती सामायिक करण्यास तयार आहे</string>
+  <string name="enrollment_consent_share_health">आरोग्य इतिहास सामायिक करण्यास तयार आहे</string>
+  <string name="enrollment_consent_diagnostic">निदान चाचण्यांमध्ये सहभागी होण्यास तयार आहे</string>
+  <string name="enrollment_consent_referral">संदर्भाचे (रेफरल) कारण समजले आहे</string>
+  <string name="enrollment_consent_play_guidelines">संमती मार्गदर्शक ऐकवा</string>
+  <string name="enrollment_consent_take_photo">संमती फॉर्मचा फोटो काढा</string>
+  <string name="enrollment_consent_play_video">स्वागत व्हिडिओ चालवा</string>
+  <string name="enrollment_consent_retake_photo">संमती फॉर्मचा फोटो पुन्हा काढा</string>
+  <string name="enrollment_consent_photo_captured">फोटो घेतला आहे</string>
+  <string name="enrollment_consent_refused">संमती मिळाली नाही — नोंदणी पुढे जाऊ शकत नाही.</string>
+  <string name="enrollment_next_personal_info">वैयक्तिक माहिती</string>
+  <string name="enrollment_step_pending">हा विभाग लवकरच येत आहे</string>
+  <string name="enrollment_complete_title">नोंदणी पूर्ण झाली!</string>
+  <string name="enrollment_start_visit_form">भेट फॉर्म सुरू करा</string>
+  <string name="enrollment_coming_soon">हे वैशिष्ट्य लवकरच येत आहे</string>
+  <string name="enrollment_exit_title">नोंदणी सोडायची का?</string>
+  <string name="enrollment_exit_message">आता बाहेर पडल्यास भरलेली माहिती नष्ट होईल.</string>
+  <string name="enrollment_exit_cancel">थांबा</string>
+  <string name="enrollment_exit_confirm">बाहेर पडा</string>
+
+  <!-- Enrollment — Personal Info step (CR-015b) -->
+  <string name="enrollment_pi_instruction">कृपया लाभार्थ्याशी संबंधित सर्व तपशील भरा. लाभार्थी योग्य माहिती देत असल्याची खात्री करा</string>
+  <string name="enrollment_pi_first_name">लाभार्थीचे नाव</string>
+  <string name="enrollment_pi_middle_name">लाभार्थीचे मधले नाव</string>
+  <string name="enrollment_pi_last_name">लाभार्थीचे आडनाव</string>
+  <string name="enrollment_pi_name_placeholder">येथे नाव लिहा</string>
+  <string name="enrollment_pi_dob">जन्मतारीख</string>
+  <string name="enrollment_pi_dob_placeholder">जन्मतारीख निवडा</string>
+  <string name="enrollment_pi_age">वय</string>
+  <string name="enrollment_pi_age_placeholder">किंवा वय (वर्षांत) लिहा</string>
+  <string name="enrollment_pi_education">शिक्षण</string>
+  <string name="enrollment_pi_education_placeholder">शिक्षण निवडा</string>
+  <string name="enrollment_pi_partner_education">जोडीदाराचे शिक्षण</string>
+  <string name="enrollment_pi_partner_occupation">जोडीदाराचा व्यवसाय</string>
+  <string name="enrollment_pi_select_placeholder">निवडा</string>
+  <string name="enrollment_pi_address">पत्ता</string>
+  <string name="enrollment_pi_address_placeholder">घर क्रमांक, गल्ली क्रमांक, खूण लिहा</string>
+  <string name="enrollment_pi_mobile">लाभार्थीचा मोबाईल क्रमांक</string>
+  <string name="enrollment_pi_mobile_placeholder">लाभार्थीचा फोन क्रमांक येथे लिहा</string>
+  <string name="enrollment_phone_prefix">+91</string>
+  <string name="enrollment_pi_phone_owner">फोन कोणाच्या मालकीचा आहे?</string>
+  <string name="enrollment_pi_network">मोबाईल नेटवर्कची उपलब्धता</string>
+  <string name="enrollment_pi_years_in_village">या गावात किती वर्षांपासून राहत आहात?</string>
+  <string name="enrollment_pi_years_placeholder">वर्षांची संख्या लिहा</string>
+  <string name="enrollment_pi_migration">कुटुंबाच्या स्थलांतराचा प्रकार</string>
+  <string name="enrollment_pi_income">कुटुंबाचे मासिक उत्पन्न</string>
+  <string name="enrollment_pi_religion">धर्म</string>
+  <string name="enrollment_pi_category">प्रवर्ग</string>
+  <string name="enrollment_pi_household">कुटुंबातील सदस्य संख्या (५ वर्षांखालील मुलांसह)</string>
+  <string name="enrollment_pi_household_placeholder">संख्या लिहा (२–१५)</string>
+  <string name="enrollment_pi_children_under5">कुटुंबातील ५ वर्षांखालील मुले</string>
+  <string name="enrollment_pi_children_placeholder">संख्या लिहा</string>
+  <string name="enrollment_pi_state">राज्याचे नाव</string>
+  <string name="enrollment_pi_district">जिल्ह्याचे नाव</string>
+  <string name="enrollment_pi_block">तालुक्याचे नाव</string>
+  <string name="enrollment_pi_village">महसुली गाव/ग्रामपंचायतीचे नाव</string>
+  <string name="enrollment_pi_pada">लाभार्थीच्या पाड्याचे नाव</string>
+  <string name="enrollment_pi_phc">लाभार्थीच्या PHC चे नाव</string>
+  <string name="enrollment_pi_sub_centre">उपकेंद्राचे नाव</string>
+  <string name="enrollment_pi_lmp_known">महिलेला तिची LMP माहीत आहे का?</string>
+  <string name="enrollment_pi_yes">होय</string>
+  <string name="enrollment_pi_no">नाही</string>
+  <string name="enrollment_pi_lmp">LMP ची तारीख</string>
+  <string name="enrollment_pi_lmp_placeholder">LMP भरा</string>
+  <string name="enrollment_pi_edd">EDD (स्वयं-गणना)</string>
+  <string name="enrollment_pi_ga">गर्भधारणेचा कालावधी (आठवडे)</string>
+  <string name="enrollment_pi_banner">सर्व आवश्यक माहिती भरा</string>
+  <string name="enrollment_pi_back">मागे</string>
+  <string name="enrollment_pi_next_health_history">आरोग्य इतिहास</string>
+  <!-- Field validation messages -->
+  <string name="enrollment_error_required">ही माहिती आवश्यक आहे</string>
+  <string name="enrollment_error_lmp_future">LMP भविष्यातील तारीख असू शकत नाही</string>
+  <string name="enrollment_error_lmp_recent">LMP नोंदणीच्या ३० दिवसांपेक्षा जास्त आधीची असावी</string>
+  <string name="enrollment_error_lmp_old">LMP नोंदणीच्या २४० दिवसांच्या आतील असावी</string>
+  <string name="enrollment_error_name_chars">फक्त अक्षरे आणि रिकाम्या जागांना परवानगी आहे</string>
+  <string name="enrollment_error_age_range">वय १० ते ५० वर्षांदरम्यान असावे</string>
+  <string name="enrollment_error_mobile">वैध १० अंकी मोबाईल क्रमांक भरा</string>
+  <string name="enrollment_error_household_range">२ ते १५ दरम्यान असावे</string>
+  <string name="enrollment_error_children_exceed">कुटुंब सदस्यांपेक्षा जास्त असू शकत नाही</string>
+  <string name="enrollment_error_years">वैध वर्षांची संख्या भरा</string>
+
+  <!-- Enrollment — Summary step (CR-015d) -->
+  <string name="enrollment_summary_title">तपशील तपासा</string>
+  <string name="enrollment_summary_personal_info">वैयक्तिक माहिती</string>
+  <string name="enrollment_summary_edit">संपादित करा</string>
+  <string name="enrollment_next_summary">सारांश</string>
+  <string name="enrollment_submit">सबमिट करा</string>
+  <string name="enrollment_data_saved">माहिती जतन केली आहे</string>
+  <string name="enrollment_submit_error">नोंदणी जतन करता आली नाही. कृपया पुन्हा प्रयत्न करा.</string>
+
+  <!-- Enrollment — Health History (CR-015c). Clinical terms pending native QA. -->
+  <string name="enrollment_hh_instruction">लाभार्थीची सध्याची गर्भधारणा, प्रसूती व वैद्यकीय माहिती नोंदवा.</string>
+  <string name="enrollment_hh_section_current">सध्याची गर्भधारणा</string>
+  <string name="enrollment_hh_section_obstetric">मागील प्रसूती इतिहास</string>
+  <string name="enrollment_hh_section_last_pregnancy">मागील गर्भधारणा</string>
+  <string name="enrollment_hh_section_medical">स्वतःचा व कौटुंबिक वैद्यकीय इतिहास</string>
+
+  <string name="enrollment_hh_trimester">गर्भधारणेचा त्रैमासिक</string>
+  <string name="enrollment_hh_trimester_first">पहिला त्रैमासिक</string>
+  <string name="enrollment_hh_trimester_second">दुसरा त्रैमासिक</string>
+  <string name="enrollment_hh_trimester_third">तिसरा त्रैमासिक</string>
+  <string name="enrollment_hh_planned">ही गर्भधारणा नियोजित आहे का?</string>
+  <string name="enrollment_hh_took_treatment">यावेळी गर्भवती होण्यासाठी काही वैद्यकीय उपचार घेतले का?</string>
+  <string name="enrollment_hh_treatment_type">उपचाराचा प्रकार</string>
+  <string name="enrollment_hh_rch_status">RCH मध्ये नोंदणी आहे का?</string>
+  <string name="enrollment_hh_rch_number">RCH क्रमांक</string>
+  <string name="enrollment_hh_rch_number_placeholder">RCH क्रमांक भरा</string>
+  <string name="enrollment_hh_anc_status">या गर्भधारणेत ANC तपासणी झाली आहे का?</string>
+  <string name="enrollment_hh_anc1_date">ANC-1 ची तारीख</string>
+  <string name="enrollment_hh_anc1_date_placeholder">ANC-1 तारीख निवडा</string>
+  <string name="enrollment_hh_anc_conditions">शेवटच्या ANC तपासणीत आढळलेली उच्च-जोखीम स्थिती</string>
+  <string name="enrollment_hh_td">घेतलेले Td डोस</string>
+  <string name="enrollment_hh_td_none">अद्याप कोणताही घेतला नाही</string>
+  <string name="enrollment_hh_td1">Td-1</string>
+  <string name="enrollment_hh_td2">Td-2</string>
+  <string name="enrollment_hh_td_booster">Td-बूस्टर</string>
+  <string name="enrollment_hh_td_date_placeholder">तारीख निवडा</string>
+
+  <string name="enrollment_hh_gravida">ग्रॅव्हिडा (सध्याच्यासह एकूण गर्भधारणा)</string>
+  <string name="enrollment_hh_para">पॅरा (24 आठवड्यांनंतरच्या प्रसूती)</string>
+  <string name="enrollment_hh_living_children">जिवंत मुले</string>
+  <string name="enrollment_hh_abortions">गर्भपात (24 आठवड्यांपूर्वीचे)</string>
+  <string name="enrollment_hh_still_births">मृत जन्म</string>
+  <string name="enrollment_hh_dead_children">मृत मुले</string>
+  <string name="enrollment_hh_count_placeholder">संख्या भरा</string>
+
+  <string name="enrollment_hh_last_pregnancy_when">तुमची शेवटची गर्भधारणा केव्हा होती?</string>
+  <string name="enrollment_hh_delivery_complications">मागील प्रसूतीदरम्यान गुंतागुंत</string>
+  <string name="enrollment_hh_delivery_duration">शेवटच्या प्रसूतीचा कालावधी</string>
+  <string name="enrollment_hh_delivery_type">शेवटच्या प्रसूतीचा प्रकार</string>
+  <string name="enrollment_hh_delivery_place">शेवटची प्रसूती कोठे झाली?</string>
+  <string name="enrollment_hh_delivery_outcome">शेवटच्या प्रसूतीचा निकाल</string>
+  <string name="enrollment_hh_birth_weight">जन्मावेळी बाळाचे वजन</string>
+
+  <string name="enrollment_hh_self_conditions">यापैकी कोणत्या स्थितीचे निदान झाले आहे का?</string>
+  <string name="enrollment_hh_long_term_meds">तुम्ही सध्या दीर्घकालीन औषधे घेत आहात का?</string>
+  <string name="enrollment_hh_sickle_cell">सिकल सेल आजार / वाहक स्थिती</string>
+  <string name="enrollment_hh_substance_use">या गर्भधारणेपूर्वी किंवा दरम्यान व्यसन</string>
+  <string name="enrollment_hh_family_history">तीव्र किंवा दीर्घकालीन आजाराचा कौटुंबिक इतिहास?</string>
+  <string name="enrollment_hh_family_conditions">लागू कौटुंबिक स्थिती</string>
+  <string name="enrollment_hh_malnutrition">घरातील कोणत्या मुलावर कुपोषणासाठी उपचार सुरू आहेत का?</string>
+  <string name="enrollment_hh_remarks">शेरा</string>
+  <string name="enrollment_hh_remarks_placeholder">पर्यायी टिपा</string>
+
+  <string name="enrollment_hh_error_count">वैध संख्या भरा</string>
+  <string name="enrollment_hh_error_anc1_date">ANC-1 तारीख भविष्यातील नसावी</string>
+  <string name="enrollment_hh_error_td_future">डोसची तारीख भविष्यातील असू शकत नाही</string>
+  <string name="enrollment_hh_error_td_order">डोसच्या तारखा Td-1 → Td-2 → बूस्टर क्रमाने असाव्यात</string>
+  <string name="enrollment_hh_error_para">पॅरा ग्रॅव्हिडापेक्षा जास्त असू शकत नाही</string>
+  <string name="enrollment_hh_error_abortions">गर्भपात ग्रॅव्हिडापेक्षा जास्त असू शकत नाही</string>
+  <string name="enrollment_hh_error_dead">जिवंत मुलांपेक्षा जास्त असू शकत नाही</string>
+  <string name="enrollment_hh_error_gravida_total">ग्रॅव्हिडा = पॅरा + गर्भपात + 1 असावे</string>
+  <string name="enrollment_summary_health_history">आरोग्य इतिहास</string>
+
+  <!-- Pre-Visit Health History (FR-S-4.6, CR-016a) — MR translations flagged for native QA -->
+  <string name="previsit_back_title">लाभार्थी पहा</string>
+  <string name="previsit_summary_title">सारांश</string>
+  <string name="previsit_name_age">%1$s | %2$s</string>
+  <string name="previsit_village_pada">गाव | पाडा : %1$s | %2$s</string>
+  <string name="previsit_husband_name">पतीचे नाव : %1$s</string>
+  <string name="previsit_mobile_no">मोबाईल क्रमांक : %1$s</string>
+  <string name="previsit_risk_factor_title">%1$s - %2$s</string>
+  <string name="previsit_see_profile">प्रोफाइल पहा</string>
+  <string name="previsit_start_visit">भेट सुरू करा</string>
+  <string name="previsit_error_load">या लाभार्थ्याचा आरोग्य इतिहास लोड करता आला नाही. कृपया पुन्हा प्रयत्न करा.</string>
+
+  <!-- ANC Visit Form (CR-016) — MR translations flagged for native QA -->
+  <string name="visit_form_coming_soon">हे वैशिष्ट्य लवकरच येत आहे</string>
+  <string name="visit_form_back_title">भेट ट्रॅकर</string>
+  <string name="visit_form_title">%1$s फॉर्म</string>
+  <string name="visit_form_tab_visit_data">भेट डेटा</string>
+  <string name="visit_form_tab_summary">सारांश</string>
+  <string name="visit_form_tab_health_info">आरोग्य\nमाहिती</string>
+  <string name="visit_form_tab_referral">संदर्भ</string>
+  <string name="visit_form_subtab_tests">चाचण्या</string>
+  <string name="visit_form_subtab_symptoms">लक्षणे</string>
+  <string name="visit_form_subtab_history">इतिहास</string>
+  <string name="visit_form_step_pending">हा विभाग लवकरच येत आहे</string>
+  <string name="visit_form_back">मागे</string>
+  <string name="visit_form_next_summary">सारांश</string>
+  <string name="visit_form_next_health_info">आरोग्य माहिती</string>
+  <string name="visit_form_next_referral">संदर्भ</string>
+  <string name="visit_form_submit">सबमिट करा</string>
+  <string name="visit_form_exit_title">भेट फॉर्म सोडायचा?</string>
+  <string name="visit_form_exit_message">या भेटीत आंशिक जतन नाही — आता सोडल्यास सर्व नोंदी गमावल्या जातील.</string>
+  <string name="visit_form_exit_cancel">थांबा</string>
+  <string name="visit_form_exit_confirm">सोडा</string>
+
+  <!-- ANC Visit Form — Visit Data fields (CR-016b) — MR translations flagged for native QA -->
+  <string name="visit_form_error_load">या भेटीचा डेटा लोड करता आला नाही. कृपया पुन्हा प्रयत्न करा.</string>
+  <string name="visit_form_vd_banner">सर्व आवश्यक फील्ड पूर्ण करा</string>
+  <string name="visit_form_error_required">हे फील्ड आवश्यक आहे</string>
+  <string name="visit_form_error_range">वैध श्रेणीत मूल्य भरा</string>
+  <string name="visit_form_error_date_future">तारीख भविष्यातील असू शकत नाही</string>
+  <string name="visit_form_error_date_too_early">तारीख LMP / आधीच्या डोसच्या तारखेनंतर असावी</string>
+  <string name="visit_form_hb_confirm_prompt">हे मागील भेटीपेक्षा खूप वेगळे आहे. कृपया मूल्याची पुष्टी करा किंवा चाचणी पुन्हा करा.</string>
+  <string name="visit_form_hb_confirm_action">मूल्याची पुष्टी करा</string>
+
+  <string name="visit_form_critical_danger_sign">धोक्याचे लक्षण आढळले — भेट थांबवा आणि लाभार्थ्याला ताबडतोब आरोग्य केंद्रात घेऊन जा.</string>
+  <string name="visit_form_critical_hypertension">लक्षणांसह तीव्र उच्च रक्तदाब — भेट थांबवा आणि लाभार्थ्याला ताबडतोब आरोग्य केंद्रात घेऊन जा.</string>
+  <string name="visit_form_critical_anaemia">चक्करसह तीव्र अशक्तपणा — भेट थांबवा आणि लाभार्थ्याला ताबडतोब आरोग्य केंद्रात घेऊन जा.</string>
+  <string name="visit_form_critical_hypoglycaemia">लक्षणांसह अत्यंत कमी रक्तशर्करा — भेट थांबवा आणि लाभार्थ्याला ताबडतोब आरोग्य केंद्रात घेऊन जा.</string>
+  <string name="visit_form_critical_title">तातडीची सूचना</string>
+  <string name="visit_form_critical_close">बंद करा आणि भेट संपवा</string>
+
+  <string name="visit_form_vd_section_tracking">भेट नोंद</string>
+  <string name="visit_form_vd_visit_date">भेटीची तारीख</string>
+  <string name="visit_form_vd_met_beneficiary">तुम्ही लाभार्थ्याला भेटीसाठी भेटू शकलात का?</string>
+  <string name="visit_form_vd_not_met_reason">नाही असल्यास, कारण नमूद करा</string>
+
+  <string name="visit_form_vd_section_dating">गर्भावस्था कालावधी</string>
+  <string name="visit_form_vd_rch_number">RCH क्रमांक</string>
+  <string name="visit_form_vd_lmp">LMP</string>
+  <string name="visit_form_vd_has_sonography">LMP तारीख निश्चित करण्यासाठी तुमच्याकडे सोनोग्राफी अहवाल आहे का?</string>
+  <string name="visit_form_vd_sonography_upload">सोनोग्राफी अहवालाचे छायाचित्र अपलोड करा</string>
+  <string name="visit_form_vd_gestational_age">सद्य गर्भावस्था कालावधी (आठवडे)</string>
+  <string name="visit_form_vd_edd">EDD</string>
+
+  <string name="visit_form_vd_height">उंची (सेमी)</string>
+  <string name="visit_form_vd_weight">सध्याचे वजन (किलो)</string>
+  <string name="visit_form_vd_bmi">BMI</string>
+  <string name="visit_form_vd_muac">दंडाचा घेर (सेमी)</string>
+  <string name="visit_form_vd_bp_systolic">रक्तदाब — सिस्टोलिक</string>
+  <string name="visit_form_vd_bp_diastolic">रक्तदाब — डायस्टोलिक</string>
+  <string name="visit_form_vd_temperature">शरीराचे तापमान (°F)</string>
+  <string name="visit_form_vd_hemoglobin">हिमोग्लोबिन (g/dl)</string>
+  <string name="visit_form_vd_last_meal">शेवटच्या जेवणापासून तास</string>
+  <string name="visit_form_vd_blood_glucose">रक्तशर्करा (mg/dl)</string>
+  <string name="visit_form_vd_urine_test">लघवी तपासणी</string>
+  <string name="visit_form_vd_fetal_movements">गर्भाची हालचाल</string>
+  <string name="visit_form_vd_fetal_heart_rate">गर्भाच्या हृदयाचे ठोके</string>
+  <string name="visit_form_vd_fundal_height">फंडल उंची (सेमी)</string>
+  <string name="visit_form_vd_count_placeholder">मूल्य भरा</string>
+
+  <string name="visit_form_vd_danger_signs">मागील भेटीपासून तुम्हाला यापैकी काही जाणवले आहे का?</string>
+  <string name="visit_form_vd_palm_nails">तळहात आणि नखे तपासा</string>
+  <string name="visit_form_vd_sclera">डोळ्याचा पांढरा भाग तपासा</string>
+  <string name="visit_form_vd_skin">त्वचा तपासा</string>
+  <string name="visit_form_vd_swelling">सूज</string>
+  <string name="visit_form_vd_dehydration">निर्जलीकरण</string>
+
+  <string name="visit_form_vd_section_supplements">पूरक आहार आणि पालन</string>
+  <string name="visit_form_vd_td">लसीकरण स्थिती (Td)</string>
+  <string name="visit_form_vd_td_none">अद्याप घेतलेले नाही</string>
+  <string name="visit_form_vd_td1">Td-1</string>
+  <string name="visit_form_vd_td2">Td-2</string>
+  <string name="visit_form_vd_td_booster">Td-बूस्टर</string>
+  <string name="visit_form_vd_td_date_placeholder">डोसची तारीख निवडा</string>
+
+  <string name="visit_form_vd_food_consumed">गेल्या 24 तासांत तुम्ही यापैकी कोणते पदार्थ खाल्ले?</string>
+  <string name="visit_form_vd_food_avoided">तुम्ही यापैकी कोणते पदार्थ खाणे टाळता?</string>
+  <string name="visit_form_vd_taking_ifa">तुम्ही IFA गोळ्या घेत आहात का?</string>
+  <string name="visit_form_vd_ifa_tablets">मागील भेटीपासून तुम्ही किती IFA गोळ्या घेतल्या?</string>
+  <string name="visit_form_vd_ifa_reasons">नाही असल्यास, IFA गोळ्या न घेण्याची कारणे</string>
+  <string name="visit_form_vd_calcium">कॅल्शियम गोळ्या मिळाल्या आणि घेतल्या का?</string>
+
+  <string name="visit_form_vd_section_birth_prep">प्रसूती तयारी आणि मानसिक आरोग्य</string>
+  <string name="visit_form_vd_visited_facility">मागील भेटीपासून तुम्ही आरोग्य केंद्राला भेट दिली आहे का?</string>
+  <string name="visit_form_vd_last_anc_date">आरोग्य केंद्रातील शेवटच्या ANC भेटीची तारीख भरा</string>
+  <string name="visit_form_vd_delivery_place">सल्ला दिलेले प्रसूती ठिकाण</string>
+  <string name="visit_form_vd_sickle_cell">सिकल सेल</string>
+  <string name="visit_form_vd_family_planning">प्रसूतीनंतर महिला कोणती कुटुंब नियोजन पद्धत वापरण्याचा विचार करत आहे?</string>
+  <string name="visit_form_vd_feeling_stressed">बहुतेक दिवस दुःखी, चिंताग्रस्त किंवा तणावग्रस्त वाटते का?</string>
+  <string name="visit_form_vd_family_support">गरोदरपणात पुरेसा कौटुंबिक आधार आहे का?</string>
+  <string name="visit_form_vd_planning_migration">गरोदरपणात तुम्ही दुसऱ्या ठिकाणी स्थलांतर करणार आहात का?</string>
+  <string name="visit_form_vd_usg_done">मागील भेटीपासून USG केले आहे का?</string>
+  <string name="visit_form_vd_usg_date">USG ची तारीख</string>
+  <string name="visit_form_vd_usg_type">USG चा प्रकार</string>
+  <string name="visit_form_vd_usg_finding">USG निष्कर्ष</string>
+  <string name="visit_form_vd_transport_shared">वाहतुकीचा संपर्क कुटुंबाला दिला आणि जतन केला आहे का?</string>
+  <string name="visit_form_vd_funds_arranged">कुटुंबाने प्रसूती/आपत्कालीन खर्चासाठी निधीची व्यवस्था केली आहे का?</string>
+  <string name="visit_form_vd_birth_companion">प्रसूती/आपत्कालीन प्रसंगासाठी सोबती निश्चित केला आहे का?</string>
+  <string name="visit_form_vd_remarks">शेरा</string>
+  <string name="visit_form_vd_remarks_placeholder">पर्यायी टिपा</string>
+  <string name="visit_form_vd_section_counselling">समुपदेशन यादी</string>
+  <string name="visit_form_vd_counselling">सखी म्हणून, तुम्ही लाभार्थ्याला खालील बाबींवर मार्गदर्शन केले आहे का?</string>
+
+  <string name="visit_form_take_photo">छायाचित्र घ्या</string>
+  <string name="visit_form_retake_photo">छायाचित्र पुन्हा घ्या</string>
+
+  <!-- ANC Visit Form — Summary tab (CR-016c) — MR translations flagged for native QA -->
+  <string name="visit_form_vs_risk_identified">ओळखलेला धोका</string>
+  <string name="visit_form_vs_no_conditions">कोणतीही ज्ञात स्थिती नाही</string>
+  <string name="visit_form_vs_edit">संपादित करा</string>
+  <string name="visit_form_vs_tests_title">तपासण्या</string>
+  <string name="visit_form_vs_symptoms_title">लक्षणे</string>
+  <string name="visit_form_vs_bp">रक्तदाब</string>
+  <string name="visit_form_vs_reference_range">(%1$s)</string>
 </resources>

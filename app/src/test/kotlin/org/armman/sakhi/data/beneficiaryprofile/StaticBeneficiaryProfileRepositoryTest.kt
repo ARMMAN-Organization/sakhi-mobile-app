@@ -19,9 +19,30 @@ class StaticBeneficiaryProfileRepositoryTest {
     assertEquals("Sunita Sharma", profile.name)
     assertTrue(!profile.lmp.isNullOrBlank())
     assertTrue(!profile.edd.isNullOrBlank())
-    assertNull(profile.dob)
-    assertNull(profile.weight)
+    // DOB/Weight now populated for mothers too — the strip shows them for all types.
+    assertTrue(!profile.dob.isNullOrBlank())
+    assertTrue(!profile.weight.isNullOrBlank())
     assertTrue(profile.lastVisitStats.isNotEmpty())
+  }
+
+  @Test
+  fun `mother last visit stats match the design board copy`() = runTest {
+    val stats = repository.getBeneficiary("b01").lastVisitStats
+
+    assertEquals(4, stats.size)
+    assertEquals(VitalStat(value = "9 (12)", caption = "Low Hb.", abnormal = true), stats[0])
+    assertEquals(VitalStat(value = "80 (60)- 140 (120)", caption = "High BP.", abnormal = true), stats[1])
+    assertEquals(VitalStat(value = "101 (98.7)", caption = "High Temp.", abnormal = true), stats[2])
+    assertEquals(VitalStat(value = "45 (60)", caption = "Low Weight", abnormal = true), stats[3])
+  }
+
+  @Test
+  fun `child last visit stats keep weight and hb`() = runTest {
+    val stats = repository.getBeneficiary("b07").lastVisitStats
+
+    assertEquals(2, stats.size)
+    assertEquals(VitalStat(value = "2.1 (3.2)", caption = "Low Weight", abnormal = true), stats[0])
+    assertEquals(VitalStat(value = "11 (12)", caption = "Hb.", abnormal = false), stats[1])
   }
 
   @Test

@@ -31,5 +31,17 @@ val InformationSurface = Color(0xFFE8F1FC)
 // Light red wash for high-risk diagnosis chips / abnormal stat tiles.
 val RiskHighSurface = Color(0xFFFCE9E9)
 
+// Moderate/mild/low risk surface washes — Pre-Visit Health History risk-factor
+// cards (CR-016a) use these behind their colored header bar per risk level.
+val RiskModerateSurface = Color(0xFFFDF1E6)
+val RiskMildSurface = Color(0xFFFEF9E3)
+val RiskLowSurface = Color(0xFFEBF5EC)
+
+// Even lighter red wash — the "Last Visit Stats" card background per the board.
+val RiskHighSurfaceSubtle = Color(0xFFFDF4F1)
+
+// Light grey wash of the consent video placeholder (Enrollment form design).
+val VideoPlaceholderSurface = Color(0xFFEEEEEE)
+
 // Soft shadow tint for cards/bars (black at ~15% opacity, per design shadows).
 val ShadowTint = Color(0x26000000)

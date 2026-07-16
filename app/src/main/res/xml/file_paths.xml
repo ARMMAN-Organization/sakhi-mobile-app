@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Camera capture targets live in app-private storage only (no gallery). -->
+<paths>
+  <files-path
+    name="enrollment_captures"
+    path="enrollment/" />
+  <files-path
+    name="visitform_captures"
+    path="visitform/" />
+</paths>

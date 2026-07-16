@@ -192,5 +192,7 @@ After development is complete, provide:
 - List of files changed
 - Summary of the implementation
 - Any assumptions made
-- Commands required to run or test the changes (`./gradlew detekt :app:testDebugUnitTest`)
+- Commands required to run or test the changes (`./gradlew :app:testDebugUnitTest` —
+  NOTE: detekt is NOT yet configured in this repo despite the standards mentioning it;
+  adding the detekt plugin is an open tech-debt task)
 - Follow-up improvements or known limitations

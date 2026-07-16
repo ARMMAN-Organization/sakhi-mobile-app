@@ -33,4 +33,47 @@ object Dimens {
   val CardAccentHeight = 6.dp
   val AvatarSize = 44.dp
   val SmallButtonHeight = 44.dp
+
+  /** Horizontal content inset on tablet screens (measured from tablet designs). */
+  val ScreenPaddingTablet = 48.dp
+
+  /** Stepper tab indicator extends this much beyond the label on each side. */
+  val TabIndicatorOverhang = 10.dp
+
+  // Enrollment tokens measured from the Enrollment form designs (150dpi).
+  /** Height of a "Register New Beneficiary as" option card. */
+  val EnrollmentOptionHeight = 52.dp
+
+  /** Leading icon circle inside an option card. */
+  val EnrollmentOptionIconCircle = 32.dp
+
+  /** Consent video placeholder height (mobile frame, 150dpi measure). */
+  val ConsentVideoHeight = 216.dp
+
+  /** Purple play badge diameter centered on the video placeholder. */
+  val ConsentPlayBadge = 32.dp
+
+  /** Square consent checkbox size. */
+  val ConsentCheckboxSize = 20.dp
+
+  /** Vertical gap between consent checklist rows. */
+  val ConsentCheckRowSpacing = 20.dp
+
+  /** Success check-circle diameter on the completion screen. */
+  val CompleteBadgeSize = 56.dp
+
+  /** Horizontal inset of the completion screen CTA (measured 150dpi). */
+  val CompleteCtaPaddingH = 56.dp
+
+  /** Gap between the completion title and its CTA. */
+  val CompleteCtaSpacing = 56.dp
+
+  /** Max content width of stepper forms on tablet (style-guide modal width). */
+  val EnrollmentFormMaxWidth = 640.dp
+
+  /** Bottom offset of the green "Data has been saved" pill (Summary frame). */
+  val SavedToastBottomPadding = 96.dp
+
+  /** Micro gap between a review row's label and its value (Summary frame). */
+  val LabelValueGap = 2.dp
 }

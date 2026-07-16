@@ -24,10 +24,10 @@ class StaticBeneficiaryProfileRepository @Inject constructor() : BeneficiaryProf
   private companion object {
     const val NETWORK_LATENCY_MS = 500L
 
-    /** Mother stat set: Hb, BP, Temp, Weight (all flagged abnormal in the design). */
+    /** Mother stat set per the board: Hb, BP, Temp, Weight (all abnormal). */
     val MOTHER_STATS = listOf(
       VitalStat(value = "9 (12)", caption = "Low Hb.", abnormal = true),
-      VitalStat(value = "80 (60)-140 (120)", caption = "High BP.", abnormal = true),
+      VitalStat(value = "80 (60)- 140 (120)", caption = "High BP.", abnormal = true),
       VitalStat(value = "101 (98.7)", caption = "High Temp.", abnormal = true),
       VitalStat(value = "45 (60)", caption = "Low Weight", abnormal = true),
     )
@@ -48,6 +48,7 @@ class StaticBeneficiaryProfileRepository @Inject constructor() : BeneficiaryProf
         action = ProfileVisitAction.START_VISIT,
         daysRemaining = 2,
         startable = false, // Not due yet — Start Visit disabled per design.
+        hasPreVisitHistory = true, // v1-v3 completed — prior data exists.
       ),
       ProfileVisit(
         id = "v3",
@@ -57,6 +58,7 @@ class StaticBeneficiaryProfileRepository @Inject constructor() : BeneficiaryProf
         action = ProfileVisitAction.FILL_FORM,
         referralIncomplete = true,
         riskLabel = "High Risk",
+        hasPreVisitHistory = true, // v1-v2 completed — prior data exists.
       ),
       ProfileVisit(
         id = "v2",
@@ -65,6 +67,7 @@ class StaticBeneficiaryProfileRepository @Inject constructor() : BeneficiaryProf
         dateLabel = "24 Apr 2025",
         action = ProfileVisitAction.SEE_DATA,
         riskLabel = "High Risk",
+        hasPreVisitHistory = true, // v1 completed — prior data exists.
       ),
       ProfileVisit(
         id = "v1",
@@ -72,6 +75,7 @@ class StaticBeneficiaryProfileRepository @Inject constructor() : BeneficiaryProf
         state = ProfileVisitState.COMPLETED,
         dateLabel = "24 Apr 2025",
         action = ProfileVisitAction.SEE_DATA,
+        hasPreVisitHistory = false, // The beneficiary's actual first visit — no prior data.
       ),
       ProfileVisit(
         id = "enrollment",
@@ -100,6 +104,9 @@ class StaticBeneficiaryProfileRepository @Inject constructor() : BeneficiaryProf
       riskLevel = risk,
       lmp = "1 Dec 2025",
       edd = "1 Sep 2026",
+      // Profile stat strip shows DOB | Weight for every beneficiary type.
+      dob = "10 Nov 2000",
+      weight = "45 Kg",
       diagnoses = listOf("Sickle Cell", "Chronic Diabetes"),
       lastVisitStats = MOTHER_STATS,
       visits = VISITS,

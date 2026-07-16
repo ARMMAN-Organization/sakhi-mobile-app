@@ -29,6 +29,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.armman.sakhi.R
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfile
+import org.armman.sakhi.data.beneficiaryprofile.ProfileVisit
+import org.armman.sakhi.data.beneficiaryprofile.ProfileVisitAction
 import org.armman.sakhi.ui.beneficiaryprofile.components.IdentityCard
 import org.armman.sakhi.ui.beneficiaryprofile.components.LastVisitStatsCard
 import org.armman.sakhi.ui.beneficiaryprofile.components.VisitHistoryCard
@@ -54,6 +56,7 @@ import java.util.Locale
 fun BeneficiaryProfileScreen(
   onBack: () -> Unit,
   onProfile: () -> Unit = {},
+  onStartVisit: (beneficiaryId: String, visit: ProfileVisit) -> Unit = { _, _ -> },
   viewModel: BeneficiaryProfileViewModel = hiltViewModel(),
 ) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -86,6 +89,7 @@ fun BeneficiaryProfileScreen(
               profile = profile,
               isTablet = isTablet,
               onComingSoon = { onComingSoon() },
+              onStartVisit = { visit -> onStartVisit(profile.id, visit) },
             )
           }
         }
@@ -99,6 +103,7 @@ private fun ProfileContent(
   profile: BeneficiaryProfile,
   isTablet: Boolean,
   onComingSoon: () -> Unit,
+  onStartVisit: (ProfileVisit) -> Unit,
 ) {
   Column(modifier = Modifier.fillMaxSize()) {
     // Scrollable body; the Delivery/Closure footer stays pinned below it.
@@ -111,6 +116,7 @@ private fun ProfileContent(
       IdentityCard(profile = profile, isTablet = isTablet, onEdit = onComingSoon)
       LastVisitStatsCard(
         stats = profile.lastVisitStats,
+        isTablet = isTablet,
         modifier = Modifier.padding(top = Dimens.ItemSpacing),
       )
       if (profile.visits.isNotEmpty()) {
@@ -123,7 +129,18 @@ private fun ProfileContent(
         profile.visits.forEach { visit ->
           VisitHistoryCard(
             visit = visit,
-            onAction = onComingSoon,
+            isTablet = isTablet,
+            // CR-016: Start Visit / Fill Form now open the Visit Form flow;
+            // See Data / Referral remain stubbed until their own CRs land.
+            onAction = {
+              if (visit.action == ProfileVisitAction.START_VISIT ||
+                visit.action == ProfileVisitAction.FILL_FORM
+              ) {
+                onStartVisit(visit)
+              } else {
+                onComingSoon()
+              }
+            },
             modifier = Modifier.padding(top = Dimens.ItemSpacing),
           )
         }

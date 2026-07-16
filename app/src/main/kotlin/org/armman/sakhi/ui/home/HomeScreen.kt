@@ -48,6 +48,7 @@ fun HomeScreen(
   onAllBeneficiaries: () -> Unit = {},
   onSeeVisitTracker: () -> Unit = {},
   onProfile: () -> Unit = {},
+  onRegisterNew: () -> Unit = {},
   viewModel: HomeViewModel = hiltViewModel(),
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -68,6 +69,7 @@ fun HomeScreen(
             summary = state.summary,
             onAllBeneficiaries = onAllBeneficiaries,
             onSeeVisitTracker = onSeeVisitTracker,
+            onRegisterNew = onRegisterNew,
           )
         }
       }
