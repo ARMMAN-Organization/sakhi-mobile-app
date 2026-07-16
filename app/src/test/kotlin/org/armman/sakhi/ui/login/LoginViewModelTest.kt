@@ -27,7 +27,7 @@ class LoginViewModelTest {
   /** Controllable fake so tests never depend on the static credential values. */
   private class FakeAuthRepository(
     var result: LoginResult = LoginResult.Success(
-      UserSession(userId = "u1", displayName = "Test", role = "SAKHI", accessToken = "t"),
+      UserSession(username = "u1", displayName = "Test", role = "SAKHI", accessToken = "t"),
     ),
   ) : AuthRepository {
     var loginCallCount = 0
@@ -61,29 +61,29 @@ class LoginViewModelTest {
   fun `initial state prefills dev credentials in debug and has no errors`() {
     // Unit tests run against the debug variant, so the dev prefill is expected.
     val state = viewModel.uiState.value
-    assertEquals("sakhi01", state.userId)
+    assertEquals("sakhi01", state.username)
     assertEquals("Sakhi@123", state.password)
     assertFalse(state.isSubmitting)
-    assertNull(state.userIdError)
+    assertNull(state.usernameError)
     assertNull(state.passwordError)
     assertNull(state.loginError)
     assertFalse(state.loginSucceeded)
   }
 
   @Test
-  fun `blank user id blocks submit with field error`() = runTest(dispatcher) {
-    viewModel.onUserIdChanged("")
+  fun `blank username blocks submit with field error`() = runTest(dispatcher) {
+    viewModel.onUsernameChanged("")
     viewModel.onPasswordChanged("secret")
     viewModel.onLoginClicked()
     dispatcher.scheduler.advanceUntilIdle()
 
-    assertEquals(R.string.login_error_user_id_required, viewModel.uiState.value.userIdError)
+    assertEquals(R.string.login_error_username_required, viewModel.uiState.value.usernameError)
     assertEquals(0, repository.loginCallCount)
   }
 
   @Test
   fun `blank password blocks submit with field error`() = runTest(dispatcher) {
-    viewModel.onUserIdChanged("sakhi01")
+    viewModel.onUsernameChanged("sakhi01")
     viewModel.onPasswordChanged("")
     viewModel.onLoginClicked()
     dispatcher.scheduler.advanceUntilIdle()
@@ -94,20 +94,20 @@ class LoginViewModelTest {
 
   @Test
   fun `both fields blank shows both errors`() = runTest(dispatcher) {
-    viewModel.onUserIdChanged("")
+    viewModel.onUsernameChanged("")
     viewModel.onPasswordChanged("")
     viewModel.onLoginClicked()
     dispatcher.scheduler.advanceUntilIdle()
 
     val state = viewModel.uiState.value
-    assertEquals(R.string.login_error_user_id_required, state.userIdError)
+    assertEquals(R.string.login_error_username_required, state.usernameError)
     assertEquals(R.string.login_error_password_required, state.passwordError)
     assertEquals(0, repository.loginCallCount)
   }
 
   @Test
   fun `successful login sets loginSucceeded and stops submitting`() = runTest(dispatcher) {
-    viewModel.onUserIdChanged("sakhi01")
+    viewModel.onUsernameChanged("sakhi01")
     viewModel.onPasswordChanged("Sakhi@123")
     viewModel.onLoginClicked()
     dispatcher.scheduler.advanceUntilIdle()
@@ -119,19 +119,19 @@ class LoginViewModelTest {
   }
 
   @Test
-  fun `user id is trimmed before submission`() = runTest(dispatcher) {
-    viewModel.onUserIdChanged("  sakhi01  ")
+  fun `username is trimmed before submission`() = runTest(dispatcher) {
+    viewModel.onUsernameChanged("  sakhi01  ")
     viewModel.onPasswordChanged("Sakhi@123")
     viewModel.onLoginClicked()
     dispatcher.scheduler.advanceUntilIdle()
 
-    assertEquals("sakhi01", repository.lastRequest?.userId)
+    assertEquals("sakhi01", repository.lastRequest?.username)
   }
 
   @Test
   fun `invalid credentials shows login error`() = runTest(dispatcher) {
     repository.result = LoginResult.Failure(LoginFailureReason.INVALID_CREDENTIALS)
-    viewModel.onUserIdChanged("sakhi01")
+    viewModel.onUsernameChanged("sakhi01")
     viewModel.onPasswordChanged("wrong")
     viewModel.onLoginClicked()
     dispatcher.scheduler.advanceUntilIdle()
@@ -145,7 +145,7 @@ class LoginViewModelTest {
   @Test
   fun `unknown failure shows generic error`() = runTest(dispatcher) {
     repository.result = LoginResult.Failure(LoginFailureReason.UNKNOWN)
-    viewModel.onUserIdChanged("sakhi01")
+    viewModel.onUsernameChanged("sakhi01")
     viewModel.onPasswordChanged("pw")
     viewModel.onLoginClicked()
     dispatcher.scheduler.advanceUntilIdle()
@@ -156,7 +156,7 @@ class LoginViewModelTest {
   @Test
   fun `typing clears field and login errors`() = runTest(dispatcher) {
     repository.result = LoginResult.Failure(LoginFailureReason.INVALID_CREDENTIALS)
-    viewModel.onUserIdChanged("sakhi01")
+    viewModel.onUsernameChanged("sakhi01")
     viewModel.onPasswordChanged("wrong")
     viewModel.onLoginClicked()
     dispatcher.scheduler.advanceUntilIdle()
@@ -170,7 +170,7 @@ class LoginViewModelTest {
 
   @Test
   fun `onLoginHandled resets the one-shot success flag`() = runTest(dispatcher) {
-    viewModel.onUserIdChanged("sakhi01")
+    viewModel.onUsernameChanged("sakhi01")
     viewModel.onPasswordChanged("Sakhi@123")
     viewModel.onLoginClicked()
     dispatcher.scheduler.advanceUntilIdle()
@@ -182,7 +182,7 @@ class LoginViewModelTest {
 
   @Test
   fun `submit is ignored while already submitting`() = runTest(dispatcher) {
-    viewModel.onUserIdChanged("sakhi01")
+    viewModel.onUsernameChanged("sakhi01")
     viewModel.onPasswordChanged("Sakhi@123")
     viewModel.onLoginClicked() // starts submitting; coroutine not yet run
     viewModel.onLoginClicked() // second click before the scheduler advances

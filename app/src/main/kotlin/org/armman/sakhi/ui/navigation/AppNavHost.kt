@@ -12,7 +12,9 @@ import org.armman.sakhi.ui.beneficiaryprofile.BeneficiaryProfileScreen
 import org.armman.sakhi.ui.enrollment.EnrollmentScreen
 import org.armman.sakhi.ui.home.HomeScreen
 import org.armman.sakhi.ui.login.LoginScreen
+import org.armman.sakhi.ui.previsithealthhistory.PreVisitHealthHistoryScreen
 import org.armman.sakhi.ui.profile.ProfileScreen
+import org.armman.sakhi.ui.visitform.VisitFormScreen
 import org.armman.sakhi.ui.visittracker.PadaSelectionScreen
 import org.armman.sakhi.ui.visittracker.PadaVisitsScreen
 
@@ -25,6 +27,8 @@ object Routes {
   const val PROFILE = "profile"
   const val BENEFICIARY_PROFILE = "beneficiary/{id}"
   const val ENROLLMENT = "enrollment"
+  const val PRE_VISIT_HEALTH_HISTORY = "previsit-health-history/{beneficiaryId}/{visitId}/{label}"
+  const val VISIT_FORM = "visit-form/{beneficiaryId}/{visitId}/{label}"
 
   /** Builds a login route, optionally showing the post-logout success banner. */
   fun login(loggedOut: Boolean = false) = "login?loggedOut=$loggedOut"
@@ -34,6 +38,14 @@ object Routes {
 
   /** Builds the route for a single beneficiary's profile. */
   fun beneficiaryProfile(id: String) = "beneficiary/${Uri.encode(id)}"
+
+  /** Builds the route for the Pre-Visit Health History screen (FR-S-4.6). */
+  fun preVisitHealthHistory(beneficiaryId: String, visitId: String, label: String) =
+    "previsit-health-history/${Uri.encode(beneficiaryId)}/${Uri.encode(visitId)}/${Uri.encode(label)}"
+
+  /** Builds the route for a single visit's Visit Form. */
+  fun visitForm(beneficiaryId: String, visitId: String, label: String) =
+    "visit-form/${Uri.encode(beneficiaryId)}/${Uri.encode(visitId)}/${Uri.encode(label)}"
 }
 
 /** Top-level navigation graph for the Sakhi app. */
@@ -115,6 +127,52 @@ fun AppNavHost() {
       arguments = listOf(navArgument("id") { type = NavType.StringType }),
     ) {
       BeneficiaryProfileScreen(
+        onBack = { navController.popBackStack() },
+        onProfile = { navController.navigate(Routes.PROFILE) },
+        onStartVisit = { beneficiaryId, visit ->
+          val route = if (visit.hasPreVisitHistory) {
+            Routes.preVisitHealthHistory(beneficiaryId, visit.id, visit.label)
+          } else {
+            Routes.visitForm(beneficiaryId, visit.id, visit.label)
+          }
+          navController.navigate(route)
+        },
+      )
+    }
+    composable(
+      route = Routes.PRE_VISIT_HEALTH_HISTORY,
+      arguments = listOf(
+        navArgument("beneficiaryId") { type = NavType.StringType },
+        navArgument("visitId") { type = NavType.StringType },
+        navArgument("label") { type = NavType.StringType },
+      ),
+    ) { backStackEntry ->
+      val beneficiaryId = backStackEntry.arguments?.getString("beneficiaryId").orEmpty()
+      val visitId = backStackEntry.arguments?.getString("visitId").orEmpty()
+      val label = backStackEntry.arguments?.getString("label").orEmpty()
+      PreVisitHealthHistoryScreen(
+        onBack = { navController.popBackStack() },
+        onProfile = { navController.navigate(Routes.PROFILE) },
+        onSeeProfile = { navController.navigate(Routes.beneficiaryProfile(beneficiaryId)) },
+        onStartVisit = {
+          // Pre-Visit screen is a dead end for back-nav — replace it so
+          // system back from the Visit Form returns to Beneficiary Profile,
+          // not back into this read-only screen.
+          navController.navigate(Routes.visitForm(beneficiaryId, visitId, label)) {
+            popUpTo(Routes.PRE_VISIT_HEALTH_HISTORY) { inclusive = true }
+          }
+        },
+      )
+    }
+    composable(
+      route = Routes.VISIT_FORM,
+      arguments = listOf(
+        navArgument("beneficiaryId") { type = NavType.StringType },
+        navArgument("visitId") { type = NavType.StringType },
+        navArgument("label") { type = NavType.StringType },
+      ),
+    ) {
+      VisitFormScreen(
         onBack = { navController.popBackStack() },
         onProfile = { navController.navigate(Routes.PROFILE) },
       )

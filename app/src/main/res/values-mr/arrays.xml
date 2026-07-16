@@ -218,4 +218,124 @@
     <item>नाही</item>
     <item>मुले नाहीत</item>
   </string-array>
+
+  <!-- ANC Visit Form (CR-016b) — MR translations flagged for native QA; order matches EN, NEVER reorder. -->
+  <string-array name="visit_form_not_met_reason_options">
+    <item>महिला स्थलांतरित, स्थिती ज्ञात</item>
+    <item>महिला स्थलांतरित, स्थिती अज्ञात</item>
+    <item>महिला उपलब्ध नाही (बाहेर गेली, रुग्णालयात दाखल)</item>
+    <item>महिला तपासणीसाठी व्यस्त</item>
+    <item>इतर</item>
+  </string-array>
+  <string-array name="visit_form_danger_sign_options">
+    <item>तीव्र पोटदुखी</item>
+    <item>योनीतून रक्तस्त्राव</item>
+    <item>असामान्य योनी स्त्राव (दुर्गंधीयुक्त आणि पिवळा)</item>
+    <item>24 तासांपेक्षा जास्त उलट्या</item>
+    <item>फेफरे</item>
+    <item>तीव्र डोकेदुखी, अंधुक दिसणे</item>
+    <item>चक्कर येणे</item>
+    <item>श्वास घेण्यास त्रास</item>
+    <item>धडधडणे</item>
+    <item>वारंवार लघवी होणे</item>
+    <item>योनीला खाज</item>
+    <item>लघवी करताना जळजळ</item>
+    <item>कोणतीही असामान्य लक्षणे नाहीत</item>
+  </string-array>
+  <string-array name="visit_form_palm_nails_options">
+    <item>फिकट</item>
+    <item>पिवळे</item>
+    <item>सामान्य</item>
+  </string-array>
+  <string-array name="visit_form_swelling_options">
+    <item>सूज नाही</item>
+    <item>हातांना सूज</item>
+    <item>पायांना सूज</item>
+    <item>चेहऱ्याला सूज</item>
+  </string-array>
+  <string-array name="visit_form_dehydration_options">
+    <item>कोरडी जीभ</item>
+    <item>त्वचेची लवचिकता कमी होणे</item>
+    <item>नाही</item>
+  </string-array>
+  <string-array name="visit_form_urine_test_options">
+    <item>सामान्य</item>
+    <item>संसर्ग</item>
+    <item>साखर</item>
+    <item>प्रथिने</item>
+  </string-array>
+  <string-array name="visit_form_fetal_movements_options">
+    <item>अनुपस्थित</item>
+    <item>उपस्थित</item>
+  </string-array>
+  <string-array name="visit_form_food_options">
+    <item>तृणधान्ये (नाचणी, बाजरी, ज्वारी, गहू, तांदूळ इ.)</item>
+    <item>कडधान्ये (तूर डाळ, चणा, मूग इ.)</item>
+    <item>सुका मेवा व बिया (शेंगदाणे, बदाम इ.)</item>
+    <item>दुग्धजन्य पदार्थ (पनीर, दही, ताक इ.)</item>
+    <item>फळे</item>
+    <item>भाज्या</item>
+    <item>हिरव्या पालेभाज्या</item>
+    <item>व्हिटॅमिन ए समृद्ध फळे व भाज्या (आंबा, पपई, भोपळा, गाजर)</item>
+    <item>अंडी</item>
+    <item>पोल्ट्री/मांस/मासे</item>
+  </string-array>
+  <string-array name="visit_form_ifa_reason_options">
+    <item>घेण्यास विसरले</item>
+    <item>दुष्परिणामांमुळे (बद्धकोष्ठता, काळी विष्ठा, मळमळ)</item>
+    <item>IFA बद्दल गैरसमज</item>
+    <item>गोळ्या उपलब्ध नाहीत</item>
+    <item>इतर</item>
+  </string-array>
+  <string-array name="visit_form_delivery_place_options">
+    <item>सिव्हिल हॉस्पिटल</item>
+    <item>उपजिल्हा रुग्णालय</item>
+    <item>ग्रामीण रुग्णालय</item>
+    <item>प्राथमिक आरोग्य केंद्र</item>
+    <item>उपकेंद्र</item>
+    <item>खाजगी रुग्णालय</item>
+    <item>इतर</item>
+  </string-array>
+  <string-array name="visit_form_sickle_cell_options">
+    <item>तपासणी केली, निकाल सामान्य</item>
+    <item>सिकल सेल ट्रेट (वाहक)</item>
+    <item>सिकल सेल आजार</item>
+    <item>आधी तपासणी केली पण निकाल उपलब्ध नाही</item>
+    <item>अद्याप तपासणी केलेली नाही</item>
+    <item>माहीत नाही</item>
+  </string-array>
+  <string-array name="visit_form_family_planning_options">
+    <item>कंडोम</item>
+    <item>तोंडावाटे गर्भनिरोधक गोळ्या (माला-एन किंवा इतर)</item>
+    <item>आपत्कालीन गर्भनिरोधक गोळ्या</item>
+    <item>इंजेक्शन गर्भनिरोधक (अंतरा)</item>
+    <item>IUCD (कॉपर-टी)</item>
+    <item>स्तनपान अमेनोरिया पद्धत (LAM)</item>
+    <item>सुरक्षित कालावधी, कॅलेंडर पद्धत</item>
+    <item>विथड्रॉवल पद्धत</item>
+    <item>महिला नसबंदी</item>
+    <item>पुरुष नसबंदी</item>
+    <item>कोणतीही गर्भनिरोधक पद्धत वापरत नाही</item>
+  </string-array>
+  <string-array name="visit_form_usg_type_options">
+    <item>नियमित USG</item>
+    <item>अ‍ॅनोमली स्कॅन</item>
+    <item>डॉपलर USG</item>
+    <item>इतर</item>
+  </string-array>
+  <string-array name="visit_form_usg_finding_options">
+    <item>असामान्य</item>
+    <item>सामान्य</item>
+  </string-array>
+  <string-array name="visit_form_counselling_options">
+    <item>प्रसूती तयारी आणि गुंतागुंत सज्जता</item>
+    <item>गरोदरपणातील पोषण</item>
+    <item>IFA आणि कॅल्शियम पालन</item>
+    <item>धोक्याच्या लक्षणांबद्दल जागरूकता</item>
+    <item>विश्रांती आणि कामाचा भार कमी करणे</item>
+    <item>स्वच्छता पद्धती</item>
+    <item>संस्थात्मक प्रसूतीचे फायदे</item>
+    <item>मादक पदार्थांच्या सेवनाचे धोके</item>
+    <item>कुटुंब नियोजन पद्धती</item>
+  </string-array>
 </resources>

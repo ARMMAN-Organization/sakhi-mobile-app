@@ -41,6 +41,13 @@ data class ProfileVisit(
   val startable: Boolean = false,
   val referralIncomplete: Boolean = false,
   val riskLabel: String? = null,
+  /**
+   * FR-S-4.6: whether at least one prior completed visit exists, so the
+   * Pre-Visit Health History screen has data to show. False on a
+   * beneficiary's actual first visit — that case skips straight to the
+   * Visit Form. Only meaningful when [action] is START_VISIT or FILL_FORM.
+   */
+  val hasPreVisitHistory: Boolean = false,
 )
 
 /**

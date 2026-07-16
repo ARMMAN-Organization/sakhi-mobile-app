@@ -20,15 +20,15 @@
 
   <!-- Login -->
   <string name="login_title">Login</string>
-  <string name="login_user_id_label">User ID</string>
-  <string name="login_user_id_placeholder">Enter User ID</string>
+  <string name="login_username_label">Username</string>
+  <string name="login_username_placeholder">Enter Username</string>
   <string name="login_password_label">Password</string>
   <string name="login_password_placeholder">Enter Password</string>
   <string name="login_button">Login</string>
   <string name="login_logo_content_description">Arogya Sakhi — Pregnancy and Child Care</string>
-  <string name="login_error_user_id_required">Please enter your User ID.</string>
+  <string name="login_error_username_required">Please enter your Username.</string>
   <string name="login_error_password_required">Please enter your password.</string>
-  <string name="login_error_invalid_credentials">User ID or password is incorrect. Please try again.</string>
+  <string name="login_error_invalid_credentials">Username or password is incorrect. Please try again.</string>
   <string name="login_error_generic">Something went wrong. Please try again.</string>
   <string name="login_logout_success">You have logged out successfully</string>
 
@@ -315,4 +315,146 @@
   <string name="enrollment_hh_error_dead">Cannot exceed living children</string>
   <string name="enrollment_hh_error_gravida_total">Gravida must equal Para + Abortions + 1</string>
   <string name="enrollment_summary_health_history">Health History</string>
+
+  <!-- Pre-Visit Health History (FR-S-4.6, CR-016a) -->
+  <string name="previsit_back_title">See Beneficiaries</string>
+  <string name="previsit_summary_title">Summary</string>
+  <string name="previsit_name_age">%1$s | %2$s</string>
+  <string name="previsit_village_pada">Village | Pada : %1$s | %2$s</string>
+  <string name="previsit_husband_name">Husband\'s Name : %1$s</string>
+  <string name="previsit_mobile_no">Mobile No : %1$s</string>
+  <string name="previsit_risk_factor_title">%1$s - %2$s</string>
+  <string name="previsit_see_profile">See Profile</string>
+  <string name="previsit_start_visit">Start Visit</string>
+  <string name="previsit_error_load">We couldn\'t load this beneficiary\'s health history. Please try again.</string>
+
+  <!-- ANC Visit Form (CR-016) -->
+  <string name="visit_form_coming_soon">This feature is coming soon</string>
+  <string name="visit_form_back_title">Visit Tracker</string>
+  <string name="visit_form_title">%1$s Form</string>
+  <string name="visit_form_tab_visit_data">Visit Data</string>
+  <string name="visit_form_tab_summary">Summary</string>
+  <string name="visit_form_tab_health_info">Health\nInfo</string>
+  <string name="visit_form_tab_referral">Referral</string>
+  <string name="visit_form_subtab_tests">Tests</string>
+  <string name="visit_form_subtab_symptoms">Symptoms</string>
+  <string name="visit_form_subtab_history">History</string>
+  <string name="visit_form_step_pending">This section is coming soon</string>
+  <string name="visit_form_back">Back</string>
+  <string name="visit_form_next_summary">Summary</string>
+  <string name="visit_form_next_health_info">Health Info</string>
+  <string name="visit_form_next_referral">Referral</string>
+  <string name="visit_form_submit">Submit</string>
+  <string name="visit_form_exit_title">Leave visit form?</string>
+  <string name="visit_form_exit_message">This visit has no partial-save — all entries will be lost if you leave now.</string>
+  <string name="visit_form_exit_cancel">Stay</string>
+  <string name="visit_form_exit_confirm">Leave</string>
+
+  <!-- ANC Visit Form — Visit Data fields (CR-016b) -->
+  <string name="visit_form_error_load">We couldn\'t load this visit\'s data. Please try again.</string>
+  <string name="visit_form_vd_banner">Complete all necessary fields</string>
+  <string name="visit_form_error_required">This field is required</string>
+  <string name="visit_form_error_range">Enter a value in the valid range</string>
+  <string name="visit_form_error_date_future">Date cannot be in the future</string>
+  <string name="visit_form_error_date_too_early">Date must be after LMP / the prior dose date</string>
+  <string name="visit_form_hb_confirm_prompt">This differs a lot from the last visit. Please confirm the value or redo the test.</string>
+  <string name="visit_form_hb_confirm_action">Confirm value</string>
+
+  <string name="visit_form_critical_danger_sign">Danger sign detected — stop the visit and accompany the beneficiary to a health facility immediately.</string>
+  <string name="visit_form_critical_hypertension">Severe high blood pressure with symptoms — stop the visit and accompany the beneficiary to a health facility immediately.</string>
+  <string name="visit_form_critical_anaemia">Severe anaemia with dizziness — stop the visit and accompany the beneficiary to a health facility immediately.</string>
+  <string name="visit_form_critical_hypoglycaemia">Very low blood sugar with symptoms — stop the visit and accompany the beneficiary to a health facility immediately.</string>
+  <string name="visit_form_critical_title">Immediate Urgency</string>
+  <string name="visit_form_critical_close">Close and end visit</string>
+
+  <!-- Visit tracking (Q1-4) -->
+  <string name="visit_form_vd_section_tracking">Visit Tracking</string>
+  <string name="visit_form_vd_visit_date">Date of visit</string>
+  <string name="visit_form_vd_met_beneficiary">Have you been able to meet the beneficiary for the visit?</string>
+  <string name="visit_form_vd_not_met_reason">If no, mention reasons</string>
+
+  <!-- Pregnancy dating (Q5-11) -->
+  <string name="visit_form_vd_section_dating">Pregnancy Dating</string>
+  <string name="visit_form_vd_rch_number">RCH Number</string>
+  <string name="visit_form_vd_lmp">LMP</string>
+  <string name="visit_form_vd_has_sonography">Do you have a sonography report to confirm the LMP date?</string>
+  <string name="visit_form_vd_sonography_upload">Upload sonography report image</string>
+  <string name="visit_form_vd_gestational_age">Current gestational age (weeks)</string>
+  <string name="visit_form_vd_edd">EDD</string>
+
+  <!-- Tests sub-tab: anthropometry & diagnostics (Q12-16, Q23-32) -->
+  <string name="visit_form_vd_height">Height (cm)</string>
+  <string name="visit_form_vd_weight">Current weight (kg)</string>
+  <string name="visit_form_vd_bmi">BMI</string>
+  <string name="visit_form_vd_muac">Mid-upper arm circumference (cm)</string>
+  <string name="visit_form_vd_bp_systolic">Blood pressure — systolic</string>
+  <string name="visit_form_vd_bp_diastolic">Blood pressure — diastolic</string>
+  <string name="visit_form_vd_temperature">Body temperature (°F)</string>
+  <string name="visit_form_vd_hemoglobin">Haemoglobin (g/dl)</string>
+  <string name="visit_form_vd_last_meal">Hours since last meal</string>
+  <string name="visit_form_vd_blood_glucose">Blood glucose (mg/dl)</string>
+  <string name="visit_form_vd_urine_test">Urine test</string>
+  <string name="visit_form_vd_fetal_movements">Fetal movements</string>
+  <string name="visit_form_vd_fetal_heart_rate">Fetal heart rate</string>
+  <string name="visit_form_vd_fundal_height">Fundal height (cm)</string>
+  <string name="visit_form_vd_count_placeholder">Enter value</string>
+
+  <!-- Symptoms sub-tab (Q17-22) -->
+  <string name="visit_form_vd_danger_signs">Have you been experiencing any of these since the last visit?</string>
+  <string name="visit_form_vd_palm_nails">Check palm and nails</string>
+  <string name="visit_form_vd_sclera">Check sclera (eyes)</string>
+  <string name="visit_form_vd_skin">Check skin</string>
+  <string name="visit_form_vd_swelling">Swelling</string>
+  <string name="visit_form_vd_dehydration">Dehydration</string>
+
+  <!-- History sub-tab: Td doses (Q33) -->
+  <string name="visit_form_vd_section_supplements">Supplements &amp; Adherence</string>
+  <string name="visit_form_vd_td">Vaccination status (Td)</string>
+  <string name="visit_form_vd_td_none">None received yet</string>
+  <string name="visit_form_vd_td1">Td-1</string>
+  <string name="visit_form_vd_td2">Td-2</string>
+  <string name="visit_form_vd_td_booster">Td-Booster</string>
+  <string name="visit_form_vd_td_date_placeholder">Select dose date</string>
+
+  <!-- History sub-tab: food & IFA (Q34-39) -->
+  <string name="visit_form_vd_food_consumed">Which of these food stuff have you consumed in the last 24 hours?</string>
+  <string name="visit_form_vd_food_avoided">Which of these food stuff do you avoid eating?</string>
+  <string name="visit_form_vd_taking_ifa">Are you taking IFA tablets?</string>
+  <string name="visit_form_vd_ifa_tablets">How many IFA tablets did you consume since last visit?</string>
+  <string name="visit_form_vd_ifa_reasons">If no, reasons for non-consumption of IFA tablets</string>
+  <string name="visit_form_vd_calcium">Calcium tablets received and consumed?</string>
+
+  <!-- History sub-tab: birth prep & mental health (Q40-56) -->
+  <string name="visit_form_vd_section_birth_prep">Birth Preparedness &amp; Mental Health</string>
+  <string name="visit_form_vd_visited_facility">Have you visited a health facility since my last visit?</string>
+  <string name="visit_form_vd_last_anc_date">Enter date of latest ANC visit at the health facility</string>
+  <string name="visit_form_vd_delivery_place">Advised place of delivery</string>
+  <string name="visit_form_vd_sickle_cell">Sickle cell</string>
+  <string name="visit_form_vd_family_planning">Which family planning method does the woman plan to use after delivery?</string>
+  <string name="visit_form_vd_feeling_stressed">Feeling sad, anxious, or stressed most days?</string>
+  <string name="visit_form_vd_family_support">Adequate family support during pregnancy?</string>
+  <string name="visit_form_vd_planning_migration">Are you going to migrate to another place during pregnancy?</string>
+  <string name="visit_form_vd_usg_done">Have you done USG since last visit?</string>
+  <string name="visit_form_vd_usg_date">Date of USG</string>
+  <string name="visit_form_vd_usg_type">Type of USG</string>
+  <string name="visit_form_vd_usg_finding">USG finding</string>
+  <string name="visit_form_vd_transport_shared">Has the transport contact been shared with and saved by the family?</string>
+  <string name="visit_form_vd_funds_arranged">Has the family arranged funds for delivery/emergency expenses?</string>
+  <string name="visit_form_vd_birth_companion">Has a birth companion been identified for delivery/emergency?</string>
+  <string name="visit_form_vd_remarks">Remarks</string>
+  <string name="visit_form_vd_remarks_placeholder">Optional notes</string>
+  <string name="visit_form_vd_section_counselling">Counselling Checklist</string>
+  <string name="visit_form_vd_counselling">As a Sakhi, have you guided the beneficiary on the following?</string>
+
+  <string name="visit_form_take_photo">Take photo</string>
+  <string name="visit_form_retake_photo">Retake photo</string>
+
+  <!-- ANC Visit Form — Summary tab (CR-016c) -->
+  <string name="visit_form_vs_risk_identified">Risk Identified</string>
+  <string name="visit_form_vs_no_conditions">No known conditions</string>
+  <string name="visit_form_vs_edit">Edit</string>
+  <string name="visit_form_vs_tests_title">Tests</string>
+  <string name="visit_form_vs_symptoms_title">Symptoms</string>
+  <string name="visit_form_vs_bp">Blood Pressure</string>
+  <string name="visit_form_vs_reference_range">(%1$s)</string>
 </resources>
