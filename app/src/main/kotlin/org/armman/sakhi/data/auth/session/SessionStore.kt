@@ -3,6 +3,7 @@ package org.armman.sakhi.data.auth.session
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import org.armman.sakhi.data.auth.UserSession
+import java.time.Clock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,6 +30,7 @@ private data class PersistedSession(
 @Singleton
 class SessionStore @Inject constructor(
   private val store: SecureKeyValueStore,
+  private val clock: Clock = Clock.systemUTC(),
 ) {
   private val gson = Gson()
 
@@ -65,6 +67,18 @@ class SessionStore @Inject constructor(
       refreshToken = persisted.refreshToken,
       accessTokenExpiresAtEpochSeconds = persisted.accessTokenExpiresAtEpochSeconds,
     )
+  }
+
+  /**
+   * Whether there is a stored session whose access token has NOT yet expired — the correct
+   * signal for "skip the login form". A stored-but-expired session must NOT bypass login: the
+   * app would otherwise show the dashboard on an expired token until the first authenticated
+   * call is rejected by the server. Returns false for no session, an unreadable session, or an
+   * expired one.
+   */
+  fun hasValidSession(): Boolean {
+    val session = readSession() ?: return false
+    return session.accessTokenExpiresAtEpochSeconds > clock.instant().epochSecond
   }
 
   /** Normal logout. Intentionally does not clear [OfflineCredentialCache]. */

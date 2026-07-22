@@ -64,13 +64,23 @@ class JwtClaimsDecoder @Inject constructor() {
     } catch (e: com.google.gson.JsonSyntaxException) {
       throw JwtDecodeException("Access token payload is not valid JSON.")
     }
+    // Fail fast on missing REQUIRED claims rather than defaulting them: an empty subjectId or a
+    // 0 expiry would silently produce a misleading session (e.g. an already-"expired" token, or
+    // a session with no identity) instead of surfacing a clearly malformed token. `iat` is
+    // informational only, so it keeps its lenient default.
+    val subjectId = raw.subjectId?.takeIf { it.isNotBlank() }
+      ?: throw JwtDecodeException("Access token is missing the required `sub` claim.")
+    val roles = raw.roles
+      ?: throw JwtDecodeException("Access token is missing the required `roles` claim.")
+    val expiresAtEpochSeconds = raw.expiresAtEpochSeconds
+      ?: throw JwtDecodeException("Access token is missing the required `exp` claim.")
     return JwtClaims(
-      subjectId = raw.subjectId.orEmpty(),
-      roles = raw.roles.orEmpty(),
+      subjectId = subjectId,
+      roles = roles,
       projectId = raw.projectId,
       geographyUnitId = raw.geographyUnitId,
       issuedAtEpochSeconds = raw.issuedAtEpochSeconds ?: 0L,
-      expiresAtEpochSeconds = raw.expiresAtEpochSeconds ?: 0L,
+      expiresAtEpochSeconds = expiresAtEpochSeconds,
     )
   }
 

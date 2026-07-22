@@ -89,8 +89,18 @@ class RemoteAuthRepository @Inject constructor(
       refreshToken = data.refreshToken,
       accessTokenExpiresAtEpochSeconds = claims.expiresAtEpochSeconds,
     )
-    sessionStore.saveSession(session)
-    offlineCredentialCache.store(request.username, request.password.toCharArray(), session)
+    // These two writes must land together: a persisted session with no matching offline cache
+    // would let "stay logged in" work but silently break offline re-login after a logout. Write
+    // the offline cache FIRST (it's the one that's hard to reconstruct), then the session; if
+    // either throws, roll back both so we never persist a half-written auth state.
+    try {
+      offlineCredentialCache.store(request.username, request.password.toCharArray(), session)
+      sessionStore.saveSession(session)
+    } catch (e: Exception) {
+      runCatching { sessionStore.clearSession() }
+      runCatching { offlineCredentialCache.clear() }
+      return LoginResult.Failure(LoginFailureReason.UNKNOWN)
+    }
     return LoginResult.Success(session)
   }
 

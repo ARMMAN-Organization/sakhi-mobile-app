@@ -3,7 +3,6 @@ package org.armman.sakhi.data.auth
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -23,6 +22,18 @@ class JwtClaimsDecoderTest {
   private val tokenWithoutRolesKey =
     "eyJhbGciOiAiUlMyNTYifQ." +
       "eyJzdWIiOiAidGVzdC1zdWIiLCAicHJvamVjdElkIjogbnVsbCwgImdlb2dyYXBoeVVuaXRJZCI6IG51bGwsICJpYXQiOiAxMDAwLCAiZXhwIjogMjAwMH0." +
+      "sig"
+  private val tokenWithoutSubKey =
+    "eyJhbGciOiAiUlMyNTYifQ." +
+      "eyJyb2xlcyI6IFsiU0FLSEkiXSwgInByb2plY3RJZCI6IG51bGwsICJnZW9ncmFwaHlVbml0SWQiOiBudWxsLCAiaWF0IjogMTAwMCwgImV4cCI6IDIwMDB9." +
+      "sig"
+  private val tokenWithBlankSub =
+    "eyJhbGciOiAiUlMyNTYifQ." +
+      "eyJzdWIiOiAiIiwgInJvbGVzIjogWyJTQUtISSJdLCAicHJvamVjdElkIjogbnVsbCwgImdlb2dyYXBoeVVuaXRJZCI6IG51bGwsICJpYXQiOiAxMDAwLCAiZXhwIjogMjAwMH0." +
+      "sig"
+  private val tokenWithoutExpKey =
+    "eyJhbGciOiAiUlMyNTYifQ." +
+      "eyJzdWIiOiAidGVzdC1zdWIiLCAicm9sZXMiOiBbIlNBS0hJIl0sICJwcm9qZWN0SWQiOiBudWxsLCAiZ2VvZ3JhcGh5VW5pdElkIjogbnVsbCwgImlhdCI6IDEwMDB9." +
       "sig"
 
   @Before
@@ -52,10 +63,35 @@ class JwtClaimsDecoderTest {
   }
 
   @Test
-  fun `roles missing entirely yields empty list, no crash`() { // JW-3
-    val claims = decoder.decode(tokenWithoutRolesKey)
+  fun `roles claim missing entirely fails fast`() { // JW-3
+    // A token with no `roles` claim must not decode to an empty-role session (which would then
+    // fail the SAKHI role check with a misleading WRONG_ROLE) — it's a malformed token.
+    assertThrows(JwtDecodeException::class.java) {
+      decoder.decode(tokenWithoutRolesKey)
+    }
+  }
 
-    assertTrue(claims.roles.isEmpty())
+  @Test
+  fun `sub claim missing fails fast`() { // JW-7
+    assertThrows(JwtDecodeException::class.java) {
+      decoder.decode(tokenWithoutSubKey)
+    }
+  }
+
+  @Test
+  fun `blank sub claim fails fast`() { // JW-8
+    assertThrows(JwtDecodeException::class.java) {
+      decoder.decode(tokenWithBlankSub)
+    }
+  }
+
+  @Test
+  fun `exp claim missing fails fast`() { // JW-9
+    // Defaulting a missing exp to 0 would mark the token already-expired and silently bypass
+    // "stay logged in" forever — surface it as a malformed token instead.
+    assertThrows(JwtDecodeException::class.java) {
+      decoder.decode(tokenWithoutExpKey)
+    }
   }
 
   @Test

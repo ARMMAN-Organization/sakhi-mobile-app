@@ -7,9 +7,15 @@ package org.armman.sakhi.data.auth.session
 class FakeSecureKeyValueStore : SecureKeyValueStore {
   private val values = mutableMapOf<String, String>()
 
+  /** Test-only fault injection: when set, a `putString` for this key throws instead of writing,
+   * to simulate a persistence failure mid-way through a multi-write flow (e.g. the atomic
+   * session + offline-cache write in RemoteAuthRepository). */
+  var failOnPutKey: String? = null
+
   override fun getString(key: String): String? = values[key]
 
   override fun putString(key: String, value: String) {
+    if (key == failOnPutKey) throw RuntimeException("Simulated persistence failure for key=$key")
     values[key] = value
   }
 

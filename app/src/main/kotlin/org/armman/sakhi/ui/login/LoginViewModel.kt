@@ -37,9 +37,10 @@ class LoginViewModel @Inject constructor(
   private val sessionStore: SessionStore,
 ) : ViewModel() {
 
-  // A valid "stay logged in" session skips the form entirely — LoginScreen treats
-  // loginSucceeded the same whether it came from this check or a fresh submit.
-  private val _uiState = MutableStateFlow(LoginUiState(loginSucceeded = sessionStore.readSession() != null))
+  // A valid, unexpired "stay logged in" session skips the form entirely — LoginScreen treats
+  // loginSucceeded the same whether it came from this check or a fresh submit. An expired
+  // session does NOT bypass login (see SessionStore.hasValidSession).
+  private val _uiState = MutableStateFlow(LoginUiState(loginSucceeded = sessionStore.hasValidSession()))
   val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
   fun onUsernameChanged(value: String) {

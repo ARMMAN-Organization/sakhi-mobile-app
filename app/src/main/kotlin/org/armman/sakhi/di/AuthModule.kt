@@ -15,6 +15,7 @@ import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.connectivity.AndroidConnectivityChecker
 import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import retrofit2.Retrofit
+import java.time.Clock
 import javax.inject.Singleton
 
 /** Binds the real auth-service-backed implementation and its collaborators. */
@@ -41,5 +42,11 @@ abstract class AuthModule {
     @Provides
     @Singleton
     fun provideAuthApi(retrofit: Retrofit): AuthApi = retrofit.create(AuthApi::class.java)
+
+    /** System UTC clock for session-expiry checks. Injected (rather than called statically) so
+     * expiry logic stays unit-testable with a fixed clock. */
+    @Provides
+    @Singleton
+    fun provideClock(): Clock = Clock.systemUTC()
   }
 }

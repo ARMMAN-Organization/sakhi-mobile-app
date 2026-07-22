@@ -21,12 +21,19 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LoginViewModelTest {
   private val dispatcher = StandardTestDispatcher()
 
-  private fun sampleSession() = UserSession(
+  // Fixed clock so "skip the form" expiry checks are deterministic regardless of wall time.
+  private val nowEpochSeconds = 1_784_189_546L
+  private val fixedClock: Clock = Clock.fixed(Instant.ofEpochSecond(nowEpochSeconds), ZoneOffset.UTC)
+
+  private fun sampleSession(expiresAtEpochSeconds: Long = nowEpochSeconds + 3600) = UserSession(
     username = "test.sakhi",
     subjectId = "sub-1",
     roles = listOf("SAKHI"),
@@ -34,7 +41,7 @@ class LoginViewModelTest {
     geographyUnitId = null,
     accessToken = "t",
     refreshToken = "r",
-    accessTokenExpiresAtEpochSeconds = 2000L,
+    accessTokenExpiresAtEpochSeconds = expiresAtEpochSeconds,
   )
 
   /** Controllable fake so tests never depend on any real network/session logic. */
@@ -78,7 +85,7 @@ class LoginViewModelTest {
     Dispatchers.setMain(dispatcher)
     repository = FakeAuthRepository()
     keyValueStore = FakeSecureKeyValueStore()
-    sessionStore = SessionStore(keyValueStore)
+    sessionStore = SessionStore(keyValueStore, fixedClock)
     createViewModel()
   }
 
@@ -105,6 +112,16 @@ class LoginViewModelTest {
     createViewModel() // session must be read at construction time
 
     assertTrue(viewModel.uiState.value.loginSucceeded)
+  }
+
+  @Test
+  fun `existing expired session does not skip the form`() {
+    // An expired stored session must show the login form, not silently open the dashboard on a
+    // dead token (which would only be rejected later, on the first authenticated call).
+    sessionStore.saveSession(sampleSession(expiresAtEpochSeconds = nowEpochSeconds - 1))
+    createViewModel()
+
+    assertFalse(viewModel.uiState.value.loginSucceeded)
   }
 
   @Test

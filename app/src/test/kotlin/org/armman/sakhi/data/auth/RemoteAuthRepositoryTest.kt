@@ -157,6 +157,21 @@ class RemoteAuthRepositoryTest {
   }
 
   @Test
+  fun `persistence failure rolls back both session and offline cache`() = runTest { // RA-8b
+    // Offline cache is written first, then the session; if the session write fails, neither must
+    // survive — a persisted session with no offline cache would break offline re-login silently.
+    api.response = Response.success(successBody(sakhiToken))
+    keyValueStore.failOnPutKey = "session_json"
+
+    val result = repository.login(LoginRequest("test.sakhi", "Test@1234"))
+
+    assertEquals(LoginResult.Failure(LoginFailureReason.UNKNOWN), result)
+    assertNull(sessionStore.readSession())
+    assertFalse(offlineCache.verify("test.sakhi", "Test@1234".toCharArray()))
+    assertFalse(offlineCache.hasAnyEntry())
+  }
+
+  @Test
   fun `login rejected when roles does not contain SAKHI`() = runTest { // RA-9
     api.response = Response.success(successBody(supervisorToken))
 
@@ -221,6 +236,17 @@ class RemoteAuthRepositoryTest {
   @Test
   fun `logout does not clear the cached me profile - same Sakhi needs it back if she re-logs offline`() =
     runTest {
+      // Seed the cached profile for the SAME Sakhi who logs in, so clearIfDifferentUser is a
+      // genuine no-op — the default fake profile is a *different* username, which would trip the
+      // different-user guard at login and is not the scenario under test here.
+      currentUserRepository.profile = CurrentUserProfile(
+        username = "test.sakhi",
+        displayName = "Test Sakhi",
+        mobileNumber = null,
+        projectName = null,
+        cardNumber = null,
+        maskedBankAccount = null,
+      )
       api.response = Response.success(successBody(sakhiToken))
       repository.login(LoginRequest("test.sakhi", "Test@1234"))
 

@@ -46,6 +46,19 @@ private data class CachedCredentialEntry(
 )
 
 private const val KEY_ENTRY = "offline_cred_entry"
+
+// PBKDF2 parameters for the offline password hash. Kept together here so the security posture is
+// reviewed and updated in one place. Rationale:
+//  - PBKDF2WithHmacSHA256: the strongest PBKDF2 variant available across all supported Android
+//    API levels without a third-party crypto dependency.
+//  - 120_000 iterations: aligned with OWASP's PBKDF2-SHA256 guidance (>= 120k); a deliberate
+//    balance between brute-force cost and the latency a field worker will tolerate at login on
+//    low-end devices. Raising this is safe (old entries just re-hash on next successful login),
+//    but must stay >= the OWASP floor.
+//  - 256-bit derived key + 16-byte random salt per entry.
+// If any of these change, existing cached entries remain verifiable only while the same values
+// are used to re-derive — a change invalidates the current offline cache until the next online
+// login re-seeds it, which is acceptable (offline re-login simply falls back to "no cache").
 private const val PBKDF2_ALGORITHM = "PBKDF2WithHmacSHA256"
 private const val ITERATIONS = 120_000
 private const val KEY_LENGTH_BITS = 256
