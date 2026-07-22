@@ -1,7 +1,5 @@
 package org.armman.sakhi.ui.enrollment.steps
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,7 +7,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +22,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import org.armman.sakhi.R
 import org.armman.sakhi.ui.components.AppTextField
+import org.armman.sakhi.ui.components.ValidationErrorBanner
 import org.armman.sakhi.ui.enrollment.HealthFieldError
 import org.armman.sakhi.ui.enrollment.HealthHistoryState
 import org.armman.sakhi.ui.enrollment.components.AppCheckboxGroup
@@ -36,7 +34,6 @@ import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG400
 import org.armman.sakhi.ui.theme.RiskHigh
-import org.armman.sakhi.ui.theme.RiskHighSurface
 import java.time.LocalDate
 
 /** Callbacks for the Health History step — flat, mirroring the VM API. */
@@ -62,6 +59,8 @@ data class HealthHistoryActions(
   val onAbortions: (String) -> Unit,
   val onStillBirths: (String) -> Unit,
   val onDeadChildren: (String) -> Unit,
+  val onHeightCm: (String) -> Unit,
+  val onWeightKg: (String) -> Unit,
   val onLastPregnancyWhen: (Int) -> Unit,
   val onDeliveryComplication: (Int) -> Unit,
   val onLastDeliveryDuration: (Int) -> Unit,
@@ -189,6 +188,20 @@ fun HealthHistoryStep(
     CountField(stringResource(R.string.enrollment_hh_abortions), state.abortions, actions.onAbortions, errorText(state.abortionsError))
     CountField(stringResource(R.string.enrollment_hh_still_births), state.stillBirths, actions.onStillBirths, errorText(state.stillBirthsError))
     CountField(stringResource(R.string.enrollment_hh_dead_children), state.deadChildren, actions.onDeadChildren, errorText(state.deadChildrenError))
+    // Not in the Excel spec — collected only for the /beneficiaries API's BMI calculation.
+    // Optional: blank is valid, so no banner-driven "required" state, only range errors.
+    OptionalMeasurementField(
+      label = stringResource(R.string.enrollment_hh_height),
+      value = state.heightCm,
+      onChange = actions.onHeightCm,
+      error = errorText(state.heightCmError),
+    )
+    OptionalMeasurementField(
+      label = stringResource(R.string.enrollment_hh_weight),
+      value = state.weightKg,
+      onChange = actions.onWeightKg,
+      error = errorText(state.weightKgError),
+    )
 
     // --- Last Pregnancy (Q51–57), only if Gravida > 1 ---
     if (state.showLastPregnancy) {
@@ -292,7 +305,7 @@ fun HealthHistoryStep(
       minLines = 3,
     )
 
-    if (banner) HealthValidationBanner()
+    if (banner) ValidationErrorBanner(errors = state.validationErrors)
   }
 }
 
@@ -317,6 +330,18 @@ private fun CountField(label: String, value: String, onChange: (String) -> Unit,
     placeholder = stringResource(R.string.enrollment_hh_count_placeholder),
     errorText = error,
     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+  )
+}
+
+@Composable
+private fun OptionalMeasurementField(label: String, value: String, onChange: (String) -> Unit, error: String?) {
+  AppTextField(
+    value = value,
+    onValueChange = onChange,
+    label = label,
+    placeholder = stringResource(R.string.enrollment_hh_height_weight_placeholder),
+    errorText = error,
+    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
   )
 }
 
@@ -439,32 +464,6 @@ private fun TdCheckbox(label: String, checked: Boolean, onChecked: (Boolean) -> 
   }
 }
 
-@Composable
-private fun HealthValidationBanner() {
-  val shape = RoundedCornerShape(Dimens.TileRadius)
-  Row(
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing),
-    modifier = Modifier
-      .fillMaxWidth()
-      .background(RiskHighSurface, shape)
-      .border(1.dp, RiskHigh, shape)
-      .padding(horizontal = Dimens.ItemSpacing, vertical = Dimens.ChipSpacing),
-  ) {
-    Icon(
-      painter = painterResource(R.drawable.ic_warning_circle),
-      contentDescription = null,
-      tint = RiskHigh,
-      modifier = Modifier.size(20.dp),
-    )
-    Text(
-      text = stringResource(R.string.enrollment_pi_banner),
-      style = MaterialTheme.typography.titleMedium,
-      color = RiskHigh,
-    )
-  }
-}
-
 // --- Helpers -----------------------------------------------------------------
 
 @Composable
@@ -479,6 +478,8 @@ private fun errorText(error: HealthFieldError?): String? = when (error) {
   HealthFieldError.ABORTIONS_EXCEED_GRAVIDA -> stringResource(R.string.enrollment_hh_error_abortions)
   HealthFieldError.DEAD_EXCEEDS_LIVING -> stringResource(R.string.enrollment_hh_error_dead)
   HealthFieldError.GRAVIDA_TOTAL_MISMATCH -> stringResource(R.string.enrollment_hh_error_gravida_total)
+  HealthFieldError.HEIGHT_RANGE -> stringResource(R.string.enrollment_hh_error_height)
+  HealthFieldError.WEIGHT_RANGE -> stringResource(R.string.enrollment_hh_error_weight)
 }
 
 @Composable

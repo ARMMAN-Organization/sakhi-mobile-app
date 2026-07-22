@@ -7,7 +7,9 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import org.armman.sakhi.data.auth.AuthApi
 import org.armman.sakhi.data.auth.AuthRepository
+import org.armman.sakhi.data.auth.CurrentUserRepository
 import org.armman.sakhi.data.auth.RemoteAuthRepository
+import org.armman.sakhi.data.auth.RemoteCurrentUserRepository
 import org.armman.sakhi.data.auth.session.EncryptedSharedPreferencesStore
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.connectivity.AndroidConnectivityChecker
@@ -22,6 +24,10 @@ abstract class AuthModule {
   @Binds
   @Singleton
   abstract fun bindAuthRepository(impl: RemoteAuthRepository): AuthRepository
+
+  @Binds
+  @Singleton
+  abstract fun bindCurrentUserRepository(impl: RemoteCurrentUserRepository): CurrentUserRepository
 
   @Binds
   @Singleton

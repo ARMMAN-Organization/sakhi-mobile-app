@@ -56,6 +56,8 @@ fun EnrollmentUiState.toEnrollmentRecord(submittedAt: Instant = Instant.now()): 
       photoUri = consent.photoUri,
     ),
     healthHistory = healthHistory.toSnapshot(),
+    heightCm = healthHistory.heightCm.toDoubleOrNull(),
+    weightKg = healthHistory.weightKg.toDoubleOrNull(),
     submittedAt = submittedAt,
   )
 }

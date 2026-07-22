@@ -12,3 +12,7 @@ captures/
 .DS_Store
 .kotlin/
 .fuse_hidden*
+
+# Runtime API debug logs (ApiFileLoggingInterceptor)
+api-calls.jsonl
+api-calls.log

@@ -29,6 +29,9 @@ class RemoteAuthRepositoryTest {
       exceptionToThrow?.let { throw it }
       return response!!
     }
+
+    // Unused by this test class — RemoteCurrentUserRepositoryTest covers `/me` on its own.
+    override suspend fun getMe() = throw NotImplementedError("unused")
   }
 
   // A real, valid-shape access token: {sub:"sub-1", roles:["SAKHI"], projectId:null,
@@ -47,6 +50,7 @@ class RemoteAuthRepositoryTest {
   private lateinit var keyValueStore: FakeSecureKeyValueStore
   private lateinit var sessionStore: SessionStore
   private lateinit var offlineCache: OfflineCredentialCache
+  private lateinit var currentUserRepository: FakeCurrentUserRepository
   private lateinit var repository: RemoteAuthRepository
 
   @Before
@@ -56,7 +60,15 @@ class RemoteAuthRepositoryTest {
     keyValueStore = FakeSecureKeyValueStore()
     sessionStore = SessionStore(keyValueStore)
     offlineCache = OfflineCredentialCache(keyValueStore)
-    repository = RemoteAuthRepository(api, JwtClaimsDecoder(), sessionStore, offlineCache, connectivity)
+    currentUserRepository = FakeCurrentUserRepository()
+    repository = RemoteAuthRepository(
+      api,
+      JwtClaimsDecoder(),
+      sessionStore,
+      offlineCache,
+      connectivity,
+      currentUserRepository,
+    )
   }
 
   private fun successBody(accessToken: String) =
@@ -204,5 +216,46 @@ class RemoteAuthRepositoryTest {
     repository.logout()
 
     assertNull(sessionStore.readSession())
+  }
+
+  @Test
+  fun `logout does not clear the cached me profile - same Sakhi needs it back if she re-logs offline`() =
+    runTest {
+      api.response = Response.success(successBody(sakhiToken))
+      repository.login(LoginRequest("test.sakhi", "Test@1234"))
+
+      repository.logout()
+
+      assertEquals(0, currentUserRepository.clearCallCount)
+    }
+
+  @Test
+  fun `login guards the cached me profile with the logging-in username`() = runTest {
+    api.response = Response.success(successBody(sakhiToken))
+
+    repository.login(LoginRequest("test.sakhi", "Test@1234"))
+
+    assertEquals(listOf("test.sakhi"), currentUserRepository.clearIfDifferentUserCalls)
+  }
+
+  @Test
+  fun `same Sakhi logging back in offline keeps her cached me profile`() = runTest {
+    api.response = Response.success(successBody(sakhiToken))
+    repository.login(LoginRequest("test.sakhi", "Test@1234")) // online, seeds offline cache
+    currentUserRepository.profile = CurrentUserProfile(
+      username = "test.sakhi",
+      displayName = "Test Sakhi",
+      mobileNumber = null,
+      projectName = null,
+      cardNumber = null,
+      maskedBankAccount = null,
+    )
+    repository.logout()
+    connectivity.online = false
+
+    val result = repository.login(LoginRequest("test.sakhi", "Test@1234"))
+
+    assertTrue(result is LoginResult.Success)
+    assertEquals("Test Sakhi", currentUserRepository.getProfile()?.displayName)
   }
 }

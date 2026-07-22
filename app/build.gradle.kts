@@ -70,6 +70,20 @@ dependencies {
   implementation(libs.coroutines.android)
   implementation(libs.androidx.security.crypto)
 
+  // Local persistence for the enrollment offline queue (drafts + sync status).
+  implementation(libs.room.runtime)
+  implementation(libs.room.ktx)
+  kapt(libs.room.compiler)
+
+  // Background sync for queued enrollments (connectivity-restored + periodic retry).
+  implementation(libs.work.runtime.ktx)
+  implementation(libs.hilt.work)
+  kapt(libs.androidx.hilt.compiler)
+
   testImplementation(libs.junit)
   testImplementation(libs.coroutines.test)
+  // Test-only: lets AuthInterceptorTest assert on real request headers without hand-faking
+  // OkHttp's Interceptor.Chain/Call interfaces (heavier and less trustworthy than a real client
+  // hitting a local mock server).
+  testImplementation(libs.okhttp.mockwebserver)
 }

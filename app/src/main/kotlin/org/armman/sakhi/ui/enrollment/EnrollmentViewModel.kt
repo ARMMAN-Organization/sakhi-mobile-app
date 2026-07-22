@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.armman.sakhi.data.enrollment.EnrollmentRepository
+import org.armman.sakhi.data.enrollment.EnrollmentSubmitResult
 import org.armman.sakhi.data.geography.GeographyRepository
 import org.armman.sakhi.data.profile.ProfileRepository
 import java.time.LocalDate
@@ -83,6 +84,14 @@ data class EnrollmentUiState(
   val isSubmitting: Boolean = false,
   /** Last submit failed — Summary shows a retryable error (SM-9). */
   val submitFailed: Boolean = false,
+  /** Backend-provided detail for [submitFailed] (validation/conflict message), when available —
+   * null falls back to the generic retry message. */
+  val submitErrorMessage: String? = null,
+  /** Incremented on every blocked Next attempt (Personal Info/Health History) so the screen can
+   * scroll back to the validation banner even if it was already showing — without this, tapping
+   * Next while scrolled down to the button leaves the (off-screen) banner unnoticed and the step
+   * looks like it silently did nothing. */
+  val validationScrollTrigger: Int = 0,
 ) {
   /** Submit gate (SM-6): full draft valid and no save already running. */
   val canSubmit: Boolean
@@ -343,6 +352,7 @@ class EnrollmentViewModel @Inject constructor(
       moveTo(EnrollmentStep.HEALTH_HISTORY)
     } else {
       updatePersonalInfo { it.copy(showValidationBanner = true) }
+      bumpValidationScrollTrigger()
     }
   }
 
@@ -434,6 +444,11 @@ class EnrollmentViewModel @Inject constructor(
 
   fun setDeadChildren(value: String) = updateHealthHistory { it.copy(deadChildren = value) }
 
+  /** Not in the Excel spec — feeds `/beneficiaries` `motherDetails.heightCm`/`weightKg` only. */
+  fun setHeightCm(value: String) = updateHealthHistory { it.copy(heightCm = value) }
+
+  fun setWeightKg(value: String) = updateHealthHistory { it.copy(weightKg = value) }
+
   // Q51–57 — last pregnancy.
   fun setLastPregnancyWhen(code: Int) = updateHealthHistory { it.copy(lastPregnancyWhen = code) }
 
@@ -494,6 +509,7 @@ class EnrollmentViewModel @Inject constructor(
       moveTo(EnrollmentStep.SUMMARY)
     } else {
       updateHealthHistory { it.copy(showValidationBanner = true) }
+      bumpValidationScrollTrigger()
     }
   }
 
@@ -522,18 +538,30 @@ class EnrollmentViewModel @Inject constructor(
   fun submit() {
     val state = _uiState.value
     if (state.currentStep != EnrollmentStep.SUMMARY || !state.canSubmit) return
-    _uiState.update { it.copy(isSubmitting = true, submitFailed = false) }
+    _uiState.update { it.copy(isSubmitting = true, submitFailed = false, submitErrorMessage = null) }
     viewModelScope.launch {
-      val result = enrollmentRepository.saveEnrollment(_uiState.value.toEnrollmentRecord())
-      result
-        .onSuccess {
+      // submitEnrollment (not saveEnrollment) — while online, this waits for the REAL backend
+      // result before we decide whether to navigate, instead of advancing on a local save that
+      // says nothing about whether the backend will accept the record.
+      when (val result = enrollmentRepository.submitEnrollment(_uiState.value.toEnrollmentRecord())) {
+        is EnrollmentSubmitResult.Synced, is EnrollmentSubmitResult.QueuedOffline -> {
           _events.trySend(EnrollmentEvent.DataSaved)
           _uiState.update { it.copy(isSubmitting = false) }
           moveTo(EnrollmentStep.COMPLETE)
         }
-        .onFailure {
-          _uiState.update { it.copy(isSubmitting = false, submitFailed = true) }
+
+        is EnrollmentSubmitResult.DuplicateConflict -> {
+          _uiState.update {
+            it.copy(isSubmitting = false, submitFailed = true, submitErrorMessage = result.message)
+          }
         }
+
+        is EnrollmentSubmitResult.Failed -> {
+          _uiState.update {
+            it.copy(isSubmitting = false, submitFailed = true, submitErrorMessage = result.message)
+          }
+        }
+      }
     }
   }
 
@@ -556,6 +584,12 @@ class EnrollmentViewModel @Inject constructor(
         furthestStep = if (step.ordinal > it.furthestStep.ordinal) step else it.furthestStep,
       )
     }
+  }
+
+  /** Fires even if the banner was already showing (repeated taps while still invalid), so the
+   * screen re-scrolls to it every time rather than only on the first blocked attempt. */
+  private fun bumpValidationScrollTrigger() {
+    _uiState.update { it.copy(validationScrollTrigger = it.validationScrollTrigger + 1) }
   }
 
   private inline fun updateConsent(crossinline transform: (ConsentState) -> ConsentState) {

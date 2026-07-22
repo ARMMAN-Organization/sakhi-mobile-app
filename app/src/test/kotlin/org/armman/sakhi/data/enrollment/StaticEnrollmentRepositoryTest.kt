@@ -140,6 +140,8 @@ class StaticEnrollmentRepositoryTest {
         malnutrition = null,
         remarks = null,
       ),
+      heightCm = 158.0,
+      weightKg = 55.0,
       submittedAt = Instant.now(),
     )
   }

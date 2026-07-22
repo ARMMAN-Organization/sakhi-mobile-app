@@ -28,6 +28,7 @@ class RemoteAuthRepository @Inject constructor(
   private val sessionStore: SessionStore,
   private val offlineCredentialCache: OfflineCredentialCache,
   private val connectivityChecker: ConnectivityChecker,
+  private val currentUserRepository: CurrentUserRepository,
 ) : AuthRepository {
 
   override suspend fun login(request: LoginRequest): LoginResult {
@@ -49,6 +50,10 @@ class RemoteAuthRepository @Inject constructor(
   override suspend fun logout() {
     try {
       sessionStore.clearSession()
+      // Deliberately does NOT clear currentUserRepository: this device belongs to one Sakhi, who
+      // routinely logs out/back in while offline (no way to re-fetch /me then) — the cached
+      // profile must survive that. The (rare) different-Sakhi case is handled at login instead,
+      // via clearIfDifferentUser.
     } catch (e: Exception) {
       // Logout must never throw — the user must still land on the login screen.
     }
@@ -71,6 +76,9 @@ class RemoteAuthRepository @Inject constructor(
     if (REQUIRED_ROLE !in claims.roles) {
       return LoginResult.Failure(LoginFailureReason.WRONG_ROLE)
     }
+    // Guards against a device previously used by a different Sakhi still showing her cached
+    // /me profile — a no-op for the common case of the same Sakhi logging back in.
+    currentUserRepository.clearIfDifferentUser(request.username)
     val session = UserSession(
       username = request.username,
       subjectId = claims.subjectId,
@@ -101,6 +109,9 @@ class RemoteAuthRepository @Inject constructor(
         LoginResult.Failure(LoginFailureReason.OFFLINE_NO_CACHE)
       }
     }
+    // Same guard as the online path — a no-op here in practice, since the offline cache only
+    // ever verifies against the one username it was seeded with, but kept for symmetry.
+    currentUserRepository.clearIfDifferentUser(request.username)
     // Restore "stay logged in" too, so a second offline relaunch skips the form again.
     sessionStore.saveSession(restoredSession)
     return LoginResult.Success(restoredSession)

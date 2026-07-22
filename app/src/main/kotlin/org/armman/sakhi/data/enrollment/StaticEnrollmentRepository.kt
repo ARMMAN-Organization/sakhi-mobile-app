@@ -19,6 +19,11 @@ class StaticEnrollmentRepository @Inject constructor() : EnrollmentRepository {
     return Result.success(Unit)
   }
 
+  override suspend fun submitEnrollment(record: EnrollmentRecord): EnrollmentSubmitResult {
+    records[record.beneficiaryId] = record
+    return EnrollmentSubmitResult.Synced
+  }
+
   override suspend fun getEnrollment(beneficiaryId: String): EnrollmentRecord? =
     records[beneficiaryId]
 }

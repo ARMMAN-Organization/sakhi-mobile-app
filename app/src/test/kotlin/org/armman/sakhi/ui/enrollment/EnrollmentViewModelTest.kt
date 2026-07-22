@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.armman.sakhi.data.enrollment.EnrollmentRecord
 import org.armman.sakhi.data.enrollment.EnrollmentRepository
+import org.armman.sakhi.data.enrollment.EnrollmentSubmitResult
 import org.armman.sakhi.data.geography.StaticGeographyRepository
 import org.armman.sakhi.data.profile.ProfileRepository
 import org.armman.sakhi.data.profile.SakhiProfile
@@ -35,6 +36,18 @@ class EnrollmentViewModelTest {
   private companion object {
     const val PHOTO_URI = "content://org.armman.sakhi.fileprovider/enrollment/consent_photo.jpg"
     const val PROJECT_NAME = "Project X"
+
+    // Real geography_units rows backend provisioned for testing — mirrors the constants in
+    // StaticGeographyRepository (file-private there, so duplicated here rather than exposed).
+    // Maharashtra > Nandurbar > Dhadgaon is the Sakhi's assignment; Dhadgaon has exactly one
+    // village/pada/PHC/sub-centre, so pada/phc/subCentre all auto-select once a village is picked.
+    const val STATE_MH = "de591be5-a495-4dba-9409-3f198d878ccf"
+    const val DISTRICT_NANDURBAR = "7a600bc7-0a76-4321-8c7e-8c2abb6eec74"
+    const val BLOCK_DHADGAON = "85a051dc-7189-4f4d-ae02-3561a89df378"
+    const val VILLAGE_TEST = "aa158c5a-9258-42d2-835a-88f517107c66"
+    const val PADA_TEST = "4c5cb203-e3cb-4877-b1e9-c6fac3857cbb"
+    const val PHC_TEST = "ea7787c7-11de-410a-88f3-d58172bf98b3"
+    const val SUBCENTRE_TEST = "862704ab-a774-44a5-b2c1-84220eacbfc2"
   }
 
   private class FakeProfileRepository : ProfileRepository {
@@ -49,19 +62,26 @@ class EnrollmentViewModelTest {
   }
 
   /**
-   * Records saves and lets a test choose the outcome. [gate], when set,
-   * suspends the save until completed — used to assert the in-flight guard.
+   * Records submits and lets a test choose the [submitEnrollment] outcome. [gate], when set,
+   * suspends the submit until completed — used to assert the in-flight guard (SM-10). Mirrors
+   * [RoomEnrollmentRepository]'s real behavior: a local save always happens (recorded in [saved])
+   * regardless of what the backend eventually says.
    */
   private class FakeEnrollmentRepository(
-    var result: Result<Unit> = Result.success(Unit),
+    var submitResult: EnrollmentSubmitResult = EnrollmentSubmitResult.Synced,
     var gate: CompletableDeferred<Unit>? = null,
   ) : EnrollmentRepository {
     val saved = mutableListOf<EnrollmentRecord>()
 
     override suspend fun saveEnrollment(record: EnrollmentRecord): Result<Unit> {
+      saved += record
+      return Result.success(Unit)
+    }
+
+    override suspend fun submitEnrollment(record: EnrollmentRecord): EnrollmentSubmitResult {
       gate?.await()
       saved += record
-      return result
+      return submitResult
     }
 
     override suspend fun getEnrollment(beneficiaryId: String): EnrollmentRecord? =
@@ -379,10 +399,10 @@ class EnrollmentViewModelTest {
       setCategory(5)
       setHouseholdMembers("5")
       setChildrenUnderFive("1")
-      selectVillage("V-BHAV")
+      selectVillage(VILLAGE_TEST)
     }
     idle()
-    viewModel.selectPada("P-CHAU")
+    // Pada auto-selects (PADA_TEST is the village's only pada) — no explicit selectPada needed.
   }
 
   @Test
@@ -517,32 +537,34 @@ class EnrollmentViewModelTest {
   fun `PI-15 repo returns hierarchical children per parent`() = runTest {
     val repo = StaticGeographyRepository()
     assertTrue(repo.getStates().isNotEmpty())
-    assertTrue(repo.getDistricts("MH").isNotEmpty())
-    assertTrue(repo.getBlocks("MH-PAL").isNotEmpty())
-    assertTrue(repo.getVillages("MH-PAL-JAW").isNotEmpty())
-    assertTrue(repo.getPadas("V-BHAV").isNotEmpty())
-    assertTrue(repo.getPhcs("V-BHAV").isNotEmpty())
-    assertTrue(repo.getSubCentres("V-BHAV").isNotEmpty())
+    assertTrue(repo.getDistricts(STATE_MH).isNotEmpty())
+    assertTrue(repo.getBlocks(DISTRICT_NANDURBAR).isNotEmpty())
+    assertTrue(repo.getVillages(BLOCK_DHADGAON).isNotEmpty())
+    assertTrue(repo.getPadas(VILLAGE_TEST).isNotEmpty())
+    assertTrue(repo.getPhcs(VILLAGE_TEST).isNotEmpty())
+    assertTrue(repo.getSubCentres(VILLAGE_TEST).isNotEmpty())
     assertTrue(repo.getDistricts("XX").isEmpty())
   }
 
   @Test
   fun `PI-16 geography prefilled from sakhi assignment`() {
     reachPersonalInfo()
-    assertEquals("MH", pi().stateId)
-    assertEquals("MH-PAL", pi().districtId)
-    assertEquals("MH-PAL-JAW", pi().blockId)
+    assertEquals(STATE_MH, pi().stateId)
+    assertEquals(DISTRICT_NANDURBAR, pi().districtId)
+    assertEquals(BLOCK_DHADGAON, pi().blockId)
     assertTrue(pi().villages.isNotEmpty())
   }
 
   @Test
   fun `PI-17 changing parent resets descendants`() {
     reachPersonalInfo()
-    viewModel.selectVillage("V-BHAV")
+    viewModel.selectVillage(VILLAGE_TEST)
     idle()
-    viewModel.selectPada("P-CHAU")
 
-    viewModel.selectDistrict("MH-NAN")
+    // Only one real district is provisioned so far — re-selecting it still exercises the reset
+    // logic (selectDistrict unconditionally clears descendants and reloads blocks), without
+    // fabricating a second fake branch the backend wouldn't recognize.
+    viewModel.selectDistrict(DISTRICT_NANDURBAR)
     idle()
 
     assertNull(pi().blockId)
@@ -550,20 +572,22 @@ class EnrollmentViewModelTest {
     assertNull(pi().padaId)
     assertNull(pi().phcId)
     assertNull(pi().subCentreId)
-    assertTrue(pi().blocks.isNotEmpty()) // reloaded for the new district
-    assertTrue(pi().villages.isEmpty())
+    assertTrue(pi().blocks.isNotEmpty()) // reloaded for the district
+    assertTrue(pi().villages.isEmpty()) // not reloaded until a block is (re-)selected
   }
 
   @Test
-  fun `PI-18 phc and sc auto populate from village`() {
+  fun `PI-18 pada, phc, and sub-centre all auto populate from village`() {
     reachPersonalInfo()
-    viewModel.selectVillage("V-BHAV")
+    viewModel.selectVillage(VILLAGE_TEST)
     idle()
-    // Single-option lists auto-select; multi-option pada stays unselected.
-    assertEquals("PHC-JAW", pi().phcId)
-    assertEquals("SC-BHAV", pi().subCentreId)
-    assertNull(pi().padaId)
-    assertEquals(2, pi().padas.size)
+    // Dhadgaon's only provisioned village has exactly one pada/PHC/sub-centre — all three
+    // single-option lists auto-select (Q17/Q18 behavior), unlike the old fake fixture which had
+    // two padas under its sample village and left pada for the Sakhi to pick explicitly.
+    assertEquals(PADA_TEST, pi().padaId)
+    assertEquals(PHC_TEST, pi().phcId)
+    assertEquals(SUBCENTRE_TEST, pi().subCentreId)
+    assertEquals(1, pi().padas.size)
   }
 
   @Test
@@ -643,6 +667,42 @@ class EnrollmentViewModelTest {
   }
 
   @Test
+  fun `PI-23 blocked next lists the specific missing fields, not a generic message`() {
+    reachPersonalInfo()
+    viewModel.goToHealthHistory()
+
+    val errors = pi().validationErrors
+    assertTrue(errors.isNotEmpty())
+    // Spot-check a couple of concrete messages rather than the full ~20-item list.
+    assertTrue(errors.any { it.contains("first name", ignoreCase = true) })
+    assertTrue(errors.any { it.contains("state", ignoreCase = true) })
+  }
+
+  @Test
+  fun `PI-23 blocked next bumps the validation scroll trigger every attempt`() {
+    reachPersonalInfo()
+    val before = viewModel.uiState.value.validationScrollTrigger
+
+    viewModel.goToHealthHistory() // 1st blocked attempt
+    val afterFirst = viewModel.uiState.value.validationScrollTrigger
+    assertEquals(before + 1, afterFirst)
+
+    viewModel.goToHealthHistory() // still invalid — 2nd blocked attempt
+    assertEquals(afterFirst + 1, viewModel.uiState.value.validationScrollTrigger)
+  }
+
+  @Test
+  fun `valid next does not bump the validation scroll trigger`() {
+    reachPersonalInfo()
+    completePersonalInfo()
+    val before = viewModel.uiState.value.validationScrollTrigger
+
+    viewModel.goToHealthHistory() // succeeds — no blocked attempt
+
+    assertEquals(before, viewModel.uiState.value.validationScrollTrigger)
+  }
+
+  @Test
   fun `PI-25 complete step advances and updates furthest`() {
     reachPersonalInfo()
     completePersonalInfo()
@@ -698,7 +758,7 @@ class EnrollmentViewModelTest {
       assertEquals("Powra", lastName)
       assertEquals(4, educationSelf)
       assertEquals("9740887212", mobileNumber)
-      assertEquals("MH", stateId)
+      assertEquals(STATE_MH, stateId)
     }
   }
 
@@ -782,8 +842,8 @@ class EnrollmentViewModelTest {
   }
 
   @Test
-  fun `SM-9 failed submit stays on summary with retryable error`() {
-    enrollmentRepository.result = Result.failure(RuntimeException("disk full"))
+  fun `SM-9 failed submit stays on summary with the backend's error message`() {
+    enrollmentRepository.submitResult = EnrollmentSubmitResult.Failed("disk full")
     reachSummary()
 
     viewModel.submit()
@@ -792,13 +852,39 @@ class EnrollmentViewModelTest {
     val state = viewModel.uiState.value
     assertEquals(EnrollmentStep.SUMMARY, state.currentStep)
     assertTrue(state.submitFailed)
+    assertEquals("disk full", state.submitErrorMessage)
     assertFalse(state.isSubmitting)
     assertTrue(state.canSubmit) // retry possible
 
     // Retry succeeds and clears the error.
-    enrollmentRepository.result = Result.success(Unit)
+    enrollmentRepository.submitResult = EnrollmentSubmitResult.Synced
     viewModel.submit()
     idle()
+    assertEquals(EnrollmentStep.COMPLETE, viewModel.uiState.value.currentStep)
+  }
+
+  @Test
+  fun `SM-9b duplicate conflict stays on summary with the backend's message`() {
+    enrollmentRepository.submitResult = EnrollmentSubmitResult.DuplicateConflict("possible duplicate")
+    reachSummary()
+
+    viewModel.submit()
+    idle()
+
+    val state = viewModel.uiState.value
+    assertEquals(EnrollmentStep.SUMMARY, state.currentStep)
+    assertTrue(state.submitFailed)
+    assertEquals("possible duplicate", state.submitErrorMessage)
+  }
+
+  @Test
+  fun `SM-9c offline submit (QueuedOffline) still completes — offline-first guarantee`() {
+    enrollmentRepository.submitResult = EnrollmentSubmitResult.QueuedOffline
+    reachSummary()
+
+    viewModel.submit()
+    idle()
+
     assertEquals(EnrollmentStep.COMPLETE, viewModel.uiState.value.currentStep)
   }
 
@@ -849,7 +935,14 @@ class EnrollmentViewModelTest {
     viewModel.goToHealthHistory()
   }
 
-  /** Minimal valid Health History: Gravida 1 (no last-pregnancy block). */
+  /**
+   * Minimal valid Health History: Gravida 1 (no last-pregnancy block).
+   * NOTE: livingChildren=1 here (not 0) purely to satisfy the cross-total
+   * rule (livingChildren + stillBirths + abortions == gravida) as currently
+   * implemented — see the flagged product issue on that formula not
+   * accounting for the current, still-ongoing pregnancy. Not meant to model
+   * a realistic obstetric history, just to keep this shared fixture valid.
+   */
   private fun completeHealthHistory() {
     with(viewModel) {
       setPlannedPregnancy(2)
@@ -859,7 +952,7 @@ class EnrollmentViewModelTest {
       setTdNone(true)
       setGravida("1")
       setPara("0")
-      setLivingChildren("0")
+      setLivingChildren("1")
       setAbortions("0")
       setStillBirths("0")
       toggleSelfCondition(1)
@@ -1016,12 +1109,18 @@ class EnrollmentViewModelTest {
 
   @Test
   fun `HH-14 gravida cross-total enforced when all entered`() {
+    // Formula MUST match the /beneficiaries API's own cross-field rule:
+    // livingChildren + stillBirths + abortions == gravida. This used to be
+    // checked against a different, incompatible formula (para + abortions + 1)
+    // that could pass here and still fail server-side at submit — see the
+    // doc comment on HealthHistoryState.gravidaTotalError.
     reachHealthHistory()
     viewModel.setGravida("4")
-    viewModel.setPara("2")
-    viewModel.setAbortions("0") // 2 + 0 + 1 = 3 ≠ 4
+    viewModel.setLivingChildren("2")
+    viewModel.setStillBirths("0")
+    viewModel.setAbortions("1") // 2 + 0 + 1 = 3 ≠ 4
     assertEquals(HealthFieldError.GRAVIDA_TOTAL_MISMATCH, hh().gravidaTotalError)
-    viewModel.setAbortions("1") // 2 + 1 + 1 = 4
+    viewModel.setAbortions("2") // 2 + 0 + 2 = 4
     assertNull(hh().gravidaTotalError)
   }
 
@@ -1117,6 +1216,41 @@ class EnrollmentViewModelTest {
     assertTrue(hh().showValidationBanner)
     completeHealthHistory()
     assertFalse(hh().showValidationBanner)
+  }
+
+  @Test
+  fun `HH-23 blocked next lists the specific missing fields, not a generic message`() {
+    reachHealthHistory()
+    viewModel.goToSummary()
+
+    val errors = hh().validationErrors
+    assertTrue(errors.isNotEmpty())
+    assertTrue(errors.any { it.contains("Td dose", ignoreCase = true) })
+  }
+
+  @Test
+  fun `HH-23 gravida cross-total mismatch surfaces its own specific message`() {
+    reachHealthHistory()
+    completeHealthHistory()
+    // Break just the cross-total rule (livingChildren + stillBirths + abortions != gravida)
+    // while leaving every other required field valid, so this is the only failure.
+    viewModel.setLivingChildren((hh().livingChildren.toInt() + 1).toString())
+    viewModel.goToSummary()
+
+    assertTrue(hh().validationErrors.any { it.contains("add up to Gravida") })
+  }
+
+  @Test
+  fun `HH-23 blocked next bumps the validation scroll trigger every attempt`() {
+    reachHealthHistory()
+    val before = viewModel.uiState.value.validationScrollTrigger
+
+    viewModel.goToSummary() // 1st blocked attempt
+    val afterFirst = viewModel.uiState.value.validationScrollTrigger
+    assertEquals(before + 1, afterFirst)
+
+    viewModel.goToSummary() // still invalid — 2nd blocked attempt
+    assertEquals(afterFirst + 1, viewModel.uiState.value.validationScrollTrigger)
   }
 
   @Test

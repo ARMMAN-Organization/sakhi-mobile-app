@@ -187,6 +187,87 @@ data class PersonalInfoState(
       childrenUnderFiveError == null &&
       !missingSelections
 
+  /**
+   * Every currently-failing validation rule, in question order, as a plain-language sentence —
+   * see [org.armman.sakhi.ui.components.ValidationErrorBanner]. Replaces a single generic
+   * "complete all fields" message that gave no clue which of this step's 20+ fields (7 geography
+   * dropdowns + 9 demographic dropdowns + several text fields) was actually still missing.
+   */
+  val validationErrors: List<String>
+    get() = buildList {
+      if (lmp == null) {
+        add("Enter the LMP date")
+      } else {
+        lmpError?.let {
+          add(
+            when (it) {
+              FieldError.LMP_FUTURE -> "LMP date cannot be in the future"
+              FieldError.LMP_TOO_RECENT ->
+                "LMP date is too recent (must be more than $MIN_LMP_DAYS days before registration)"
+              FieldError.LMP_TOO_OLD ->
+                "LMP date is too old (must be less than $MAX_LMP_DAYS days before registration)"
+              else -> "Check the LMP date"
+            },
+          )
+        }
+      }
+      if (firstName.isBlank()) {
+        add("Enter the beneficiary's first name")
+      } else {
+        firstNameError?.let { add("First name can only contain letters and spaces") }
+      }
+      middleNameError?.let { add("Middle name can only contain letters and spaces") }
+      if (lastName.isBlank()) {
+        add("Enter the beneficiary's last name")
+      } else {
+        lastNameError?.let { add("Last name can only contain letters and spaces") }
+      }
+      if (ageYears == null) {
+        add("Enter the beneficiary's age or date of birth")
+      } else {
+        ageError?.let { add("Age must be between $MIN_AGE and $MAX_AGE years") }
+      }
+      if (address.isBlank()) add("Enter the beneficiary's address")
+      if (mobileNumber.isBlank()) {
+        add("Enter the beneficiary's mobile number")
+      } else {
+        mobileError?.let { add("Mobile number must be exactly $MOBILE_DIGITS digits") }
+      }
+      if (yearsInVillage.isBlank()) {
+        add("Enter years lived in the village")
+      } else {
+        yearsInVillageError?.let { add("Years in village must be a valid non-negative number") }
+      }
+      if (householdMembers.isBlank()) {
+        add("Enter the number of household members")
+      } else {
+        householdMembersError?.let {
+          add("Household members must be between $MIN_HOUSEHOLD and $MAX_HOUSEHOLD")
+        }
+      }
+      if (childrenUnderFive.isBlank()) {
+        add("Enter the number of children under five")
+      } else {
+        childrenUnderFiveError?.let { add("Children under five cannot exceed household members") }
+      }
+      if (stateId == null) add("Select the state")
+      if (districtId == null) add("Select the district")
+      if (blockId == null) add("Select the block/taluka")
+      if (villageId == null) add("Select the village")
+      if (padaId == null) add("Select the pada")
+      if (phcId == null) add("Select the PHC")
+      if (subCentreId == null) add("Select the sub-centre")
+      if (phoneOwner == null) add("Select who owns the phone")
+      if (networkAvailability == null) add("Select network availability")
+      if (educationSelf == null) add("Select the beneficiary's education level")
+      if (educationPartner == null) add("Select the partner's education level")
+      if (partnerOccupation == null) add("Select the partner's occupation")
+      if (migrationPattern == null) add("Select the migration pattern")
+      if (incomeBand == null) add("Select the income band")
+      if (religion == null) add("Select the religion")
+      if (category == null) add("Select the category")
+    }
+
   // --- Helpers ---------------------------------------------------------------
 
   /** Empty-mandatory errors appear only after a blocked Next attempt. */
