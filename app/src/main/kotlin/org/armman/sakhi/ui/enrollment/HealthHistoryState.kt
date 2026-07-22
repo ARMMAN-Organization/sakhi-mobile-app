@@ -28,8 +28,19 @@ enum class HealthFieldError {
   /** Dead children must not exceed living children (Q50). */
   DEAD_EXCEEDS_LIVING,
 
-  /** Gravida ≠ Para + Abortions + 1 (Q45 cross-total). */
+  /**
+   * Gravida ≠ Living Children + Stillbirths + Abortions (Q45 cross-total).
+   * Matches the `/beneficiaries` API's own cross-field rule exactly — this
+   * used to be a different, incompatible formula (`Para + Abortions + 1`)
+   * that could pass here and still be rejected by the API at submit time.
+   */
   GRAVIDA_TOTAL_MISMATCH,
+
+  /** Height outside the `/beneficiaries` API's accepted range (0, 300] cm. */
+  HEIGHT_RANGE,
+
+  /** Weight outside the `/beneficiaries` API's accepted range (0, 400] kg. */
+  WEIGHT_RANGE,
 }
 
 /**
@@ -74,6 +85,15 @@ data class HealthHistoryState(
   val abortions: String = "",
   val stillBirths: String = "",
   val deadChildren: String = "",
+
+  /**
+   * Not part of the Excel spec (Q1–65) — collected only so the `/beneficiaries`
+   * API's `motherDetails.heightCm`/`weightKg` can be sent for the server's BMI
+   * calculation. Both optional: blank is valid and means "not sent", matching
+   * the DTO's optional fields. Never gates step completion.
+   */
+  val heightCm: String = "",
+  val weightKg: String = "",
 
   // Q51–57 — last pregnancy (only when Gravida > 1).
   val lastPregnancyWhen: Int? = null,
@@ -161,13 +181,38 @@ data class HealthHistoryState(
       return if (d > living) HealthFieldError.DEAD_EXCEEDS_LIVING else null
     }
 
-  /** Q45 cross-total: Gravida = Para + Abortions + 1 (checked when all present). */
+  /**
+   * Q45 cross-total: Gravida = Living Children + Stillbirths + Abortions
+   * (checked when all present). MUST stay identical to the `/beneficiaries`
+   * API's own check (`liveBirths + stillbirths + abortions == gravida` in
+   * `create-beneficiary.dto.ts` / `EnrollmentApiMapper.validateMotherCrossFieldRules`)
+   * — this field used to gate on `Para + Abortions + 1` instead, which is not
+   * the same formula and let invalid records reach submit before failing
+   * server-side with no field-level message. Do not reintroduce that drift.
+   */
   val gravidaTotalError: HealthFieldError?
     get() {
       val g = gravida.toIntOrNull() ?: return null
-      val p = para.toIntOrNull() ?: return null
+      val living = livingChildren.toIntOrNull() ?: return null
+      val s = stillBirths.toIntOrNull() ?: return null
       val a = abortions.toIntOrNull() ?: return null
-      return if (g != p + a + 1) HealthFieldError.GRAVIDA_TOTAL_MISMATCH else null
+      return if (living + s + a != g) HealthFieldError.GRAVIDA_TOTAL_MISMATCH else null
+    }
+
+  /** Optional — blank is valid; only range-checked when entered (mirrors backend `0 < x <= 300`). */
+  val heightCmError: HealthFieldError?
+    get() {
+      if (heightCm.isBlank()) return null
+      val value = heightCm.toDoubleOrNull() ?: return HealthFieldError.HEIGHT_RANGE
+      return if (value <= 0 || value > MAX_HEIGHT_CM) HealthFieldError.HEIGHT_RANGE else null
+    }
+
+  /** Optional — blank is valid; only range-checked when entered (mirrors backend `0 < x <= 400`). */
+  val weightKgError: HealthFieldError?
+    get() {
+      if (weightKg.isBlank()) return null
+      val value = weightKg.toDoubleOrNull() ?: return HealthFieldError.WEIGHT_RANGE
+      return if (value <= 0 || value > MAX_WEIGHT_KG) HealthFieldError.WEIGHT_RANGE else null
     }
 
   val anc1DateError: HealthFieldError?
@@ -242,7 +287,96 @@ data class HealthHistoryState(
     get() = gravidaError == null && paraError == null && livingChildrenError == null &&
       abortionsError == null && stillBirthsError == null && deadChildrenError == null &&
       gravidaTotalError == null && anc1DateError == null && tdDateError == null &&
+      heightCmError == null && weightKgError == null &&
       !missingSelections
+
+  /**
+   * Every currently-failing validation rule, in question order, as a plain-language sentence.
+   * Used by [org.armman.sakhi.ui.components.ValidationErrorBanner] to tell the Sakhi exactly
+   * what's still wrong on a blocked Next attempt, instead of a single generic "complete all
+   * fields" line that gives no clue which of 20+ fields on this step is the actual blocker (e.g.
+   * the Td-dose checkbox group, or the Gravida/living-children/stillbirths/abortions cross-total —
+   * neither has an obvious per-field red mark pointing back at [gravidaTotalError]/
+   * [tdSelectionMissing]).
+   */
+  val validationErrors: List<String>
+    get() = buildList {
+      if (plannedPregnancy == null) add("Select whether this is a planned pregnancy")
+      if (tookTreatment == null) add("Select whether treatment was taken for infertility")
+      if (showTreatmentType && treatmentType == null) add("Select the type of treatment taken")
+      if (rchStatus == null) add("Select RCH registration status")
+      if (showRchNumber && rchNumber.isBlank()) add("Enter the RCH number")
+      if (ancStatus == null) add("Select ANC status")
+      if (showAnc1Details && ancConditions.isEmpty()) {
+        add("Select at least one ANC-1 condition (or 'No known condition')")
+      }
+      anc1DateError?.let {
+        add(
+          if (it == HealthFieldError.REQUIRED) "Enter the ANC-1 date"
+          else "ANC-1 date cannot be in the future",
+        )
+      }
+      if (tdSelectionMissing) add("Select at least one Td dose received, or 'None'")
+      tdDateError?.let {
+        add(
+          when (it) {
+            HealthFieldError.TD_DATE_FUTURE -> "A Td dose date cannot be in the future"
+            HealthFieldError.TD_DATE_ORDER ->
+              "Td dose dates must be in order: Td1, then Td2, then Booster"
+            else -> "Check the Td dose dates"
+          },
+        )
+      }
+      gravidaError?.let { add("Gravida is required and must be between $GRAVIDA_MIN and $COUNT_MAX") }
+      paraError?.let {
+        add(
+          if (it == HealthFieldError.PARA_EXCEEDS_GRAVIDA) "Para cannot be greater than Gravida"
+          else "Para is required and must be between $COUNT_MIN and $COUNT_MAX",
+        )
+      }
+      livingChildrenError?.let {
+        add("Living children is required and must be between $COUNT_MIN and $COUNT_MAX")
+      }
+      abortionsError?.let {
+        add(
+          if (it == HealthFieldError.ABORTIONS_EXCEED_GRAVIDA) "Abortions cannot be greater than Gravida"
+          else "Abortions is required and must be between $COUNT_MIN and $COUNT_MAX",
+        )
+      }
+      stillBirthsError?.let {
+        add("Stillbirths is required and must be between $COUNT_MIN and $COUNT_MAX")
+      }
+      deadChildrenError?.let {
+        add(
+          if (it == HealthFieldError.DEAD_EXCEEDS_LIVING) "Dead children cannot be greater than living children"
+          else "Dead children must be between $COUNT_MIN and $COUNT_MAX",
+        )
+      }
+      if (gravidaTotalError != null) {
+        add("Living children + Stillbirths + Abortions must add up to Gravida")
+      }
+      heightCmError?.let { add("Height must be a number between 0 and $MAX_HEIGHT_CM cm") }
+      weightKgError?.let { add("Weight must be a number between 0 and $MAX_WEIGHT_KG kg") }
+      if (showLastPregnancy) {
+        if (lastPregnancyWhen == null) add("Select when the last pregnancy ended")
+        if (deliveryComplications.isEmpty()) {
+          add("Select at least one delivery complication (or 'No known complication')")
+        }
+        if (lastDeliveryDuration == null) add("Select the last delivery duration")
+        if (lastDeliveryType == null) add("Select the last delivery type")
+        if (lastDeliveryPlace == null) add("Select the last delivery place")
+        if (lastDeliveryOutcome == null) add("Select the last delivery outcome")
+        if (showBirthWeight && birthWeight == null) add("Select the birth weight category")
+      }
+      if (selfConditions.isEmpty()) add("Select at least one self medical condition (or 'No known condition')")
+      if (longTermMeds.isEmpty()) add("Select long-term medication status (or 'None')")
+      if (sickleCell == null) add("Select sickle cell status")
+      if (substanceUse.isEmpty()) add("Select substance use status (or 'None')")
+      if (familyHistory == null) add("Select whether there is a family history of illness")
+      if (showFamilyConditions && familyConditions.isEmpty()) {
+        add("Select at least one family medical condition")
+      }
+    }
 
   // --- Helpers ---------------------------------------------------------------
 
@@ -265,6 +399,12 @@ data class HealthHistoryState(
     const val GRAVIDA_MIN = 1
     const val COUNT_MIN = 0
     const val COUNT_MAX = 14
+
+    /** `/beneficiaries` DTO: `motherDetails.heightCm` must be `0 < x <= 300`. */
+    const val MAX_HEIGHT_CM = 300.0
+
+    /** `/beneficiaries` DTO: `motherDetails.weightKg` must be `0 < x <= 400`. */
+    const val MAX_WEIGHT_KG = 400.0
 
     /**
      * Q43/Q58/Q61: 1-based codes of the mutually-exclusive options

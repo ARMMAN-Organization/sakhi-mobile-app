@@ -14,6 +14,9 @@ okhttp = "4.12.0"
 coroutines = "1.8.1"
 mobileCore = "0.1.0"
 junit = "4.13.2"
+securityCrypto = "1.1.0-alpha06"
+room = "2.6.1"
+work = "2.9.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -33,10 +36,18 @@ hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-com
 retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
 retrofit-gson = { group = "com.squareup.retrofit2", name = "converter-gson", version.ref = "retrofit" }
 okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
+okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
 coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 armman-mobile-core = { group = "org.armman", name = "mobile-core", version.ref = "mobileCore" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
+room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
+hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "hiltNavigation" }
+androidx-hilt-compiler = { group = "androidx.hilt", name = "hilt-compiler", version.ref = "hiltNavigation" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -26,10 +26,15 @@
   <string name="login_password_placeholder">Enter Password</string>
   <string name="login_button">Login</string>
   <string name="login_logo_content_description">Arogya Sakhi — Pregnancy and Child Care</string>
-  <string name="login_error_username_required">Please enter your Username.</string>
+  <string name="login_error_username_required">Please enter your username.</string>
   <string name="login_error_password_required">Please enter your password.</string>
   <string name="login_error_invalid_credentials">Username or password is incorrect. Please try again.</string>
   <string name="login_error_generic">Something went wrong. Please try again.</string>
+  <string name="login_error_network">Couldn\'t reach the server. Check your connection and try again.</string>
+  <string name="login_error_wrong_role">This account isn\'t set up as a Sakhi. Please contact your Supervisor.</string>
+  <string name="login_error_offline_no_cache">No internet connection. Please connect once and log in before you can log in offline.</string>
+  <string name="login_password_show_content_description">Show password</string>
+  <string name="login_password_hide_content_description">Hide password</string>
   <string name="login_logout_success">You have logged out successfully</string>
 
   <!-- Common -->
@@ -229,6 +234,7 @@
   <string name="enrollment_pi_edd">EDD (auto-calculated)</string>
   <string name="enrollment_pi_ga">Gestational age (weeks)</string>
   <string name="enrollment_pi_banner">Complete all necessary fields</string>
+  <string name="enrollment_validation_banner_title">Please fix the following before continuing:</string>
   <string name="enrollment_pi_back">Back</string>
   <string name="enrollment_pi_next_health_history">Health History</string>
   <!-- Field validation messages -->
@@ -247,6 +253,7 @@
   <string name="enrollment_summary_title">Review Details</string>
   <string name="enrollment_summary_personal_info">Personal Info</string>
   <string name="enrollment_summary_edit">Edit</string>
+  <string name="enrollment_summary_completed">Completed</string>
   <string name="enrollment_next_summary">Summary</string>
   <string name="enrollment_submit">Submit</string>
   <string name="enrollment_data_saved">Data has been saved</string>
@@ -287,6 +294,9 @@
   <string name="enrollment_hh_still_births">Still births</string>
   <string name="enrollment_hh_dead_children">Dead children</string>
   <string name="enrollment_hh_count_placeholder">Enter a number</string>
+  <string name="enrollment_hh_height">Height (cm)</string>
+  <string name="enrollment_hh_weight">Weight (kg)</string>
+  <string name="enrollment_hh_height_weight_placeholder">Optional</string>
 
   <string name="enrollment_hh_last_pregnancy_when">When was your last pregnancy?</string>
   <string name="enrollment_hh_delivery_complications">Complications during previous birth/delivery</string>
@@ -313,7 +323,9 @@
   <string name="enrollment_hh_error_para">Para cannot exceed Gravida</string>
   <string name="enrollment_hh_error_abortions">Abortions cannot exceed Gravida</string>
   <string name="enrollment_hh_error_dead">Cannot exceed living children</string>
-  <string name="enrollment_hh_error_gravida_total">Gravida must equal Para + Abortions + 1</string>
+  <string name="enrollment_hh_error_gravida_total">Living Children + Stillbirths + Abortions must equal Gravida</string>
+  <string name="enrollment_hh_error_height">Enter a valid height up to 300 cm</string>
+  <string name="enrollment_hh_error_weight">Enter a valid weight up to 400 kg</string>
   <string name="enrollment_summary_health_history">Health History</string>
 
   <!-- Pre-Visit Health History (FR-S-4.6, CR-016a) -->

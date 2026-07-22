@@ -74,6 +74,16 @@ data class EnrollmentRecord(
   /** Q35–65 — Health History (CR-015c). */
   val healthHistory: HealthHistorySnapshot,
 
+  /**
+   * Not part of the Excel spec — collected solely so the `/beneficiaries` API's
+   * `motherDetails.heightCm`/`weightKg` can be sent (server derives BMI from
+   * these; never send a computed BMI). Both optional: the DTO accepts either
+   * absent. Null-safe end to end — omitted entirely from the API payload when
+   * not entered, rather than sent as 0.
+   */
+  val heightCm: Double?,
+  val weightKg: Double?,
+
   /** Device-side submission moment — future sync ordering key. */
   val submittedAt: Instant,
 )

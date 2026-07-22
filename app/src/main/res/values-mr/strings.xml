@@ -26,10 +26,15 @@
   <string name="login_password_placeholder">पासवर्ड प्रविष्ट करा</string>
   <string name="login_button">लॉगिन</string>
   <string name="login_logo_content_description">आरोग्य सखी — गर्भधारणा आणि बाल संगोपन</string>
-  <string name="login_error_username_required">कृपया तुमचा युजरनेम प्रविष्ट करा.</string>
+  <string name="login_error_username_required">कृपया तुमचे युजरनेम प्रविष्ट करा.</string>
   <string name="login_error_password_required">कृपया तुमचा पासवर्ड प्रविष्ट करा.</string>
   <string name="login_error_invalid_credentials">युजरनेम किंवा पासवर्ड चुकीचा आहे. कृपया पुन्हा प्रयत्न करा.</string>
   <string name="login_error_generic">काहीतरी चूक झाली. कृपया पुन्हा प्रयत्न करा.</string>
+  <string name="login_error_network">सर्व्हरशी संपर्क होऊ शकला नाही. कृपया तुमचे इंटरनेट कनेक्शन तपासा आणि पुन्हा प्रयत्न करा.</string>
+  <string name="login_error_wrong_role">हे खाते सखी म्हणून सेट केलेले नाही. कृपया तुमच्या सुपरवायझरशी संपर्क करा.</string>
+  <string name="login_error_offline_no_cache">इंटरनेट कनेक्शन नाही. ऑफलाइन लॉगिन करण्यासाठी कृपया आधी एकदा इंटरनेटसह लॉगिन करा.</string>
+  <string name="login_password_show_content_description">पासवर्ड दाखवा</string>
+  <string name="login_password_hide_content_description">पासवर्ड लपवा</string>
   <string name="login_logout_success">तुम्ही यशस्वीरित्या लॉगआउट झाला आहात</string>
 
   <!-- Common -->
@@ -228,6 +233,7 @@
   <string name="enrollment_pi_edd">EDD (स्वयं-गणना)</string>
   <string name="enrollment_pi_ga">गर्भधारणेचा कालावधी (आठवडे)</string>
   <string name="enrollment_pi_banner">सर्व आवश्यक माहिती भरा</string>
+  <string name="enrollment_validation_banner_title">पुढे जाण्यापूर्वी कृपया खालील गोष्टी दुरुस्त करा:</string>
   <string name="enrollment_pi_back">मागे</string>
   <string name="enrollment_pi_next_health_history">आरोग्य इतिहास</string>
   <!-- Field validation messages -->
@@ -312,7 +318,7 @@
   <string name="enrollment_hh_error_para">पॅरा ग्रॅव्हिडापेक्षा जास्त असू शकत नाही</string>
   <string name="enrollment_hh_error_abortions">गर्भपात ग्रॅव्हिडापेक्षा जास्त असू शकत नाही</string>
   <string name="enrollment_hh_error_dead">जिवंत मुलांपेक्षा जास्त असू शकत नाही</string>
-  <string name="enrollment_hh_error_gravida_total">ग्रॅव्हिडा = पॅरा + गर्भपात + 1 असावे</string>
+  <string name="enrollment_hh_error_gravida_total">जिवंत मुले + मृत जन्म + गर्भपात = ग्रॅव्हिडा असावे</string>
   <string name="enrollment_summary_health_history">आरोग्य इतिहास</string>
 
   <!-- Pre-Visit Health History (FR-S-4.6, CR-016a) — MR translations flagged for native QA -->

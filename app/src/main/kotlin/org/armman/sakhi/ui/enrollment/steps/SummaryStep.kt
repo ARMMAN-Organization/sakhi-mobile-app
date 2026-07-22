@@ -46,6 +46,7 @@ fun SummaryStep(
   personalInfo: PersonalInfoState,
   healthHistory: HealthHistoryState,
   submitFailed: Boolean,
+  submitErrorMessage: String? = null,
   onEditPersonalInfo: () -> Unit,
   onEditHealthHistory: () -> Unit,
   modifier: Modifier = Modifier,
@@ -73,7 +74,7 @@ fun SummaryStep(
       HealthHistoryRows(healthHistory)
     }
     if (submitFailed) {
-      SubmitErrorBanner()
+      SubmitErrorBanner(message = submitErrorMessage)
     }
   }
 }
@@ -251,9 +252,13 @@ private fun ReviewRow(label: String, value: String) {
   }
 }
 
-/** Retryable submit failure (SM-9) — same visual family as the PI banner. */
+/**
+ * Retryable submit failure (SM-9) — same visual family as the PI banner. Shows the real
+ * backend-provided [message] (validation detail or duplicate-conflict text) when available,
+ * falling back to a generic retry message otherwise (e.g. an unparseable error body).
+ */
 @Composable
-private fun SubmitErrorBanner() {
+private fun SubmitErrorBanner(message: String?) {
   val shape = RoundedCornerShape(Dimens.TileRadius)
   Row(
     verticalAlignment = Alignment.CenterVertically,
@@ -269,7 +274,7 @@ private fun SubmitErrorBanner() {
       tint = RiskHigh,
     )
     Text(
-      text = stringResource(R.string.enrollment_submit_error),
+      text = message ?: stringResource(R.string.enrollment_submit_error),
       style = MaterialTheme.typography.bodyMedium,
       color = RiskHigh,
       modifier = Modifier.padding(start = Dimens.SmallSpacing),

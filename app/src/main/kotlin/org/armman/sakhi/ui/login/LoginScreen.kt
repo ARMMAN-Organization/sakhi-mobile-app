@@ -15,12 +15,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -28,10 +33,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.armman.sakhi.R
+import org.armman.sakhi.ui.components.AppIcons
 import org.armman.sakhi.ui.components.AppTextField
 import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.components.StatusBanner
@@ -52,6 +59,7 @@ fun LoginScreen(
   viewModel: LoginViewModel = hiltViewModel(),
 ) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
+  var passwordVisible by remember { mutableStateOf(false) }
 
   LaunchedEffect(state.loginSucceeded) {
     if (state.loginSucceeded) {
@@ -107,12 +115,31 @@ fun LoginScreen(
           placeholder = stringResource(R.string.login_password_placeholder),
           errorText = state.passwordError?.let { stringResource(it) },
           enabled = !state.isSubmitting,
-          visualTransformation = PasswordVisualTransformation(),
+          visualTransformation = if (passwordVisible) {
+            VisualTransformation.None
+          } else {
+            PasswordVisualTransformation()
+          },
           keyboardOptions = KeyboardOptions(
             keyboardType = KeyboardType.Password,
             imeAction = ImeAction.Done,
           ),
           keyboardActions = KeyboardActions(onDone = { viewModel.onLoginClicked() }),
+          trailingIcon = {
+            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+              Icon(
+                imageVector = if (passwordVisible) AppIcons.VisibilityOff else AppIcons.Visibility,
+                contentDescription = stringResource(
+                  if (passwordVisible) {
+                    R.string.login_password_hide_content_description
+                  } else {
+                    R.string.login_password_show_content_description
+                  },
+                ),
+                tint = NeutralG400,
+              )
+            }
+          },
         )
         Spacer(Modifier.height(24.dp))
         PrimaryButton(

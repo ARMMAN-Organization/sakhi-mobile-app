@@ -7,4 +7,7 @@
   <files-path
     name="visitform_captures"
     path="visitform/" />
+  <files-path
+    name="dynamic_form_captures"
+    path="dynamic-form/" />
 </paths>

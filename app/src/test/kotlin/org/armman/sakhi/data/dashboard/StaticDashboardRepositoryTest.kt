@@ -1,15 +1,18 @@
 package org.armman.sakhi.data.dashboard
 
 import kotlinx.coroutines.test.runTest
+import org.armman.sakhi.data.auth.CurrentUserProfile
+import org.armman.sakhi.data.auth.FakeCurrentUserRepository
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StaticDashboardRepositoryTest {
-  private val repository = StaticDashboardRepository()
+  private val currentUserRepository = FakeCurrentUserRepository(displayName = null)
+  private val repository = StaticDashboardRepository(currentUserRepository)
 
   @Test
-  fun `returns the expected static summary`() = runTest {
+  fun `falls back to the static name when the me endpoint has not returned one`() = runTest {
     val summary = repository.getSummary()
 
     assertEquals("Tarini Swaraj", summary.sakhiName)
@@ -32,5 +35,21 @@ class StaticDashboardRepositoryTest {
     assertTrue(summary.activeVisits.pendingReferralCount >= 0)
     assertTrue(b.mothersHighRisk in 0..b.mothersTotal)
     assertTrue(b.infantsHighRisk in 0..b.infantsTotal)
+  }
+
+  @Test
+  fun `uses the me endpoint's display name when available`() = runTest {
+    currentUserRepository.profile = CurrentUserProfile(
+      username = "jane.sakhi",
+      displayName = "Jane Sakhi",
+      mobileNumber = null,
+      projectName = null,
+      cardNumber = null,
+      maskedBankAccount = null,
+    )
+
+    val summary = repository.getSummary()
+
+    assertEquals("Jane Sakhi", summary.sakhiName)
   }
 }

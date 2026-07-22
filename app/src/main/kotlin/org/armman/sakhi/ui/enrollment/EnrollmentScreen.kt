@@ -75,6 +75,11 @@ private const val SAVED_TOAST_MILLIS = 2000L
 fun EnrollmentScreen(
   onBack: () -> Unit,
   onProfile: () -> Unit = {},
+  /** CR-018: Pregnant Woman enrollment now runs entirely through the dynamic
+   * `DynamicMotherRegistrationScreen` (backend-driven schema) instead of this screen's static
+   * Consent/Personal Info/Health History steps — those steps are only still reachable if this
+   * callback is left as a no-op, kept for tests/previews that don't wire real navigation. */
+  onPregnantWomanSelected: () -> Unit = {},
   viewModel: EnrollmentViewModel = hiltViewModel(),
 ) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -135,6 +140,7 @@ fun EnrollmentScreen(
             else -> EnrollmentBody(
               state = state,
               viewModel = viewModel,
+              onPregnantWomanSelected = onPregnantWomanSelected,
             )
           }
         }
@@ -180,6 +186,7 @@ private fun SavedToast(modifier: Modifier = Modifier) {
 private fun EnrollmentBody(
   state: EnrollmentUiState,
   viewModel: EnrollmentViewModel,
+  onPregnantWomanSelected: () -> Unit,
 ) {
   // Tab labels wrap to two lines on mobile; tablet shows them on one line
   // (QA 2026-07-13), so the resource's line break becomes a space there.
@@ -194,12 +201,21 @@ private fun EnrollmentBody(
   // Tablet designs inset content 48dp from the screen edges; mobile 24dp.
   val hPadding = if (isTablet) Dimens.ScreenPaddingTablet else Dimens.ScreenPadding
 
+  // Hoisted (rather than inline rememberScrollState()) so a blocked Next tap can scroll the step
+  // back to its validation banner — otherwise, tapping Next while scrolled down near the bottom
+  // button leaves the (now off-screen) banner unnoticed and the step looks like it silently did
+  // nothing, see EnrollmentUiState.validationScrollTrigger.
+  val scrollState = rememberScrollState()
+  LaunchedEffect(state.validationScrollTrigger) {
+    if (state.validationScrollTrigger > 0) scrollState.animateScrollTo(0)
+  }
+
   Column(modifier = Modifier.fillMaxSize()) {
     Column(
       modifier = Modifier
         .weight(1f)
         .fillMaxWidth()
-        .verticalScroll(rememberScrollState())
+        .verticalScroll(scrollState)
         .padding(horizontal = hPadding),
     ) {
       Text(
@@ -213,7 +229,10 @@ private fun EnrollmentBody(
           selectedType = state.beneficiaryType,
           onSelect = { type ->
             viewModel.selectBeneficiaryType(type)
-            if (type == BeneficiaryType.PREGNANT_WOMAN) viewModel.startEnrollment()
+            // CR-018: Pregnant Woman now goes straight to the dynamic, backend-schema-driven
+            // form instead of this screen's own static Consent/Personal Info/Health History
+            // steps — those steps' fields are superseded by the MOTHER_REGISTRATION schema.
+            if (type == BeneficiaryType.PREGNANT_WOMAN) onPregnantWomanSelected()
           },
         )
         else -> {
@@ -326,6 +345,8 @@ private fun StepContent(state: EnrollmentUiState, viewModel: EnrollmentViewModel
         onAbortions = viewModel::setAbortions,
         onStillBirths = viewModel::setStillBirths,
         onDeadChildren = viewModel::setDeadChildren,
+        onHeightCm = viewModel::setHeightCm,
+        onWeightKg = viewModel::setWeightKg,
         onLastPregnancyWhen = viewModel::setLastPregnancyWhen,
         onDeliveryComplication = viewModel::toggleDeliveryComplication,
         onLastDeliveryDuration = viewModel::setLastDeliveryDuration,
@@ -348,6 +369,7 @@ private fun StepContent(state: EnrollmentUiState, viewModel: EnrollmentViewModel
       personalInfo = state.personalInfo,
       healthHistory = state.healthHistory,
       submitFailed = state.submitFailed,
+      submitErrorMessage = state.submitErrorMessage,
       onEditPersonalInfo = { viewModel.goToStep(EnrollmentStep.PERSONAL_INFO) },
       onEditHealthHistory = { viewModel.goToStep(EnrollmentStep.HEALTH_HISTORY) },
       modifier = Modifier.padding(bottom = Dimens.ScreenPadding),

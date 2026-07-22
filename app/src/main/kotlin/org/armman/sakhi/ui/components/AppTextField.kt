@@ -34,6 +34,7 @@ fun AppTextField(
   keyboardActions: KeyboardActions = KeyboardActions.Default,
   visualTransformation: VisualTransformation = VisualTransformation.None,
   enabled: Boolean = true,
+  trailingIcon: (@Composable () -> Unit)? = null,
   singleLine: Boolean = true,
   minLines: Int = 1,
 ) {
@@ -55,6 +56,7 @@ fun AppTextField(
       keyboardOptions = keyboardOptions,
       keyboardActions = keyboardActions,
       visualTransformation = visualTransformation,
+      trailingIcon = trailingIcon,
       shape = RoundedCornerShape(8.dp),
       colors = OutlinedTextFieldDefaults.colors(
         unfocusedBorderColor = NeutralG75,

@@ -7,6 +7,8 @@ import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import org.armman.sakhi.BuildConfig
+import org.armman.sakhi.data.auth.AuthInterceptor
+import org.armman.sakhi.data.network.ApiFileLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
@@ -20,7 +22,10 @@ private const val TIMEOUT_SECONDS = 30L
 object NetworkModule {
   @Provides
   @Singleton
-  fun provideOkHttp(): OkHttpClient {
+  fun provideOkHttp(
+    authInterceptor: AuthInterceptor,
+    apiFileLoggingInterceptor: ApiFileLoggingInterceptor,
+  ): OkHttpClient {
     // Never log request/response bodies in release — they may carry PII or tokens.
     val logging = HttpLoggingInterceptor().apply {
       level = if (BuildConfig.DEBUG) {
@@ -29,12 +34,19 @@ object NetworkModule {
         HttpLoggingInterceptor.Level.NONE
       }
     }
-    return OkHttpClient.Builder()
+    val builder = OkHttpClient.Builder()
       .connectTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
       .readTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
       .writeTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+      // Attaches the Bearer token (if any) before the logging interceptors see the request.
+      .addInterceptor(authInterceptor)
       .addInterceptor(logging)
-      .build()
+    // Temporary CR-017/CR-018 verification aid — see ApiFileLoggingInterceptor's doc. Debug-only,
+    // remove once verification is done; must never reach a release build.
+    if (BuildConfig.DEBUG) {
+      builder.addInterceptor(apiFileLoggingInterceptor)
+    }
+    return builder.build()
   }
 
   @Provides

@@ -1,7 +1,5 @@
 package org.armman.sakhi.ui.enrollment.steps
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,7 +7,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -26,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import org.armman.sakhi.R
 import org.armman.sakhi.data.geography.GeographyUnit
 import org.armman.sakhi.ui.components.AppTextField
+import org.armman.sakhi.ui.components.ValidationErrorBanner
 import org.armman.sakhi.ui.enrollment.FieldError
 import org.armman.sakhi.ui.enrollment.PersonalInfoState
 import org.armman.sakhi.ui.enrollment.components.AppDateField
@@ -35,8 +33,6 @@ import org.armman.sakhi.ui.enrollment.components.AppReadOnlyField
 import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG400
-import org.armman.sakhi.ui.theme.RiskHigh
-import org.armman.sakhi.ui.theme.RiskHighSurface
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -308,7 +304,7 @@ fun PersonalInfoStep(
     }
 
     if (state.showValidationBanner) {
-      ValidationBanner()
+      ValidationErrorBanner(errors = state.validationErrors)
     }
   }
 }
@@ -359,33 +355,6 @@ private fun RadioOption(label: String, selected: Boolean, onClick: () -> Unit) {
       text = label,
       style = MaterialTheme.typography.titleMedium,
       color = if (selected) MaterialTheme.colorScheme.primary else NeutralG400,
-    )
-  }
-}
-
-/** Red "Complete all necessary fields" banner per the design frame. */
-@Composable
-private fun ValidationBanner() {
-  val shape = RoundedCornerShape(Dimens.TileRadius)
-  Row(
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing),
-    modifier = Modifier
-      .fillMaxWidth()
-      .background(RiskHighSurface, shape)
-      .border(1.dp, RiskHigh, shape)
-      .padding(horizontal = Dimens.ItemSpacing, vertical = Dimens.ChipSpacing),
-  ) {
-    Icon(
-      painter = painterResource(R.drawable.ic_warning_circle),
-      contentDescription = null,
-      tint = RiskHigh,
-      modifier = Modifier.size(20.dp),
-    )
-    Text(
-      text = stringResource(R.string.enrollment_pi_banner),
-      style = MaterialTheme.typography.titleMedium,
-      color = RiskHigh,
     )
   }
 }

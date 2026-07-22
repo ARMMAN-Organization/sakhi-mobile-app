@@ -250,6 +250,51 @@ fun AppPhoneField(
 }
 
 /**
+ * Free-text/number entry in the same outlined-box style as [AppPhoneField], minus the fixed
+ * prefix — used by CR-018's generic dynamic-form renderer for `text`/`text_geo`/`number` fields,
+ * where the label, placeholder, and keyboard type all come from the schema rather than being
+ * hardcoded per field like the rest of this file's components.
+ */
+@Composable
+fun AppTextInputField(
+  label: String,
+  placeholder: String,
+  value: String,
+  onValueChange: (String) -> Unit,
+  modifier: Modifier = Modifier,
+  errorText: String? = null,
+  keyboardType: KeyboardType = KeyboardType.Text,
+) {
+  FieldFrame(label = label, errorText = errorText, modifier = modifier) {
+    Box(
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(Dimens.SmallButtonHeight)
+        .clip(FieldShape)
+        .background(White)
+        .border(1.dp, fieldBorder(errorText != null), FieldShape)
+        .padding(horizontal = Dimens.ChipSpacing),
+      contentAlignment = Alignment.CenterStart,
+    ) {
+      BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        textStyle = MaterialTheme.typography.bodyLarge.copy(color = NeutralG400),
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        singleLine = true,
+        decorationBox = { inner ->
+          if (value.isEmpty()) {
+            Text(text = placeholder, style = MaterialTheme.typography.bodyLarge, color = NeutralG100)
+          }
+          inner()
+        },
+        modifier = Modifier.fillMaxWidth(),
+      )
+    }
+  }
+}
+
+/**
  * Radio group in the enrollment field style: label + a set of single-select
  * options. [horizontal] lays Yes/No side by side; otherwise options stack.
  * [selectedIndex] is 0-based (callers convert to/from 1-based codes).
@@ -322,6 +367,29 @@ fun AppCheckboxGroup(
         )
       }
     }
+  }
+}
+
+/**
+ * A single standalone checkbox (box on the left, label on the right) — for a yes/no affirmation
+ * the design shows as one checkbox rather than a Yes/No pair (e.g. the Consent tab's "Ensure that
+ * the beneficiary" items). [checked] drives the box; [onCheckedChange] reports the new state.
+ */
+@Composable
+fun AppSingleCheckbox(
+  label: String,
+  checked: Boolean,
+  onCheckedChange: (Boolean) -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  Row(modifier = modifier.fillMaxWidth()) {
+    SelectableRow(
+      label = label,
+      selected = checked,
+      iconSelected = R.drawable.ic_checkbox_selected,
+      iconUnselected = R.drawable.ic_checkbox,
+      onClick = { onCheckedChange(!checked) },
+    )
   }
 }
 
