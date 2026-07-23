@@ -673,9 +673,11 @@ class EnrollmentViewModelTest {
 
     val errors = pi().validationErrors
     assertTrue(errors.isNotEmpty())
-    // Spot-check a couple of concrete messages rather than the full ~20-item list.
+    // Spot-check a couple of concrete messages rather than the full ~20-item list. State/district/
+    // block are pre-filled from the Sakhi's geography assignment (EnrollmentViewModel.load), so
+    // they're not in the missing list — check fields the Sakhi still has to enter.
     assertTrue(errors.any { it.contains("first name", ignoreCase = true) })
-    assertTrue(errors.any { it.contains("state", ignoreCase = true) })
+    assertTrue(errors.any { it.contains("mobile", ignoreCase = true) })
   }
 
   @Test

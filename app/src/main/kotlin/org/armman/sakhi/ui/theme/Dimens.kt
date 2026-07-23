@@ -76,4 +76,23 @@ object Dimens {
 
   /** Micro gap between a review row's label and its value (Summary frame). */
   val LabelValueGap = 2.dp
+
+  // "Forms Uploaded" sync-status modal (Home screen Data Upload pill).
+  /** Status icon/spinner diameter per row. */
+  val UploadModalStatusIconSize = 24.dp
+
+  /** Caps the record list's height so a long draft history scrolls inside the modal instead of
+   * pushing it off-screen. */
+  val UploadModalListMaxHeight = 360.dp
+
+  /** Diameter of the circular close (X) button overlapping the modal's top-right corner — kept
+   * small (matches FilterPopup's close button precedent), not Material3's default 48dp. */
+  val UploadModalCloseButtonSize = 28.dp
+
+  /** X glyph size inside [UploadModalCloseButtonSize] — smaller than Icon's own 24dp default so
+   * it doesn't crowd the smaller circle. */
+  val UploadModalCloseIconSize = 16.dp
+
+  /** Height of a category card's sync-progress bar (thicker + rounded, per the Figma reference). */
+  val UploadModalProgressBarHeight = 8.dp
 }

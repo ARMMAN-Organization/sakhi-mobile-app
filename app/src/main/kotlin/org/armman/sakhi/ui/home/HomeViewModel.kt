@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.armman.sakhi.data.dashboard.DashboardRepository
 import org.armman.sakhi.data.dashboard.DashboardSummary
+import org.armman.sakhi.data.forms.DynamicFormDraftRepository
+import org.armman.sakhi.data.forms.FormUploadRecord
 import javax.inject.Inject
 
 /** UI state for the Home dashboard — loading, error and success. */
@@ -18,13 +20,28 @@ sealed interface HomeUiState {
   data object Error : HomeUiState
 }
 
+/**
+ * State for the "Forms Uploaded" sync-status modal (Data Upload pill on Home). Kept separate from
+ * [HomeUiState] so opening/reloading the modal never disturbs the dashboard cards underneath, and
+ * a modal load failure doesn't force the whole Home screen into an error state.
+ */
+data class UploadModalState(
+  val isVisible: Boolean = false,
+  val isLoading: Boolean = false,
+  val records: List<FormUploadRecord> = emptyList(),
+)
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
   private val dashboardRepository: DashboardRepository,
+  private val dynamicFormDraftRepository: DynamicFormDraftRepository,
 ) : ViewModel() {
 
   private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
   val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
+  private val _uploadModalState = MutableStateFlow(UploadModalState())
+  val uploadModalState: StateFlow<UploadModalState> = _uploadModalState.asStateFlow()
 
   init {
     loadSummary()
@@ -41,5 +58,25 @@ class HomeViewModel @Inject constructor(
         HomeUiState.Error
       }
     }
+  }
+
+  /** Opens the "Forms Uploaded" modal and loads the current CR-018 draft list. */
+  fun onDataUploadClicked() {
+    _uploadModalState.value = UploadModalState(isVisible = true, isLoading = true)
+    viewModelScope.launch {
+      val records = try {
+        dynamicFormDraftRepository.getUploadRecords()
+      } catch (e: Exception) {
+        // Fail closed to an empty list rather than crashing the modal — the Sakhi can dismiss
+        // and reopen; the underlying data is untouched (this is a read-only view).
+        emptyList()
+      }
+      _uploadModalState.value = UploadModalState(isVisible = true, isLoading = false, records = records)
+    }
+  }
+
+  /** Dismisses the modal; clears records so a stale list doesn't flash on the next open. */
+  fun onDismissUploadModal() {
+    _uploadModalState.value = UploadModalState(isVisible = false)
   }
 }

@@ -39,4 +39,9 @@ interface DynamicFormDraftRepository {
     answers: FormAnswers,
     registrationDate: LocalDate,
   ): DynamicFormSubmitResult
+
+  /** All CR-018 Mother Registration drafts, newest first, for the Home screen's "Forms Uploaded"
+   * sync-status modal. The static enrollment flow is out of scope — it's being deprecated in
+   * favor of this dynamic form, per product direction. */
+  suspend fun getUploadRecords(): List<FormUploadRecord>
 }

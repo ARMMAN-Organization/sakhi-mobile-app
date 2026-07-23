@@ -59,6 +59,7 @@ internal fun HomeContent(
   onAllBeneficiaries: () -> Unit = {},
   onSeeVisitTracker: () -> Unit = {},
   onRegisterNew: () -> Unit = {},
+  onDataUploadClick: () -> Unit = {},
 ) {
   Column(modifier = Modifier.fillMaxSize()) {
     Column(
@@ -68,7 +69,7 @@ internal fun HomeContent(
         .verticalScroll(rememberScrollState())
         .padding(horizontal = Dimens.ItemSpacing, vertical = Dimens.ScreenPadding),
     ) {
-      SakhiRow(summary)
+      SakhiRow(summary, onDataUploadClick)
       ActiveVisitsCard(summary, onSeeVisitTracker)
       ActiveBeneficiariesCard(summary)
     }
@@ -78,7 +79,7 @@ internal fun HomeContent(
 
 /** Sakhi name + Data Upload pill on one row, "Updated" caption under the pill. */
 @Composable
-private fun SakhiRow(summary: DashboardSummary) {
+private fun SakhiRow(summary: DashboardSummary, onDataUploadClick: () -> Unit) {
   val updatedOn = summary.lastUploadedOn.format(
     DateTimeFormatter.ofPattern("EEE, d MMM", Locale.getDefault()),
   )
@@ -104,7 +105,7 @@ private fun SakhiRow(summary: DashboardSummary) {
     )
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
       val isTablet = LocalConfiguration.current.screenWidthDp >= Dimens.TabletMinWidthDp
-      DataUploadPill(pendingCount = summary.pendingUploadCount)
+      DataUploadPill(pendingCount = summary.pendingUploadCount, onClick = onDataUploadClick)
       Text(
         text = stringResource(R.string.home_updated_on, updatedOn),
         style = if (isTablet) {
@@ -120,11 +121,11 @@ private fun SakhiRow(summary: DashboardSummary) {
 }
 
 @Composable
-private fun DataUploadPill(pendingCount: Int) {
+private fun DataUploadPill(pendingCount: Int, onClick: () -> Unit) {
   val isTablet = LocalConfiguration.current.screenWidthDp >= Dimens.TabletMinWidthDp
   val badgeSize = if (isTablet) 28.dp else 24.dp
   Button(
-    onClick = { /* no-op: upload flow not built yet */ },
+    onClick = onClick,
     contentPadding = PaddingValues(horizontal = Dimens.PillButtonPaddingH),
     modifier = Modifier.height(if (isTablet) Dimens.ButtonHeightTablet else Dimens.ButtonHeight),
   ) {

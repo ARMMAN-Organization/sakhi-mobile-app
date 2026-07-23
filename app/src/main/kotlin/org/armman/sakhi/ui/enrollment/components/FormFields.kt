@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -23,7 +24,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -31,7 +34,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -82,6 +87,17 @@ private fun fieldBorder(isError: Boolean) =
 /**
  * Dropdown selector styled like the design's "Select …" fields: outlined box,
  * placeholder, trailing chevron, options in a DropdownMenu.
+ *
+ * Two behaviors on top of the plain Material3 [DropdownMenu]:
+ * - If [options] resolves to exactly one item and nothing is selected yet, it's auto-selected —
+ *   a single-option list isn't really a choice, so the Sakhi shouldn't have to open the menu and
+ *   tap its only row (common on the geography cascade, where a Sakhi's area often has only one
+ *   PHC/sub-centre). Guarded on [enabled] and `selectedIndex == null` so it never overrides an
+ *   existing selection or fires on a disabled/dependent field.
+ * - The menu's width is pinned to the field's own measured width, instead of [DropdownMenu]'s
+ *   default of wrapping each item's text — without this a short single-word option (e.g. a
+ *   district name) renders as a narrow floating chip instead of matching the outlined field
+ *   underneath it.
  */
 @Composable
 fun AppDropdownField(
@@ -95,6 +111,15 @@ fun AppDropdownField(
   enabled: Boolean = true,
 ) {
   var expanded by remember { mutableStateOf(false) }
+  var fieldWidthPx by remember { mutableIntStateOf(0) }
+  val density = LocalDensity.current
+
+  LaunchedEffect(options, enabled, selectedIndex) {
+    if (enabled && selectedIndex == null && options.size == 1) {
+      onSelected(0)
+    }
+  }
+
   FieldFrame(label = label, errorText = errorText, modifier = modifier) {
     Box {
       Row(
@@ -102,6 +127,7 @@ fun AppDropdownField(
         modifier = Modifier
           .fillMaxWidth()
           .height(Dimens.SmallButtonHeight)
+          .onSizeChanged { fieldWidthPx = it.width }
           .clip(FieldShape)
           .background(White)
           .border(1.dp, fieldBorder(errorText != null), FieldShape)
@@ -121,7 +147,11 @@ fun AppDropdownField(
           modifier = Modifier.size(20.dp),
         )
       }
-      DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+      DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = { expanded = false },
+        modifier = Modifier.width(with(density) { fieldWidthPx.toDp() }),
+      ) {
         options.forEachIndexed { index, option ->
           DropdownMenuItem(
             text = { Text(option, style = MaterialTheme.typography.bodyLarge) },

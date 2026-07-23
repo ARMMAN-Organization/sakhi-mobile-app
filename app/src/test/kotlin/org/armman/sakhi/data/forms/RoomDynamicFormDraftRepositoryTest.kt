@@ -68,7 +68,9 @@ class RoomDynamicFormDraftRepositoryTest {
       "living_children" to "1",
       "abortions_pregnancy_losses_before_24_weeks" to "0",
       "still_births" to "0",
-      "beneficary_name_first_name_middle_name_last_name" to "Test Mother",
+      "first_name" to "Test",
+      "last_name" to "Mother",
+      "date_of_birth" to "1996-01-01",
       "mobile_number" to "9876543210",
       "registrtion_date" to "2026-07-20",
     ),
@@ -221,5 +223,76 @@ class RoomDynamicFormDraftRepositoryTest {
     assertEquals(DynamicFormSubmitResult.QueuedOffline, result)
     assertEquals(1, syncScheduler.syncNowCallCount)
     assertEquals(EnrollmentSyncStatus.PENDING, dao.getByLocalBeneficiaryId("local-1")?.syncStatus)
+  }
+
+  // --- getUploadRecords: Home screen "Forms Uploaded" sync-status modal ------------------------
+
+  @Test
+  fun `getUploadRecords is empty when there are no drafts`() = runTest {
+    assertTrue(repository.getUploadRecords().isEmpty())
+  }
+
+  @Test
+  fun `getUploadRecords maps every draft's id, status and createdAt, newest first`() = runTest {
+    // Timestamps set explicitly (not via saveDraft's Instant.now()) so ordering is deterministic
+    // rather than depending on two real clock reads landing in different milliseconds.
+    dao.upsert(
+      DynamicFormDraftEntity(
+        localBeneficiaryId = "local-1",
+        formCode = "MOTHER_REGISTRATION",
+        formVersionId = "version-1",
+        localSubmissionUuid = "sub-1",
+        syncStatus = EnrollmentSyncStatus.PENDING,
+        createdAtEpochMillis = 1_000L,
+        lastAttemptAtEpochMillis = null,
+        retryCount = 0,
+        remoteBeneficiaryId = null,
+        remoteSubmissionId = null,
+        lastErrorMessage = null,
+      ),
+    )
+    dao.upsert(
+      DynamicFormDraftEntity(
+        localBeneficiaryId = "local-2",
+        formCode = "MOTHER_REGISTRATION",
+        formVersionId = "version-1",
+        localSubmissionUuid = "sub-2",
+        syncStatus = EnrollmentSyncStatus.FAILED,
+        createdAtEpochMillis = 2_000L,
+        lastAttemptAtEpochMillis = null,
+        retryCount = 1,
+        remoteBeneficiaryId = null,
+        remoteSubmissionId = null,
+        lastErrorMessage = "pii.villageId: Invalid uuid",
+      ),
+    )
+
+    val records = repository.getUploadRecords()
+
+    assertEquals(2, records.size)
+    assertEquals("local-2", records[0].localBeneficiaryId)
+    assertEquals("MOTHER_REGISTRATION", records[0].formCode)
+    assertEquals(EnrollmentSyncStatus.FAILED, records[0].syncStatus)
+    assertEquals(2_000L, records[0].createdAtEpochMillis)
+    assertEquals("local-1", records[1].localBeneficiaryId)
+    assertEquals(EnrollmentSyncStatus.PENDING, records[1].syncStatus)
+  }
+
+  @Test
+  fun `getUploadRecords never exposes remote ids or error messages, only the PII-free projection`() = runTest {
+    repository.saveDraft("local-1", "MOTHER_REGISTRATION", "version-1", "sub-1", answers, LocalDate.of(2026, 7, 1))
+    dao.upsert(
+      requireNotNull(dao.getByLocalBeneficiaryId("local-1")).copy(
+        remoteBeneficiaryId = "server-ben-1",
+        lastErrorMessage = "pii.villageId: Invalid uuid",
+      ),
+    )
+
+    val record = repository.getUploadRecords().single()
+
+    // FormUploadRecord's declared fields are the whole contract here — this assertion documents
+    // that the type itself has no remoteBeneficiaryId/lastErrorMessage field to leak.
+    assertEquals("local-1", record.localBeneficiaryId)
+    assertEquals(EnrollmentSyncStatus.PENDING, record.syncStatus)
   }
 }

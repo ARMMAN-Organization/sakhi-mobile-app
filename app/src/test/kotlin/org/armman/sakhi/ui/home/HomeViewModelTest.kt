@@ -10,6 +10,11 @@ import org.armman.sakhi.data.dashboard.ActiveBeneficiaries
 import org.armman.sakhi.data.dashboard.ActiveVisits
 import org.armman.sakhi.data.dashboard.DashboardRepository
 import org.armman.sakhi.data.dashboard.DashboardSummary
+import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
+import org.armman.sakhi.data.forms.DynamicFormDraftRepository
+import org.armman.sakhi.data.forms.DynamicFormSubmitResult
+import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormUploadRecord
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -57,12 +62,44 @@ class HomeViewModelTest {
     }
   }
 
+  /** Controllable fake for the CR-018 draft store — only [getUploadRecords] is exercised by
+   * [HomeViewModel]; [saveDraft]/[submitDraft] are unused stubs to satisfy the interface. */
+  private class FakeDynamicFormDraftRepository(
+    var records: List<FormUploadRecord> = emptyList(),
+    var error: Exception? = null,
+  ) : DynamicFormDraftRepository {
+    override suspend fun saveDraft(
+      localBeneficiaryId: String,
+      formCode: String,
+      formVersionId: String,
+      localSubmissionUuid: String,
+      answers: FormAnswers,
+      registrationDate: LocalDate,
+    ): Result<Unit> = Result.success(Unit)
+
+    override suspend fun submitDraft(
+      localBeneficiaryId: String,
+      formCode: String,
+      formVersionId: String,
+      localSubmissionUuid: String,
+      answers: FormAnswers,
+      registrationDate: LocalDate,
+    ): DynamicFormSubmitResult = DynamicFormSubmitResult.Synced
+
+    override suspend fun getUploadRecords(): List<FormUploadRecord> {
+      error?.let { throw it }
+      return records
+    }
+  }
+
   private lateinit var repository: FakeDashboardRepository
+  private lateinit var draftRepository: FakeDynamicFormDraftRepository
 
   @Before
   fun setUp() {
     Dispatchers.setMain(dispatcher)
     repository = FakeDashboardRepository()
+    draftRepository = FakeDynamicFormDraftRepository()
   }
 
   @After
@@ -72,13 +109,13 @@ class HomeViewModelTest {
 
   @Test
   fun `initial state is Loading`() {
-    val viewModel = HomeViewModel(repository)
+    val viewModel = HomeViewModel(repository, draftRepository)
     assertEquals(HomeUiState.Loading, viewModel.uiState.value)
   }
 
   @Test
   fun `successful load exposes the summary`() = runTest(dispatcher) {
-    val viewModel = HomeViewModel(repository)
+    val viewModel = HomeViewModel(repository, draftRepository)
     dispatcher.scheduler.advanceUntilIdle()
 
     val state = viewModel.uiState.value
@@ -89,7 +126,7 @@ class HomeViewModelTest {
   @Test
   fun `repository failure results in Error state`() = runTest(dispatcher) {
     repository.error = IOException("network down")
-    val viewModel = HomeViewModel(repository)
+    val viewModel = HomeViewModel(repository, draftRepository)
     dispatcher.scheduler.advanceUntilIdle()
 
     assertEquals(HomeUiState.Error, viewModel.uiState.value)
@@ -98,7 +135,7 @@ class HomeViewModelTest {
   @Test
   fun `retry after error reloads and reaches Success`() = runTest(dispatcher) {
     repository.error = IOException("network down")
-    val viewModel = HomeViewModel(repository)
+    val viewModel = HomeViewModel(repository, draftRepository)
     dispatcher.scheduler.advanceUntilIdle()
     assertEquals(HomeUiState.Error, viewModel.uiState.value)
 
@@ -116,11 +153,102 @@ class HomeViewModelTest {
       mothersTotal = 0,
       infantsTotal = 0,
     ).copy(pendingUploadCount = 0)
-    val viewModel = HomeViewModel(repository)
+    val viewModel = HomeViewModel(repository, draftRepository)
     dispatcher.scheduler.advanceUntilIdle()
 
     val state = viewModel.uiState.value
     assertTrue(state is HomeUiState.Success)
     assertEquals(0, (state as HomeUiState.Success).summary.pendingUploadCount)
   }
+
+  // --- "Forms Uploaded" sync-status modal --------------------------------------------------
+
+  private fun record(id: String, status: EnrollmentSyncStatus, createdAtEpochMillis: Long) =
+    FormUploadRecord(
+      localBeneficiaryId = id,
+      formCode = "MOTHER_REGISTRATION",
+      syncStatus = status,
+      createdAtEpochMillis = createdAtEpochMillis,
+    )
+
+  @Test
+  fun `initial upload modal state is hidden and empty`() {
+    val viewModel = HomeViewModel(repository, draftRepository)
+    val state = viewModel.uploadModalState.value
+
+    assertEquals(false, state.isVisible)
+    assertEquals(false, state.isLoading)
+    assertTrue(state.records.isEmpty())
+  }
+
+  @Test
+  fun `onDataUploadClicked shows the modal and loads records from the dynamic form repository`() =
+    runTest(dispatcher) {
+      draftRepository.records = listOf(
+        record("local-1", EnrollmentSyncStatus.SYNCED, 1L),
+        record("local-2", EnrollmentSyncStatus.PENDING, 2L),
+      )
+      val viewModel = HomeViewModel(repository, draftRepository)
+
+      viewModel.onDataUploadClicked()
+      assertTrue(viewModel.uploadModalState.value.isVisible)
+      assertTrue(viewModel.uploadModalState.value.isLoading)
+
+      dispatcher.scheduler.advanceUntilIdle()
+
+      val state = viewModel.uploadModalState.value
+      assertTrue(state.isVisible)
+      assertEquals(false, state.isLoading)
+      assertEquals(2, state.records.size)
+    }
+
+  @Test
+  fun `onDataUploadClicked exposes counts consistent with a 2 of 4 synced summary`() = runTest(dispatcher) {
+    draftRepository.records = listOf(
+      record("local-1", EnrollmentSyncStatus.SYNCED, 1L),
+      record("local-2", EnrollmentSyncStatus.SYNCED, 2L),
+      record("local-3", EnrollmentSyncStatus.PENDING, 3L),
+      record("local-4", EnrollmentSyncStatus.FAILED, 4L),
+    )
+    val viewModel = HomeViewModel(repository, draftRepository)
+
+    viewModel.onDataUploadClicked()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val state = viewModel.uploadModalState.value
+    val syncedCount = state.records.count { it.syncStatus == EnrollmentSyncStatus.SYNCED }
+    assertEquals(2, syncedCount)
+    assertEquals(4, state.records.size)
+  }
+
+  @Test
+  fun `onDismissUploadModal hides the modal and clears records`() = runTest(dispatcher) {
+    draftRepository.records = listOf(record("local-1", EnrollmentSyncStatus.SYNCED, 1L))
+    val viewModel = HomeViewModel(repository, draftRepository)
+    viewModel.onDataUploadClicked()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onDismissUploadModal()
+
+    val state = viewModel.uploadModalState.value
+    assertEquals(false, state.isVisible)
+    assertTrue(state.records.isEmpty())
+  }
+
+  @Test
+  fun `draft repository failure yields an empty modal instead of crashing, and leaves dashboard state untouched`() =
+    runTest(dispatcher) {
+      draftRepository.error = IOException("db read failed")
+      val viewModel = HomeViewModel(repository, draftRepository)
+      dispatcher.scheduler.advanceUntilIdle() // let the unrelated dashboard load finish first
+
+      viewModel.onDataUploadClicked()
+      dispatcher.scheduler.advanceUntilIdle()
+
+      val modalState = viewModel.uploadModalState.value
+      assertTrue(modalState.isVisible)
+      assertEquals(false, modalState.isLoading)
+      assertTrue(modalState.records.isEmpty())
+      assertTrue(viewModel.uiState.value is HomeUiState.Success)
+    }
 }

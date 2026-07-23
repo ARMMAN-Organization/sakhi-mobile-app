@@ -13,6 +13,16 @@
   <string name="home_active_beneficiaries">Active Beneficiaries</string>
   <string name="home_mothers">Mothers</string>
   <string name="home_infants">Infants</string>
+  <!-- Forms Uploaded sync-status modal -->
+  <string name="home_upload_modal_title">%1$d/%2$d Forms Uploaded</string>
+  <string name="home_upload_modal_empty">No forms submitted yet.</string>
+  <string name="home_upload_modal_form_label">Mother Registration</string>
+  <string name="home_upload_modal_category_forms">%1$d/%2$d Forms</string>
+  <string name="home_upload_status_synced">Uploaded</string>
+  <string name="home_upload_status_pending">Pending</string>
+  <string name="home_upload_status_syncing">Syncing…</string>
+  <string name="home_upload_status_needs_attention">Needs attention</string>
+  <string name="home_upload_modal_close_content_description">Close</string>
   <string name="home_all_beneficiaries">All Beneficiaries</string>
   <string name="home_register_new">Register New</string>
   <string name="home_error_load">We couldn\'t load your dashboard. Please try again.</string>

@@ -75,6 +75,16 @@ class RoomDynamicFormDraftRepository @Inject constructor(
     }
   }
 
+  override suspend fun getUploadRecords(): List<FormUploadRecord> =
+    dao.getAll().map { entity ->
+      FormUploadRecord(
+        localBeneficiaryId = entity.localBeneficiaryId,
+        formCode = entity.formCode,
+        syncStatus = entity.syncStatus,
+        createdAtEpochMillis = entity.createdAtEpochMillis,
+      )
+    }
+
   private suspend fun saveLocally(
     localBeneficiaryId: String,
     formCode: String,

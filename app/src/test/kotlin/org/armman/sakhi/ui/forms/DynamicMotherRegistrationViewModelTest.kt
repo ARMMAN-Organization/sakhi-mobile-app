@@ -11,6 +11,7 @@ import org.armman.sakhi.data.forms.DynamicFormSubmitResult
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
+import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.FormsRepository
 import org.armman.sakhi.data.forms.GeographyFieldOptionsResolver
@@ -81,6 +82,8 @@ class DynamicMotherRegistrationViewModelTest {
       submitCallCount++
       return submitResult
     }
+
+    override suspend fun getUploadRecords(): List<FormUploadRecord> = emptyList()
   }
 
   private val dispatcher = StandardTestDispatcher()

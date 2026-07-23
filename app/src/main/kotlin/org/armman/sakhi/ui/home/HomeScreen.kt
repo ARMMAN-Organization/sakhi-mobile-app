@@ -52,6 +52,7 @@ fun HomeScreen(
   viewModel: HomeViewModel = hiltViewModel(),
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+  val uploadModalState by viewModel.uploadModalState.collectAsStateWithLifecycle()
 
   Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -70,10 +71,19 @@ fun HomeScreen(
             onAllBeneficiaries = onAllBeneficiaries,
             onSeeVisitTracker = onSeeVisitTracker,
             onRegisterNew = onRegisterNew,
+            onDataUploadClick = viewModel::onDataUploadClicked,
           )
         }
       }
     }
+  }
+
+  if (uploadModalState.isVisible) {
+    FormsUploadedModal(
+      records = uploadModalState.records,
+      isLoading = uploadModalState.isLoading,
+      onDismiss = viewModel::onDismissUploadModal,
+    )
   }
 }
 
