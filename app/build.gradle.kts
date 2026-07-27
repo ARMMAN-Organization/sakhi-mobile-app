@@ -27,14 +27,26 @@ android {
     minSdk = 29
     targetSdk = 34
     versionCode = 1
-    versionName = "0.1.0"
+    versionName = "0.0.1"
     buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
+  }
+
+  signingConfigs {
+    // Team-share builds: signed with the local debug keystore so the release APK is
+    // installable. Production/Play releases use a proper keystore via CI (see .claude/CLAUDE.md).
+    create("teamShare") {
+      storeFile = File(System.getProperty("user.home"), ".android/debug.keystore")
+      storePassword = "android"
+      keyAlias = "androiddebugkey"
+      keyPassword = "android"
+    }
   }
 
   buildTypes {
     release {
       isMinifyEnabled = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+      signingConfig = signingConfigs.getByName("teamShare")
     }
   }
   buildFeatures { compose = true; buildConfig = true }

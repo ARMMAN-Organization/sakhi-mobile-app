@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import org.armman.sakhi.data.forms.AGE_YEARS_QUESTION_CODE
+import org.armman.sakhi.data.forms.AGE_FROM_DOB_QUESTION_CODES
 import org.armman.sakhi.data.forms.COMPUTED_AGE_FROM_DOB
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormComputedFieldEvaluator
@@ -20,6 +20,7 @@ import org.armman.sakhi.data.forms.FormNumericRangeValidator
 import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.FormVisibilityEvaluator
 import org.armman.sakhi.data.forms.FormFieldInputType
+import org.armman.sakhi.data.forms.MobileNumberRule
 import org.armman.sakhi.data.forms.NonRenderableQuestionCodes
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.DynamicFormSubmitResult
@@ -129,8 +130,34 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
         return@launch
       }
       _uiState.update { it.copy(isLoading = false, version = version) }
+      prefillAutoSelectedGeography()
       recomputeDerivedFields()
     }
+  }
+
+  /**
+   * Pre-fills every geography field (and `project_name`) that resolves to exactly one backend unit
+   * with that unit's id, so the value is present in the submission even though the field renders
+   * read-only (see [org.armman.sakhi.ui.forms.DynamicFormField]) and the Sakhi never taps it. Skips
+   * a field that already has an answer so a resumed draft's earlier pick isn't clobbered, and skips
+   * levels the backend ships with several units (those stay an interactive dropdown). Options here
+   * come from [FormVersion.geography]/the profile only — no network — so this is safe to run inline
+   * on load.
+   */
+  private suspend fun prefillAutoSelectedGeography() {
+    val version = _uiState.value.version ?: return
+    val geography = version.geography.orEmpty()
+    var answers = _uiState.value.answers
+    version.schemaJson
+      .filter { it.questionCode in GeographyQuestionCodes.ALL }
+      .forEach { field ->
+        if (!answers.valueOf(field.questionCode).isNullOrBlank()) return@forEach
+        val only = geographyFieldOptionsResolver
+          .optionsFromVersionGeography(field.questionCode, geography)
+          .singleOrNull() ?: return@forEach
+        answers = answers.withSingleValue(field.questionCode, only.valueCode)
+      }
+    _uiState.update { it.copy(answers = answers) }
   }
 
   fun setAnswer(questionCode: String, value: String?) {
@@ -178,15 +205,16 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
       val value = FormComputedFieldEvaluator.compute(computedFrom, answers, registrationDate)
       answers = answers.withSingleValue(field.questionCode, value)
     }
-    // Stopgap: the live schema doesn't declare `computedFrom: "AGE_FROM_DOB"` for age_years (see
-    // AGE_YEARS_QUESTION_CODE's doc), so the generic loop above never touches it. Compute it
-    // directly whenever this schema version has the field and it wasn't already handled by a real
-    // `computedFrom` declaration — forward-compatible with the day the backend adds one (at which
-    // point `ageField.computedFrom` is non-null and this block is skipped, avoiding double work).
-    val ageField = version.schemaJson.firstOrNull { it.questionCode == AGE_YEARS_QUESTION_CODE }
-    if (ageField != null && ageField.computedFrom == null) {
+    // Stopgap: the live schema doesn't declare `computedFrom: "AGE_FROM_DOB"` for the age field (see
+    // AGE_FROM_DOB_QUESTION_CODES' doc), so the generic loop above never touches it. Compute it
+    // directly whenever this schema version has the field (under whichever of its known codes) and
+    // it wasn't already handled by a real `computedFrom` declaration — forward-compatible with the
+    // day the backend adds one (then `ageField.computedFrom` is non-null and this is skipped).
+    val ageField = version.schemaJson
+      .firstOrNull { it.questionCode in AGE_FROM_DOB_QUESTION_CODES && it.computedFrom == null }
+    if (ageField != null) {
       val value = FormComputedFieldEvaluator.compute(COMPUTED_AGE_FROM_DOB, answers, registrationDate)
-      answers = answers.withSingleValue(AGE_YEARS_QUESTION_CODE, value)
+      answers = answers.withSingleValue(ageField.questionCode, value)
     }
     _uiState.update { it.copy(answers = answers) }
   }
@@ -222,7 +250,12 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
   suspend fun optionsFor(field: FormFieldSchema): List<FormFieldOption> {
     field.options?.let { return it.sortedBy(FormFieldOption::sortOrder) }
     if (field.questionCode in GeographyQuestionCodes.ALL) {
-      return geographyFieldOptionsResolver.optionsFor(field.questionCode, _uiState.value.answers)
+      // Geography answers must be the backend's own geographyUnitIds (shipped in the active
+      // version's `geography`), never a hardcoded cascade — see optionsFromVersionGeography.
+      return geographyFieldOptionsResolver.optionsFromVersionGeography(
+        field.questionCode,
+        _uiState.value.version?.geography.orEmpty(),
+      )
     }
     val categoryCode = field.lookupCategoryCode ?: return emptyList()
     return lookupRepository.getValues(categoryCode)
@@ -265,7 +298,15 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
         FormNumericRangeValidator.isWithinRange(field.numericRange, entered)
       }
 
-    return allRequiredAnswered && allRangesValid
+    // `mobile_number` must be a complete 10-digit number when present (blank is handled by the
+    // required-field gate above). See MobileNumberRule.
+    val mobileValid = fields.all { field ->
+      if (field.questionCode != MobileNumberRule.QUESTION_CODE) return@all true
+      val entered = state.answers.valueOf(field.questionCode)
+      entered.isNullOrBlank() || MobileNumberRule.isComplete(entered)
+    }
+
+    return allRequiredAnswered && allRangesValid && mobileValid
   }
 
   /** Per-tab gate for the "next tab" button: every visible required field in [section] answered

@@ -101,6 +101,18 @@ data class FormCrossFieldRule(
   val equals: String? = null,
 )
 
+/** One geography unit the backend ships alongside the form version in the `active-version`
+ * response (one row per level of the Sakhi's assigned branch — STATE, DISTRICT, BLOCK, VILLAGE,
+ * PADA, PHC, SUBCENTRE). These are the ONLY geographyUnitIds the backend's `/beneficiaries`
+ * validation recognizes, so geography answers must be sourced from here — not from any hardcoded
+ * cascade, which is exactly what caused `pii.phcId does not refer to a known geography unit`
+ * (HTTP 422). See [org.armman.sakhi.data.forms.GeographyFieldOptionsResolver]. */
+data class FormGeographyUnit(
+  val geographyUnitId: String,
+  val geoType: String,
+  val name: String,
+)
+
 data class FormVersion(
   val id: String,
   val formDefinitionId: String,
@@ -110,6 +122,11 @@ data class FormVersion(
   val effectiveFrom: String,
   val effectiveTo: String?,
   val status: String,
+  /** Nullable (not a defaulted non-null list) on purpose: a [FormVersion] persisted by an older
+   * build predates this field, so its cached JSON has no `geography` key and Gson would leave a
+   * non-null `List` property as null anyway — modelling it nullable makes that explicit and forces
+   * call sites to `.orEmpty()` rather than risk an NPE reading a stale cache. */
+  val geography: List<FormGeographyUnit>? = null,
 )
 
 data class FormActiveVersionResponseDto(

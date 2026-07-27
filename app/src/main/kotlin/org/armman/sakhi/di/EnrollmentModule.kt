@@ -14,8 +14,7 @@ import retrofit2.Retrofit
 import javax.inject.Singleton
 
 /** Binds the offline-first, Room + encrypted-store-backed enrollment repository (task #14/#16).
- * [org.armman.sakhi.data.enrollment.StaticEnrollmentRepository] (in-memory, CR-015d) is superseded
- * — kept in the codebase only for its existing unit tests until those are ported to the new repo. */
+ * The legacy in-memory StaticEnrollmentRepository (CR-015d) has been removed. */
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class EnrollmentModule {

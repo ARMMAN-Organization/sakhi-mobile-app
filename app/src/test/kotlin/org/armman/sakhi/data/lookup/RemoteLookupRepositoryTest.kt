@@ -138,6 +138,27 @@ class RemoteLookupRepositoryTest {
   }
 
   @Test
+  fun `a failed fetch with nothing cached is NOT remembered as empty and a later call re-fetches`() = runTest {
+    // Regression: a weak/offline network at first touch used to cache an empty list for the whole
+    // process, so CASE_TYPE stayed unresolvable ("MOTHER not found") even after the network came
+    // back. The failed attempt must not poison the cache.
+    val api = FakeLookupApi().apply { exceptions["CASE_TYPE"] = IOException("weak signal") }
+    val repository = RemoteLookupRepository(api, FakeSecureKeyValueStore())
+
+    assertTrue(repository.getValues("CASE_TYPE").isEmpty())
+
+    // Network recovers (or the login/reconnect prefetch re-runs).
+    api.exceptions.remove("CASE_TYPE")
+    api.responses["CASE_TYPE"] = successResponse(
+      "CASE_TYPE",
+      listOf(valueDto(id = "id-mother", valueCode = "MOTHER", valueLabel = "Mother")),
+    )
+
+    assertEquals("MOTHER", repository.getValues("CASE_TYPE").single().valueCode)
+    assertEquals(2, api.callCounts["CASE_TYPE"]) // re-fetched, not served from a poisoned empty cache
+  }
+
+  @Test
   fun `caches per category so a second call for the same category does not refetch`() = runTest {
     val api = FakeLookupApi().apply {
       responses["CASE_TYPE"] = successResponse(

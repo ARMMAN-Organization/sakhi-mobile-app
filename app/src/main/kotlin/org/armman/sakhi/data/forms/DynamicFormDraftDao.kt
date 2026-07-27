@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface DynamicFormDraftDao {
@@ -24,4 +25,10 @@ interface DynamicFormDraftDao {
 
   @Query("SELECT * FROM dynamic_form_drafts ORDER BY createdAtEpochMillis DESC")
   suspend fun getAll(): List<DynamicFormDraftEntity>
+
+  /** Observable stream of all drafts, newest first. Room re-emits on every insert/update (incl.
+   * the sync worker's PENDING→SYNCING→SYNCED transitions), which is what lets the Home upload
+   * modal and badge update live while a sync runs — the suspend [getAll] is only a one-shot. */
+  @Query("SELECT * FROM dynamic_form_drafts ORDER BY createdAtEpochMillis DESC")
+  fun observeAll(): Flow<List<DynamicFormDraftEntity>>
 }

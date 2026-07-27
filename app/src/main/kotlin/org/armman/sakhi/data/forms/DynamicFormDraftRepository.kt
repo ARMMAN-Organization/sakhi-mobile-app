@@ -1,5 +1,6 @@
 package org.armman.sakhi.data.forms
 
+import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
 
 /**
@@ -44,4 +45,9 @@ interface DynamicFormDraftRepository {
    * sync-status modal. The static enrollment flow is out of scope — it's being deprecated in
    * favor of this dynamic form, per product direction. */
   suspend fun getUploadRecords(): List<FormUploadRecord>
+
+  /** Observable version of [getUploadRecords] — re-emits whenever a draft is added or its sync
+   * status changes, so the Home upload modal and Data Upload badge reflect sync progress live
+   * (including background [DynamicFormSyncWorker] runs) without the user reopening the screen. */
+  fun observeUploadRecords(): Flow<List<FormUploadRecord>>
 }

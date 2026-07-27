@@ -8,6 +8,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import org.armman.sakhi.data.childregistration.ChildFormDraftDao
 import org.armman.sakhi.data.db.SakhiDatabase
 import org.armman.sakhi.data.enrollment.EnrollmentDraftDao
 import org.armman.sakhi.data.forms.DynamicFormDraftDao
@@ -24,7 +25,10 @@ object DatabaseModule {
   @Singleton
   fun provideSakhiDatabase(@ApplicationContext context: Context): SakhiDatabase =
     Room.databaseBuilder(context, SakhiDatabase::class.java, DATABASE_NAME)
-      // See SakhiDatabase's doc: acceptable only because no release has shipped with a v1 DB yet.
+      // CR-020: v2→v3 ships a real additive migration (adds child_registration_drafts) so queued
+      // drafts survive the upgrade. fallbackToDestructiveMigration() is retained only as the
+      // last-resort net for the pre-release v1 DB (see SakhiDatabase's doc).
+      .addMigrations(SakhiDatabase.MIGRATION_2_3)
       .fallbackToDestructiveMigration()
       .build()
 
@@ -37,6 +41,11 @@ object DatabaseModule {
   @Singleton
   fun provideDynamicFormDraftDao(database: SakhiDatabase): DynamicFormDraftDao =
     database.dynamicFormDraftDao()
+
+  @Provides
+  @Singleton
+  fun provideChildFormDraftDao(database: SakhiDatabase): ChildFormDraftDao =
+    database.childFormDraftDao()
 
   @Provides
   @Singleton

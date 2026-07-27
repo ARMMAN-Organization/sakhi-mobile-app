@@ -4,8 +4,12 @@ import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import org.armman.sakhi.data.enrollment.EnrollmentSyncScheduler
 import org.armman.sakhi.data.forms.DynamicFormSyncScheduler
+import org.armman.sakhi.data.forms.ReconnectSyncTrigger
 import javax.inject.Inject
 
 /**
@@ -23,6 +27,11 @@ class SakhiApplication : Application(), Configuration.Provider {
   @Inject lateinit var workerFactory: HiltWorkerFactory
   @Inject lateinit var enrollmentSyncScheduler: EnrollmentSyncScheduler
   @Inject lateinit var dynamicFormSyncScheduler: DynamicFormSyncScheduler
+  @Inject lateinit var reconnectSyncTrigger: ReconnectSyncTrigger
+
+  /** Process-lifetime scope for app-wide background collectors (connectivity → auto-sync). Never
+   * cancelled — it lives as long as the process, which is exactly the intended lifetime. */
+  private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
   override val workManagerConfiguration: Configuration
     get() = Configuration.Builder()
@@ -35,5 +44,8 @@ class SakhiApplication : Application(), Configuration.Provider {
     // one-shot sync ran) still get picked up periodically, not just right after saving.
     enrollmentSyncScheduler.ensurePeriodicSyncScheduled()
     dynamicFormSyncScheduler.ensurePeriodicSyncScheduled()
+    // Event-driven counterpart to the periodic safety net: retry pending offline submissions the
+    // instant connectivity returns, so the Sakhi never has to reopen the app to trigger an upload.
+    reconnectSyncTrigger.start(applicationScope)
   }
 }

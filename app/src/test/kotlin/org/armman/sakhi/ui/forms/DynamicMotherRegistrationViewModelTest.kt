@@ -11,6 +11,7 @@ import org.armman.sakhi.data.forms.DynamicFormSubmitResult
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
+import org.armman.sakhi.data.forms.FormGeographyUnit
 import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.FormsRepository
@@ -116,6 +117,8 @@ class DynamicMotherRegistrationViewModelTest {
   private fun viewModel(
     fields: List<FormFieldSchema>,
     draftRepository: FakeDraftRepository = FakeDraftRepository(),
+    geography: List<FormGeographyUnit>? = null,
+    projectName: String? = null,
   ): DynamicMotherRegistrationViewModel {
     val version = FormVersion(
       id = "v6",
@@ -126,22 +129,33 @@ class DynamicMotherRegistrationViewModelTest {
       effectiveFrom = "2026-07-21T00:00:00Z",
       effectiveTo = null,
       status = "PUBLISHED",
+      geography = geography,
     )
     val vm = DynamicMotherRegistrationViewModel(
       FakeFormsRepository(version),
       FakeLookupRepository(),
-      GeographyFieldOptionsResolver(FakeGeographyRepository(), fakeCurrentUserRepository()),
+      GeographyFieldOptionsResolver(FakeGeographyRepository(), fakeCurrentUserRepository(projectName)),
       draftRepository,
     )
     dispatcher.scheduler.advanceUntilIdle()
     return vm
   }
 
-  // Avoids pulling in a full CurrentUserRepository fake for a resolver path these tests never hit
-  // (no geography question_codes below) — see GeographyFieldOptionsResolver's own fallback.
-  private fun fakeCurrentUserRepository() =
+  // [projectName] backs the `project_name` field's single option; null (the default) mirrors a
+  // profile that hasn't loaded, exercising the resolver's empty fallback.
+  private fun fakeCurrentUserRepository(projectName: String? = null) =
     object : org.armman.sakhi.data.auth.CurrentUserRepository {
-      override suspend fun getProfile() = null
+      override suspend fun getProfile() =
+        projectName?.let {
+          org.armman.sakhi.data.auth.CurrentUserProfile(
+            username = "test.sakhi",
+            displayName = "Test Sakhi",
+            mobileNumber = null,
+            projectName = it,
+            cardNumber = null,
+            maskedBankAccount = null,
+          )
+        }
       override fun clear() = Unit
       override fun clearIfDifferentUser(username: String) = Unit
     }
@@ -210,6 +224,125 @@ class DynamicMotherRegistrationViewModelTest {
       vm.registrationDate,
     ).toString()
     assertEquals(expectedAge, vm.uiState.value.answers.valueOf("age_years"))
+  }
+
+  // One backend geography unit per level, mirroring a real `active-version` `geography` array.
+  private fun sampleGeography() = listOf(
+    FormGeographyUnit("state-uuid", "STATE", "Maharashtra"),
+    FormGeographyUnit("district-uuid", "DISTRICT", "Nandurbar"),
+    FormGeographyUnit("block-uuid", "BLOCK", "Dhadgaon"),
+    FormGeographyUnit("village-uuid", "VILLAGE", "Sample Village"),
+    FormGeographyUnit("pada-uuid", "PADA", "Sample Pada"),
+    FormGeographyUnit("phc-uuid", "PHC", "Dhadgaon PHC"),
+    FormGeographyUnit("subcentre-uuid", "SUBCENTRE", "Sample Sub-centre"),
+  )
+
+  private fun geographyFields() = listOf(
+    field("name_of_the_state", section = "Personal Info", inputType = "select"),
+    field("name_of_district", section = "Personal Info", inputType = "select"),
+    field("name_of_block_taluka", section = "Personal Info", inputType = "select"),
+    field("name_of_the_revenue_village_grampanchayat", section = "Personal Info", inputType = "select"),
+    field("beneficary_pada_name", section = "Personal Info", inputType = "select"),
+    field("beneficary_phc_name", section = "Personal Info", inputType = "select"),
+    field("name_of_sub_center", section = "Personal Info", inputType = "select"),
+  )
+
+  @Test
+  fun `geography fields auto-fill from the backend geography, not a hardcoded cascade`() = runTest {
+    val vm = viewModel(geographyFields(), geography = sampleGeography())
+
+    val answers = vm.uiState.value.answers
+    // The exact HTTP 422 case: phcId must be the backend unit's id, not a stale static UUID.
+    assertEquals("phc-uuid", answers.valueOf("beneficary_phc_name"))
+    assertEquals("state-uuid", answers.valueOf("name_of_the_state"))
+    assertEquals("district-uuid", answers.valueOf("name_of_district"))
+    assertEquals("block-uuid", answers.valueOf("name_of_block_taluka"))
+    assertEquals("village-uuid", answers.valueOf("name_of_the_revenue_village_grampanchayat"))
+    assertEquals("pada-uuid", answers.valueOf("beneficary_pada_name"))
+    assertEquals("subcentre-uuid", answers.valueOf("name_of_sub_center"))
+  }
+
+  @Test
+  fun `geography options resolve to the backend unit per level`() = runTest {
+    val vm = viewModel(geographyFields(), geography = sampleGeography())
+
+    val phcOptions = vm.optionsFor(
+      field("beneficary_phc_name", section = "Personal Info", inputType = "select"),
+    )
+    assertEquals(1, phcOptions.size)
+    assertEquals("phc-uuid", phcOptions.first().valueCode)
+    assertEquals("Dhadgaon PHC", phcOptions.first().label)
+  }
+
+  @Test
+  fun `project_name auto-fills from the Sakhi profile`() = runTest {
+    val vm = viewModel(
+      listOf(field("project_name", section = "Personal Info", inputType = "select")),
+      geography = sampleGeography(),
+      projectName = "Test Project (seeded)",
+    )
+
+    assertEquals("Test Project (seeded)", vm.uiState.value.answers.valueOf("project_name"))
+  }
+
+  @Test
+  fun `a geography level missing from the backend is not prefilled and leaves no option`() = runTest {
+    // Backend omits PHC — must surface as an empty (submit-gating) field, never a wrong id.
+    val geographyWithoutPhc = sampleGeography().filterNot { it.geoType == "PHC" }
+    val vm = viewModel(geographyFields(), geography = geographyWithoutPhc)
+
+    assertEquals(null, vm.uiState.value.answers.valueOf("beneficary_phc_name"))
+    assertTrue(
+      vm.optionsFor(field("beneficary_phc_name", section = "Personal Info", inputType = "select")).isEmpty(),
+    )
+  }
+
+  @Test
+  fun `a level with several backend units is left for the Sakhi to pick, not auto-filled`() = runTest {
+    val geographyWithTwoPhcs = sampleGeography() + FormGeographyUnit("phc-uuid-2", "PHC", "Second PHC")
+    val vm = viewModel(geographyFields(), geography = geographyWithTwoPhcs)
+
+    assertEquals(null, vm.uiState.value.answers.valueOf("beneficary_phc_name"))
+    assertEquals(
+      2,
+      vm.optionsFor(field("beneficary_phc_name", section = "Personal Info", inputType = "select")).size,
+    )
+  }
+
+  @Test
+  fun `age_of_the_beneficiary (live schema code) auto-fills from DOB`() = runTest {
+    // The live api.armman.org schema names the age field `age_of_the_beneficiary` (not `age_years`),
+    // input_type number, with no computedFrom — the exact case the old single-code stopgap missed.
+    val vm = viewModel(
+      listOf(
+        field("date_of_birth", section = "Personal Info", inputType = "date"),
+        field("age_of_the_beneficiary", section = "Personal Info", required = false, inputType = "number"),
+      ),
+    )
+
+    vm.setAnswer("date_of_birth", "2001-07-27")
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val expectedAge = java.time.temporal.ChronoUnit.YEARS.between(
+      java.time.LocalDate.of(2001, 7, 27),
+      vm.registrationDate,
+    ).toString()
+    assertEquals(expectedAge, vm.uiState.value.answers.valueOf("age_of_the_beneficiary"))
+  }
+
+  @Test
+  fun `mobile_number shorter than 10 digits blocks submit and 10 digits unblocks it`() = runTest {
+    val vm = viewModel(
+      listOf(field("mobile_number", section = "Personal Info", required = true, inputType = "number")),
+    )
+
+    vm.setAnswer("mobile_number", "63823")
+    assertFalse(vm.isReadyToSubmit())
+    assertFalse(vm.isSectionReady("Personal Info"))
+
+    vm.setAnswer("mobile_number", "6382325824")
+    assertTrue(vm.isReadyToSubmit())
+    assertTrue(vm.isSectionReady("Personal Info"))
   }
 
   @Test

@@ -24,7 +24,10 @@ class RemoteFormsRepositoryTest {
     }
   }
 
-  private fun version(versionNo: String) = FormVersion(
+  private fun version(
+    versionNo: String,
+    geography: List<FormGeographyUnit>? = null,
+  ) = FormVersion(
     id = "version-$versionNo",
     formDefinitionId = "def-1",
     versionNo = versionNo,
@@ -35,6 +38,7 @@ class RemoteFormsRepositoryTest {
     effectiveFrom = "2026-07-20T00:00:00Z",
     effectiveTo = null,
     status = "PUBLISHED",
+    geography = geography,
   )
 
   private fun successResponse(version: FormVersion) =
@@ -79,6 +83,41 @@ class RemoteFormsRepositoryTest {
     val restarted = RemoteFormsRepository(offlineApi, store)
 
     assertEquals("v1", restarted.getActiveVersion("MOTHER_REGISTRATION")?.versionNo)
+  }
+
+  @Test
+  fun `backend geography is parsed and survives the offline persistence round-trip`() = runTest {
+    val store = FakeSecureKeyValueStore()
+    val geography = listOf(
+      FormGeographyUnit("phc-uuid", "PHC", "Dhadgaon PHC"),
+      FormGeographyUnit("state-uuid", "STATE", "Maharashtra"),
+    )
+    val onlineApi = FakeFormsApi().apply { response = successResponse(version("v1", geography)) }
+    RemoteFormsRepository(onlineApi, store).getActiveVersion("MOTHER_REGISTRATION")
+
+    // Restart offline — geography must come back from the persisted cache, not be dropped.
+    val offlineApi = FakeFormsApi().apply { exceptionToThrow = IOException("offline") }
+    val restored = RemoteFormsRepository(offlineApi, store).getActiveVersion("MOTHER_REGISTRATION")
+
+    assertEquals(geography, restored?.geography)
+  }
+
+  @Test
+  fun `a version cached by an older build without geography still loads with null geography`() = runTest {
+    // Legacy persisted JSON predating the `geography` field — Gson must not choke on its absence.
+    val store = FakeSecureKeyValueStore()
+    val legacyJson = """
+      {"id":"version-legacy","formDefinitionId":"def-1","versionNo":"v0",
+       "schemaJson":[{"label":"LMP date","required":true,"input_type":"date","question_code":"lmp_date"}],
+       "validationJson":[],"effectiveFrom":"2026-07-20T00:00:00Z","status":"PUBLISHED"}
+    """.trimIndent()
+    store.putString("form_active_version_MOTHER_REGISTRATION", legacyJson)
+
+    val offlineApi = FakeFormsApi().apply { exceptionToThrow = IOException("offline") }
+    val loaded = RemoteFormsRepository(offlineApi, store).getActiveVersion("MOTHER_REGISTRATION")
+
+    assertEquals("v0", loaded?.versionNo)
+    assertNull(loaded?.geography)
   }
 
   @Test

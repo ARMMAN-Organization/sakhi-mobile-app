@@ -16,6 +16,7 @@
   <!-- Forms Uploaded sync-status modal -->
   <string name="home_upload_modal_title">%1$d/%2$d फॉर्म अपलोड झाले</string>
   <string name="home_upload_modal_empty">अद्याप कोणताही फॉर्म सबमिट केलेला नाही.</string>
+  <string name="home_upload_modal_retry">पुन्हा प्रयत्न करा</string>
   <string name="home_upload_modal_form_label">माता नोंदणी</string>
   <string name="home_upload_modal_category_forms">%1$d/%2$d फॉर्म</string>
   <string name="home_upload_status_synced">अपलोड झाले</string>
@@ -42,7 +43,7 @@
   <string name="login_error_generic">काहीतरी चूक झाली. कृपया पुन्हा प्रयत्न करा.</string>
   <string name="login_error_network">सर्व्हरशी संपर्क होऊ शकला नाही. कृपया तुमचे इंटरनेट कनेक्शन तपासा आणि पुन्हा प्रयत्न करा.</string>
   <string name="login_error_wrong_role">हे खाते सखी म्हणून सेट केलेले नाही. कृपया तुमच्या सुपरवायझरशी संपर्क करा.</string>
-  <string name="login_error_offline_no_cache">इंटरनेट कनेक्शन नाही. ऑफलाइन लॉगिन करण्यासाठी कृपया आधी एकदा इंटरनेटसह लॉगिन करा.</string>
+  <string name="login_error_offline_no_cache">इंटरनेट कनेक्शन नाही. ऑफलाइन लॉगिन वापरण्यापूर्वी कृपया इंटरनेटशी कनेक्ट करा आणि किमान एकदा लॉगिन करा.</string>
   <string name="login_password_show_content_description">पासवर्ड दाखवा</string>
   <string name="login_password_hide_content_description">पासवर्ड लपवा</string>
   <string name="login_logout_success">तुम्ही यशस्वीरित्या लॉगआउट झाला आहात</string>
@@ -465,4 +466,13 @@
   <string name="visit_form_vs_symptoms_title">लक्षणे</string>
   <string name="visit_form_vs_bp">रक्तदाब</string>
   <string name="visit_form_vs_reference_range">(%1$s)</string>
+
+  <!-- Children Register (CR-020) -->
+  <string name="child_reg_title">बाल नोंदणी</string>
+  <string name="child_reg_consent_refused">लाभार्थीच्या संमतीशिवाय नोंदणी पुढे करता येणार नाही.</string>
+  <string name="child_reg_dob_future">जन्मतारीख भविष्यातील असू शकत नाही.</string>
+  <string name="child_reg_ineligible_direct">हे बाळ १२ महिन्यांपेक्षा (३६५ दिवस) मोठे आहे, त्यामुळे थेट नोंदणी करता येणार नाही.</string>
+  <string name="child_reg_ineligible_mother">नोंदणीकृत मातेच्या बाळाची नोंदणी जन्मानंतर ६ महिन्यांच्या (१८३ दिवस) आत करणे आवश्यक आहे.</string>
+  <string name="child_reg_duplicate">जुळणारे बाळाचे रेकॉर्ड आधीच अस्तित्वात आहे. नवीन रेकॉर्ड म्हणून नोंदणी सुरू ठेवायची का?</string>
+  <string name="child_reg_submit_failed">नोंदणी सबमिट करता आली नाही. कृपया फॉर्म तपासून पुन्हा प्रयत्न करा.</string>
 </resources>

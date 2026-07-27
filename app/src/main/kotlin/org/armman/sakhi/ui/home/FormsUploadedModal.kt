@@ -18,7 +18,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -37,6 +36,7 @@ import androidx.compose.ui.window.DialogProperties
 import org.armman.sakhi.R
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.FormUploadRecord
+import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG400
@@ -73,7 +73,7 @@ import org.armman.sakhi.ui.theme.softShadow
 @Composable
 fun FormsUploadedModal(
   records: List<FormUploadRecord>,
-  isLoading: Boolean,
+  onRetry: () -> Unit,
   onDismiss: () -> Unit,
 ) {
   Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -85,6 +85,7 @@ fun FormsUploadedModal(
       Column(modifier = Modifier.padding(Dimens.ScreenPadding)) {
         val categories = remember(records) { groupUploadRecordsByCategory(records) }
         val syncedCount = records.count { it.syncStatus == EnrollmentSyncStatus.SYNCED }
+        val hasPending = records.any { it.syncStatus != EnrollmentSyncStatus.SYNCED }
 
         // Small circular close button on its own row at the top-right, inside the modal (per the
         // Figma reference — not overlapping the corner). Sized down to match the app's compact
@@ -110,22 +111,15 @@ fun FormsUploadedModal(
           modifier = Modifier.padding(top = Dimens.SmallSpacing),
         )
 
-        when {
-          isLoading -> Row(
-            modifier = Modifier.fillMaxWidth().padding(top = Dimens.ItemSpacing),
-            horizontalArrangement = Arrangement.Center,
-          ) {
-            CircularProgressIndicator()
-          }
-
-          categories.isEmpty() -> Text(
+        if (categories.isEmpty()) {
+          Text(
             text = stringResource(R.string.home_upload_modal_empty),
             style = MaterialTheme.typography.bodyMedium,
             color = NeutralG200,
             modifier = Modifier.padding(top = Dimens.ItemSpacing),
           )
-
-          else -> LazyColumn(
+        } else {
+          LazyColumn(
             modifier = Modifier
               .padding(top = Dimens.ItemSpacing)
               .heightIn(max = Dimens.UploadModalListMaxHeight)
@@ -136,6 +130,19 @@ fun FormsUploadedModal(
               UploadCategoryCard(summary)
             }
           }
+        }
+
+        // Retry is shown only while something still needs uploading (pending/failed). It re-triggers
+        // the sync worker immediately; the list above updates live as statuses advance, so no
+        // separate progress spinner is needed here.
+        if (hasPending) {
+          PrimaryButton(
+            text = stringResource(R.string.home_upload_modal_retry),
+            onClick = onRetry,
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(top = Dimens.ItemSpacing),
+          )
         }
       }
     }

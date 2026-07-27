@@ -4,12 +4,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.armman.sakhi.data.dashboard.DashboardRepository
 import org.armman.sakhi.data.dashboard.DashboardSummary
+import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
+import org.armman.sakhi.data.forms.DynamicFormSyncScheduler
 import org.armman.sakhi.data.forms.FormUploadRecord
 import javax.inject.Inject
 
@@ -27,21 +34,43 @@ sealed interface HomeUiState {
  */
 data class UploadModalState(
   val isVisible: Boolean = false,
-  val isLoading: Boolean = false,
   val records: List<FormUploadRecord> = emptyList(),
 )
+
+private const val SUBSCRIPTION_TIMEOUT_MS = 5_000L
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
   private val dashboardRepository: DashboardRepository,
   private val dynamicFormDraftRepository: DynamicFormDraftRepository,
+  private val syncScheduler: DynamicFormSyncScheduler,
 ) : ViewModel() {
 
   private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
   val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
-  private val _uploadModalState = MutableStateFlow(UploadModalState())
-  val uploadModalState: StateFlow<UploadModalState> = _uploadModalState.asStateFlow()
+  /** Live draft list from Room — re-emits as the sync worker advances statuses, which is what
+   * makes both the badge and the open modal update without any user action. */
+  private val uploadRecords: StateFlow<List<FormUploadRecord>> =
+    dynamicFormDraftRepository.observeUploadRecords()
+      // Fail closed to an empty list rather than crashing the Home screen if the local read errors —
+      // this is a read-only status view; the underlying drafts are untouched.
+      .catch { emit(emptyList()) }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS), emptyList())
+
+  /** Data Upload badge count = drafts not yet uploaded (anything but SYNCED, so FAILED/
+   * DUPLICATE_CONFLICT still surface as needing attention). Replaces the former hardcoded value. */
+  val pendingUploadCount: StateFlow<Int> =
+    uploadRecords
+      .map { records -> records.count { it.syncStatus != EnrollmentSyncStatus.SYNCED } }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS), 0)
+
+  private val _modalVisible = MutableStateFlow(false)
+
+  val uploadModalState: StateFlow<UploadModalState> =
+    combine(_modalVisible, uploadRecords) { visible, records ->
+      UploadModalState(isVisible = visible, records = records)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS), UploadModalState())
 
   init {
     loadSummary()
@@ -60,23 +89,19 @@ class HomeViewModel @Inject constructor(
     }
   }
 
-  /** Opens the "Forms Uploaded" modal and loads the current CR-018 draft list. */
+  /** Opens the "Forms Uploaded" modal. Records come live from [uploadRecords]; no manual load. */
   fun onDataUploadClicked() {
-    _uploadModalState.value = UploadModalState(isVisible = true, isLoading = true)
-    viewModelScope.launch {
-      val records = try {
-        dynamicFormDraftRepository.getUploadRecords()
-      } catch (e: Exception) {
-        // Fail closed to an empty list rather than crashing the modal — the Sakhi can dismiss
-        // and reopen; the underlying data is untouched (this is a read-only view).
-        emptyList()
-      }
-      _uploadModalState.value = UploadModalState(isVisible = true, isLoading = false, records = records)
-    }
+    _modalVisible.value = true
   }
 
-  /** Dismisses the modal; clears records so a stale list doesn't flash on the next open. */
+  /** Immediately re-attempts upload of every pending/failed draft. Enqueues the sync worker (which
+   * runs as soon as there's connectivity); the modal reflects progress live via [uploadRecords]. */
+  fun onRetryUpload() {
+    syncScheduler.syncNow()
+  }
+
+  /** Dismisses the modal. */
   fun onDismissUploadModal() {
-    _uploadModalState.value = UploadModalState(isVisible = false)
+    _modalVisible.value = false
   }
 }

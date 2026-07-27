@@ -25,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 import org.armman.sakhi.R
 import org.armman.sakhi.ui.components.AppIcons
 import org.armman.sakhi.ui.components.AppTextField
@@ -47,10 +49,15 @@ import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG400
 import org.armman.sakhi.ui.theme.White
 
+/** How long the "logged out successfully" banner stays visible before auto-dismissing. */
+private const val LOGOUT_BANNER_TIMEOUT_MS = 4_000L
+
 /**
  * Login screen per the "Arogya Sakhi - Revamp" Figma (mobile 375x812):
  * logo, title, Username + Password fields, pill Login button, and a
  * success banner shown when the user arrives here right after logging out.
+ * The banner auto-dismisses after [LOGOUT_BANNER_TIMEOUT_MS] or as soon as
+ * the user starts interacting with the form.
  */
 @Composable
 fun LoginScreen(
@@ -60,6 +67,27 @@ fun LoginScreen(
 ) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
   var passwordVisible by remember { mutableStateOf(false) }
+
+  // Once dismissed (timeout elapsed or user interacted) the banner stays gone.
+  // rememberSaveable survives config changes so it never reappears on rotation.
+  var logoutBannerDismissed by rememberSaveable { mutableStateOf(false) }
+  val logoutBannerVisible = shouldShowLogoutBanner(showLogoutBanner, logoutBannerDismissed)
+
+  // Auto-dismiss after the timeout. Guarded by the dismissed flag so it won't
+  // restart on an activity recreate once the banner is already gone.
+  LaunchedEffect(showLogoutBanner) {
+    if (showLogoutBanner && !logoutBannerDismissed) {
+      delay(LOGOUT_BANNER_TIMEOUT_MS)
+      logoutBannerDismissed = true
+    }
+  }
+
+  // Hide as soon as the user interacts with the form.
+  LaunchedEffect(state.username, state.password) {
+    if (userHasInteractedWithLoginForm(state.username, state.password)) {
+      logoutBannerDismissed = true
+    }
+  }
 
   LaunchedEffect(state.loginSucceeded) {
     if (state.loginSucceeded) {
@@ -161,7 +189,7 @@ fun LoginScreen(
           variant = StatusBannerVariant.Error,
           modifier = bannerModifier,
         )
-        showLogoutBanner -> StatusBanner(
+        logoutBannerVisible -> StatusBanner(
           message = stringResource(R.string.login_logout_success),
           variant = StatusBannerVariant.Success,
           modifier = bannerModifier,

@@ -1,5 +1,7 @@
 package org.armman.sakhi.data.forms
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
@@ -76,14 +78,17 @@ class RoomDynamicFormDraftRepository @Inject constructor(
   }
 
   override suspend fun getUploadRecords(): List<FormUploadRecord> =
-    dao.getAll().map { entity ->
-      FormUploadRecord(
-        localBeneficiaryId = entity.localBeneficiaryId,
-        formCode = entity.formCode,
-        syncStatus = entity.syncStatus,
-        createdAtEpochMillis = entity.createdAtEpochMillis,
-      )
-    }
+    dao.getAll().map { it.toUploadRecord() }
+
+  override fun observeUploadRecords(): Flow<List<FormUploadRecord>> =
+    dao.observeAll().map { entities -> entities.map { it.toUploadRecord() } }
+
+  private fun DynamicFormDraftEntity.toUploadRecord() = FormUploadRecord(
+    localBeneficiaryId = localBeneficiaryId,
+    formCode = formCode,
+    syncStatus = syncStatus,
+    createdAtEpochMillis = createdAtEpochMillis,
+  )
 
   private suspend fun saveLocally(
     localBeneficiaryId: String,

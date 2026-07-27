@@ -53,6 +53,7 @@ fun HomeScreen(
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
   val uploadModalState by viewModel.uploadModalState.collectAsStateWithLifecycle()
+  val pendingUploadCount by viewModel.pendingUploadCount.collectAsStateWithLifecycle()
 
   Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -68,6 +69,7 @@ fun HomeScreen(
           is HomeUiState.Error -> HomeError(onRetry = viewModel::loadSummary)
           is HomeUiState.Success -> HomeContent(
             summary = state.summary,
+            pendingUploadCount = pendingUploadCount,
             onAllBeneficiaries = onAllBeneficiaries,
             onSeeVisitTracker = onSeeVisitTracker,
             onRegisterNew = onRegisterNew,
@@ -81,7 +83,7 @@ fun HomeScreen(
   if (uploadModalState.isVisible) {
     FormsUploadedModal(
       records = uploadModalState.records,
-      isLoading = uploadModalState.isLoading,
+      onRetry = viewModel::onRetryUpload,
       onDismiss = viewModel::onDismissUploadModal,
     )
   }

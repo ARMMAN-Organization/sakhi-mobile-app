@@ -15,6 +15,7 @@ import org.armman.sakhi.data.auth.LoginFailureReason
 import org.armman.sakhi.data.auth.LoginRequest
 import org.armman.sakhi.data.auth.LoginResult
 import org.armman.sakhi.data.auth.session.SessionStore
+import org.armman.sakhi.data.lookup.LookupWarmer
 import javax.inject.Inject
 
 /**
@@ -35,6 +36,7 @@ data class LoginUiState(
 class LoginViewModel @Inject constructor(
   private val authRepository: AuthRepository,
   private val sessionStore: SessionStore,
+  private val lookupWarmer: LookupWarmer,
 ) : ViewModel() {
 
   // A valid, unexpired "stay logged in" session skips the form entirely — LoginScreen treats
@@ -71,8 +73,13 @@ class LoginViewModel @Inject constructor(
         LoginRequest(username = state.username.trim(), password = state.password.trim()),
       )
       when (result) {
-        is LoginResult.Success ->
+        is LoginResult.Success -> {
+          // Warm the submit-critical lookups now, while the network is freshest, so a later
+          // enrollment can resolve caseType/beneficiaryType even offline or on a weak signal.
+          // Fire-and-forget on the warmer's own scope so navigating away doesn't cancel it.
+          lookupWarmer.warmSubmitCriticalCategoriesAsync()
           _uiState.update { it.copy(isSubmitting = false, loginSucceeded = true) }
+        }
         is LoginResult.Failure ->
           _uiState.update { it.copy(isSubmitting = false, loginError = result.reason.toMessageRes()) }
       }

@@ -2,7 +2,12 @@ package org.armman.sakhi.ui.home
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -13,10 +18,12 @@ import org.armman.sakhi.data.dashboard.DashboardSummary
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.DynamicFormSubmitResult
+import org.armman.sakhi.data.forms.FakeDynamicFormSyncScheduler
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormUploadRecord
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -44,7 +51,6 @@ class HomeViewModelTest {
         infantsTotal: Int = 10,
       ) = DashboardSummary(
         sakhiName = "Test Sakhi",
-        pendingUploadCount = 8,
         lastUploadedOn = LocalDate.of(2026, 4, 14),
         activeVisits = ActiveVisits(
           month = YearMonth.of(2026, 1),
@@ -62,12 +68,18 @@ class HomeViewModelTest {
     }
   }
 
-  /** Controllable fake for the CR-018 draft store — only [getUploadRecords] is exercised by
-   * [HomeViewModel]; [saveDraft]/[submitDraft] are unused stubs to satisfy the interface. */
+  /** Draft store fake backed by a hot flow, so the badge/modal can be observed reacting to status
+   * changes exactly as they would against Room. [failObserve] simulates a local read error. */
   private class FakeDynamicFormDraftRepository(
-    var records: List<FormUploadRecord> = emptyList(),
-    var error: Exception? = null,
+    records: List<FormUploadRecord> = emptyList(),
+    var failObserve: Boolean = false,
   ) : DynamicFormDraftRepository {
+    private val recordsFlow = MutableStateFlow(records)
+
+    fun setRecords(records: List<FormUploadRecord>) {
+      recordsFlow.value = records
+    }
+
     override suspend fun saveDraft(
       localBeneficiaryId: String,
       formCode: String,
@@ -86,20 +98,22 @@ class HomeViewModelTest {
       registrationDate: LocalDate,
     ): DynamicFormSubmitResult = DynamicFormSubmitResult.Synced
 
-    override suspend fun getUploadRecords(): List<FormUploadRecord> {
-      error?.let { throw it }
-      return records
-    }
+    override suspend fun getUploadRecords(): List<FormUploadRecord> = recordsFlow.value
+
+    override fun observeUploadRecords(): Flow<List<FormUploadRecord>> =
+      if (failObserve) flow { throw IOException("db read failed") } else recordsFlow
   }
 
   private lateinit var repository: FakeDashboardRepository
   private lateinit var draftRepository: FakeDynamicFormDraftRepository
+  private lateinit var syncScheduler: FakeDynamicFormSyncScheduler
 
   @Before
   fun setUp() {
     Dispatchers.setMain(dispatcher)
     repository = FakeDashboardRepository()
     draftRepository = FakeDynamicFormDraftRepository()
+    syncScheduler = FakeDynamicFormSyncScheduler()
   }
 
   @After
@@ -107,15 +121,31 @@ class HomeViewModelTest {
     Dispatchers.resetMain()
   }
 
+  private fun viewModel() = HomeViewModel(repository, draftRepository, syncScheduler)
+
+  /** Keeps the WhileSubscribed StateFlows active for the duration of a test so their derived values
+   * are computed (mirrors the screen collecting them). */
+  private fun TestScope.observe(viewModel: HomeViewModel) {
+    backgroundScope.launch(dispatcher) { viewModel.pendingUploadCount.collect {} }
+    backgroundScope.launch(dispatcher) { viewModel.uploadModalState.collect {} }
+  }
+
+  private fun record(id: String, status: EnrollmentSyncStatus, createdAtEpochMillis: Long) =
+    FormUploadRecord(
+      localBeneficiaryId = id,
+      formCode = "MOTHER_REGISTRATION",
+      syncStatus = status,
+      createdAtEpochMillis = createdAtEpochMillis,
+    )
+
   @Test
   fun `initial state is Loading`() {
-    val viewModel = HomeViewModel(repository, draftRepository)
-    assertEquals(HomeUiState.Loading, viewModel.uiState.value)
+    assertEquals(HomeUiState.Loading, viewModel().uiState.value)
   }
 
   @Test
   fun `successful load exposes the summary`() = runTest(dispatcher) {
-    val viewModel = HomeViewModel(repository, draftRepository)
+    val viewModel = viewModel()
     dispatcher.scheduler.advanceUntilIdle()
 
     val state = viewModel.uiState.value
@@ -126,7 +156,7 @@ class HomeViewModelTest {
   @Test
   fun `repository failure results in Error state`() = runTest(dispatcher) {
     repository.error = IOException("network down")
-    val viewModel = HomeViewModel(repository, draftRepository)
+    val viewModel = viewModel()
     dispatcher.scheduler.advanceUntilIdle()
 
     assertEquals(HomeUiState.Error, viewModel.uiState.value)
@@ -135,7 +165,7 @@ class HomeViewModelTest {
   @Test
   fun `retry after error reloads and reaches Success`() = runTest(dispatcher) {
     repository.error = IOException("network down")
-    val viewModel = HomeViewModel(repository, draftRepository)
+    val viewModel = viewModel()
     dispatcher.scheduler.advanceUntilIdle()
     assertEquals(HomeUiState.Error, viewModel.uiState.value)
 
@@ -147,108 +177,120 @@ class HomeViewModelTest {
     assertTrue(viewModel.uiState.value is HomeUiState.Success)
   }
 
+  // --- Data Upload badge count (live, from the draft store) ---------------------------------
+
   @Test
-  fun `zero-count summary is still Success`() = runTest(dispatcher) {
-    repository.summary = FakeDashboardRepository.defaultSummary(
-      mothersTotal = 0,
-      infantsTotal = 0,
-    ).copy(pendingUploadCount = 0)
-    val viewModel = HomeViewModel(repository, draftRepository)
+  fun `pendingUploadCount counts every draft that is not yet synced`() = runTest(dispatcher) {
+    draftRepository.setRecords(
+      listOf(
+        record("local-1", EnrollmentSyncStatus.SYNCED, 1L),
+        record("local-2", EnrollmentSyncStatus.SYNCED, 2L),
+        record("local-3", EnrollmentSyncStatus.PENDING, 3L),
+        record("local-4", EnrollmentSyncStatus.FAILED, 4L),
+      ),
+    )
+    val viewModel = viewModel()
+    observe(viewModel)
     dispatcher.scheduler.advanceUntilIdle()
 
-    val state = viewModel.uiState.value
-    assertTrue(state is HomeUiState.Success)
-    assertEquals(0, (state as HomeUiState.Success).summary.pendingUploadCount)
+    assertEquals(2, viewModel.pendingUploadCount.value)
   }
 
-  // --- "Forms Uploaded" sync-status modal --------------------------------------------------
+  @Test
+  fun `pendingUploadCount drops live as the sync worker marks drafts synced`() = runTest(dispatcher) {
+    draftRepository.setRecords(listOf(record("local-1", EnrollmentSyncStatus.PENDING, 1L)))
+    val viewModel = viewModel()
+    observe(viewModel)
+    dispatcher.scheduler.advanceUntilIdle()
+    assertEquals(1, viewModel.pendingUploadCount.value)
 
-  private fun record(id: String, status: EnrollmentSyncStatus, createdAtEpochMillis: Long) =
-    FormUploadRecord(
-      localBeneficiaryId = id,
-      formCode = "MOTHER_REGISTRATION",
-      syncStatus = status,
-      createdAtEpochMillis = createdAtEpochMillis,
-    )
+    // Connectivity returned and the worker uploaded it — no user action, count updates itself.
+    draftRepository.setRecords(listOf(record("local-1", EnrollmentSyncStatus.SYNCED, 1L)))
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(0, viewModel.pendingUploadCount.value)
+  }
+
+  // --- "Forms Uploaded" sync-status modal ---------------------------------------------------
 
   @Test
   fun `initial upload modal state is hidden and empty`() {
-    val viewModel = HomeViewModel(repository, draftRepository)
-    val state = viewModel.uploadModalState.value
-
-    assertEquals(false, state.isVisible)
-    assertEquals(false, state.isLoading)
+    val state = viewModel().uploadModalState.value
+    assertFalse(state.isVisible)
     assertTrue(state.records.isEmpty())
   }
 
   @Test
-  fun `onDataUploadClicked shows the modal and loads records from the dynamic form repository`() =
-    runTest(dispatcher) {
-      draftRepository.records = listOf(
+  fun `onDataUploadClicked shows the modal with the live draft list`() = runTest(dispatcher) {
+    draftRepository.setRecords(
+      listOf(
         record("local-1", EnrollmentSyncStatus.SYNCED, 1L),
         record("local-2", EnrollmentSyncStatus.PENDING, 2L),
-      )
-      val viewModel = HomeViewModel(repository, draftRepository)
-
-      viewModel.onDataUploadClicked()
-      assertTrue(viewModel.uploadModalState.value.isVisible)
-      assertTrue(viewModel.uploadModalState.value.isLoading)
-
-      dispatcher.scheduler.advanceUntilIdle()
-
-      val state = viewModel.uploadModalState.value
-      assertTrue(state.isVisible)
-      assertEquals(false, state.isLoading)
-      assertEquals(2, state.records.size)
-    }
-
-  @Test
-  fun `onDataUploadClicked exposes counts consistent with a 2 of 4 synced summary`() = runTest(dispatcher) {
-    draftRepository.records = listOf(
-      record("local-1", EnrollmentSyncStatus.SYNCED, 1L),
-      record("local-2", EnrollmentSyncStatus.SYNCED, 2L),
-      record("local-3", EnrollmentSyncStatus.PENDING, 3L),
-      record("local-4", EnrollmentSyncStatus.FAILED, 4L),
+      ),
     )
-    val viewModel = HomeViewModel(repository, draftRepository)
+    val viewModel = viewModel()
+    observe(viewModel)
 
     viewModel.onDataUploadClicked()
     dispatcher.scheduler.advanceUntilIdle()
 
     val state = viewModel.uploadModalState.value
-    val syncedCount = state.records.count { it.syncStatus == EnrollmentSyncStatus.SYNCED }
-    assertEquals(2, syncedCount)
-    assertEquals(4, state.records.size)
+    assertTrue(state.isVisible)
+    assertEquals(2, state.records.size)
   }
 
   @Test
-  fun `onDismissUploadModal hides the modal and clears records`() = runTest(dispatcher) {
-    draftRepository.records = listOf(record("local-1", EnrollmentSyncStatus.SYNCED, 1L))
-    val viewModel = HomeViewModel(repository, draftRepository)
+  fun `open modal reflects status changes live without reopening`() = runTest(dispatcher) {
+    draftRepository.setRecords(listOf(record("local-1", EnrollmentSyncStatus.PENDING, 1L)))
+    val viewModel = viewModel()
+    observe(viewModel)
+    viewModel.onDataUploadClicked()
+    dispatcher.scheduler.advanceUntilIdle()
+    assertEquals(EnrollmentSyncStatus.PENDING, viewModel.uploadModalState.value.records.single().syncStatus)
+
+    draftRepository.setRecords(listOf(record("local-1", EnrollmentSyncStatus.SYNCED, 1L)))
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(EnrollmentSyncStatus.SYNCED, viewModel.uploadModalState.value.records.single().syncStatus)
+  }
+
+  @Test
+  fun `onRetryUpload triggers an immediate sync attempt`() = runTest(dispatcher) {
+    val viewModel = viewModel()
+    observe(viewModel)
+
+    viewModel.onRetryUpload()
+
+    assertEquals(1, syncScheduler.syncNowCallCount)
+  }
+
+  @Test
+  fun `onDismissUploadModal hides the modal`() = runTest(dispatcher) {
+    draftRepository.setRecords(listOf(record("local-1", EnrollmentSyncStatus.SYNCED, 1L)))
+    val viewModel = viewModel()
+    observe(viewModel)
     viewModel.onDataUploadClicked()
     dispatcher.scheduler.advanceUntilIdle()
 
     viewModel.onDismissUploadModal()
+    dispatcher.scheduler.advanceUntilIdle()
 
-    val state = viewModel.uploadModalState.value
-    assertEquals(false, state.isVisible)
-    assertTrue(state.records.isEmpty())
+    assertFalse(viewModel.uploadModalState.value.isVisible)
   }
 
   @Test
-  fun `draft repository failure yields an empty modal instead of crashing, and leaves dashboard state untouched`() =
+  fun `a draft read error fails closed to an empty modal and leaves the dashboard untouched`() =
     runTest(dispatcher) {
-      draftRepository.error = IOException("db read failed")
-      val viewModel = HomeViewModel(repository, draftRepository)
-      dispatcher.scheduler.advanceUntilIdle() // let the unrelated dashboard load finish first
+      draftRepository.failObserve = true
+      val viewModel = viewModel()
+      observe(viewModel)
 
       viewModel.onDataUploadClicked()
       dispatcher.scheduler.advanceUntilIdle()
 
-      val modalState = viewModel.uploadModalState.value
-      assertTrue(modalState.isVisible)
-      assertEquals(false, modalState.isLoading)
-      assertTrue(modalState.records.isEmpty())
+      assertTrue(viewModel.uploadModalState.value.isVisible)
+      assertTrue(viewModel.uploadModalState.value.records.isEmpty())
+      assertEquals(0, viewModel.pendingUploadCount.value)
       assertTrue(viewModel.uiState.value is HomeUiState.Success)
     }
 }

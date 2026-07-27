@@ -1,6 +1,7 @@
 package org.armman.sakhi.data.forms
 
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
+import org.armman.sakhi.data.enrollment.EnrollmentMappingException
 import org.armman.sakhi.data.enrollment.EnrollmentSyncOutcome
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import retrofit2.HttpException
@@ -11,6 +12,13 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val HTTP_CONFLICT = 409
+
+/** Shown to the Sakhi when a submission can't proceed because a submit-critical lookup category
+ * (CASE_TYPE/BENEFICIARY_TYPE) hasn't loaded — a transient, connectivity-driven state (see
+ * [org.armman.sakhi.data.lookup.LookupWarmer]), not a form mistake. Deliberately actionable and
+ * free of internal jargon, unlike the raw exception text kept on the draft for debugging. */
+private const val LOOKUP_UNAVAILABLE_USER_MESSAGE =
+  "Couldn't load the data needed to submit. Please connect to the internet and try again."
 
 /**
  * Per-draft outcome of an IMMEDIATE, single-item sync attempt via
@@ -185,8 +193,11 @@ class DynamicFormSyncExecutor @Inject constructor(
               // Both the permanent-4xx and generic-error cases resolve to the same thing here:
               // show the Sakhi the error now. The distinction between them only matters to
               // [run]'s WorkManager-job-retry bookkeeping, not to what the Submit button does.
+              // Store the raw technical message on the draft (for debugging), but surface a clear,
+              // actionable message to the Sakhi — mapping the internal "lookup not seeded?" case to
+              // plain language, since to her it just means reference data hasn't loaded yet.
               markFailed(draft, error.message)
-              DynamicFormSyncItemResult.Failed(error.message)
+              DynamicFormSyncItemResult.Failed(userFacingMessage(error))
             }
           }
         },
@@ -196,6 +207,18 @@ class DynamicFormSyncExecutor @Inject constructor(
       DynamicFormSyncItemResult.Failed(e.message())
     }
   }
+
+  /** The message actually shown to the Sakhi for a failed submit: the internal "lookup not
+   * available" mapping failure becomes [LOOKUP_UNAVAILABLE_USER_MESSAGE]; everything else keeps its
+   * own message (raw backend errors are already meaningful enough to surface). */
+  private fun userFacingMessage(error: Throwable): String? =
+    if (error is DynamicFormSubmissionException.MappingFailed &&
+      error.mappingCause is EnrollmentMappingException.LookupNotAvailable
+    ) {
+      LOOKUP_UNAVAILABLE_USER_MESSAGE
+    } else {
+      error.message
+    }
 
   private suspend fun markFailed(draft: DynamicFormDraftEntity, errorMessage: String?) {
     dao.upsert(

@@ -1,5 +1,6 @@
 package org.armman.sakhi.data.forms
 
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
@@ -12,6 +13,7 @@ import org.armman.sakhi.data.enrollment.CreateBeneficiaryResponseDto
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -29,6 +31,7 @@ class RoomDynamicFormDraftRepositoryTest {
   private lateinit var formSubmissionApi: FakeFormSubmissionApi
   private lateinit var syncExecutor: DynamicFormSyncExecutor
   private lateinit var repository: RoomDynamicFormDraftRepository
+  private lateinit var lookupRepository: FakeLookupRepository
 
   private val session = UserSession(
     username = "test.sakhi",
@@ -51,7 +54,8 @@ class RoomDynamicFormDraftRepositoryTest {
     formSubmissionApi = FakeFormSubmissionApi()
     val sessionStore = SessionStore(FakeSecureKeyValueStore())
     sessionStore.saveSession(session)
-    val mapper = DynamicFormSubmissionMapper(sessionStore, FakeLookupRepository())
+    lookupRepository = FakeLookupRepository()
+    val mapper = DynamicFormSubmissionMapper(sessionStore, lookupRepository)
     val coordinator = DynamicFormSubmissionCoordinator(enrollmentApi, formSubmissionApi, mapper)
     // Reuses the same dao/secureStore as the repository so runOne() sees the row submitDraft just
     // wrote — matching how the real Hilt graph wires a single instance of each.
@@ -225,6 +229,24 @@ class RoomDynamicFormDraftRepositoryTest {
     assertEquals(EnrollmentSyncStatus.PENDING, dao.getByLocalBeneficiaryId("local-1")?.syncStatus)
   }
 
+  @Test
+  fun `submitDraft online shows a clear retryable message when a submit-critical lookup is missing`() = runTest {
+    connectivityChecker.online = true
+    // Simulate CASE_TYPE/BENEFICIARY_TYPE never having loaded (cold cache on a weak network) — the
+    // mapper can't resolve caseTypeLookupId and throws LookupNotAvailable.
+    lookupRepository.valuesByCategory = mutableMapOf()
+
+    val result = submit()
+
+    assertTrue(result is DynamicFormSubmitResult.Failed)
+    val message = (result as DynamicFormSubmitResult.Failed).message.orEmpty()
+    // Plain, actionable text — NOT the internal "seeded server-side?" phrasing.
+    assertTrue(message.contains("connect to the internet", ignoreCase = true))
+    assertFalse(message.contains("seeded", ignoreCase = true))
+    // Left FAILED, which the sync worker still retries once the lookups warm.
+    assertEquals(EnrollmentSyncStatus.FAILED, dao.getByLocalBeneficiaryId("local-1")?.syncStatus)
+  }
+
   // --- getUploadRecords: Home screen "Forms Uploaded" sync-status modal ------------------------
 
   @Test
@@ -276,6 +298,32 @@ class RoomDynamicFormDraftRepositoryTest {
     assertEquals(2_000L, records[0].createdAtEpochMillis)
     assertEquals("local-1", records[1].localBeneficiaryId)
     assertEquals(EnrollmentSyncStatus.PENDING, records[1].syncStatus)
+  }
+
+  @Test
+  fun `observeUploadRecords emits the current drafts and re-emits when a status changes`() = runTest {
+    dao.upsert(
+      DynamicFormDraftEntity(
+        localBeneficiaryId = "local-1",
+        formCode = "MOTHER_REGISTRATION",
+        formVersionId = "version-1",
+        localSubmissionUuid = "sub-1",
+        syncStatus = EnrollmentSyncStatus.PENDING,
+        createdAtEpochMillis = 1_000L,
+        lastAttemptAtEpochMillis = null,
+        retryCount = 0,
+        remoteBeneficiaryId = null,
+        remoteSubmissionId = null,
+        lastErrorMessage = null,
+      ),
+    )
+
+    assertEquals(EnrollmentSyncStatus.PENDING, repository.observeUploadRecords().first().single().syncStatus)
+
+    // Simulate the sync worker completing the upload — the stream must reflect it live.
+    dao.upsert(requireNotNull(dao.getByLocalBeneficiaryId("local-1")).copy(syncStatus = EnrollmentSyncStatus.SYNCED))
+
+    assertEquals(EnrollmentSyncStatus.SYNCED, repository.observeUploadRecords().first().single().syncStatus)
   }
 
   @Test

@@ -14,6 +14,11 @@ class FakeLookupRepository(
     ),
   ),
 ) : LookupRepository {
-  override suspend fun getValues(categoryCode: String): List<LookupValue> =
-    valuesByCategory[categoryCode] ?: emptyList()
+  /** Every category code passed to [getValues], in call order — lets tests assert what was warmed. */
+  val requestedCategories = mutableListOf<String>()
+
+  override suspend fun getValues(categoryCode: String): List<LookupValue> {
+    requestedCategories += categoryCode
+    return valuesByCategory[categoryCode] ?: emptyList()
+  }
 }

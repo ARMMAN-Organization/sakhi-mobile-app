@@ -26,12 +26,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import org.armman.sakhi.R
-import org.armman.sakhi.data.forms.AGE_YEARS_QUESTION_CODE
+import org.armman.sakhi.data.forms.AGE_FROM_DOB_QUESTION_CODES
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormFieldInputType
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
 import org.armman.sakhi.data.forms.FormNumericRangeValidator
+import org.armman.sakhi.data.forms.GeographyQuestionCodes
+import org.armman.sakhi.data.forms.MobileNumberRule
 import org.armman.sakhi.ui.enrollment.components.AppCheckboxGroup
 import org.armman.sakhi.ui.enrollment.components.AppDateField
 import org.armman.sakhi.ui.enrollment.components.AppDropdownField
@@ -93,9 +95,9 @@ private val CONSENT_CHECKBOX_QUESTION_CODES = setOf(
  * A blank/not-yet-computed value shows a placeholder rather than an empty box, so it doesn't look
  * broken.
  *
- * [AGE_YEARS_QUESTION_CODE] is treated the same way even though the live schema doesn't (yet) set
- * `computedFrom` on it — see that constant's doc. Without this, it would render as a normal
- * editable number box whose typed value gets silently clobbered by
+ * The DOB-derived age field ([AGE_FROM_DOB_QUESTION_CODES]) is treated the same way even though the
+ * live schema doesn't (yet) set `computedFrom` on it — see that constant's doc. Without this, it
+ * would render as a normal editable number box whose typed value gets silently clobbered by
  * `recomputeDerivedFields`'s stopgap every time any other answer changes — exactly the broken
  * pattern this whole read-only branch exists to avoid.
  */
@@ -115,10 +117,25 @@ fun DynamicFormField(
   val singleValue = answers.valueOf(field.questionCode).orEmpty()
   val multiValue = answers.multiValueOf(field.questionCode)
 
-  if (field.computedFrom != null || field.questionCode == AGE_YEARS_QUESTION_CODE) {
+  if (field.computedFrom != null || field.questionCode in AGE_FROM_DOB_QUESTION_CODES) {
     AppReadOnlyField(
       label = field.label,
       value = singleValue.ifBlank { "Auto-calculated" },
+      modifier = modifier,
+    )
+    return
+  }
+
+  // Geography (and project_name) options come from the backend's `geography`/profile, one unit per
+  // level. A single option renders read-only (pre-selected by the ViewModel); multiple falls back
+  // to a dropdown. Handled here rather than in the SELECT branch so the read-only/dropdown split
+  // stays in one place. See GeographyFieldOptionsResolver.optionsFromVersionGeography.
+  if (field.questionCode in GeographyQuestionCodes.ALL) {
+    GeographyField(
+      field = field,
+      selectedValue = singleValue,
+      loadOptions = loadOptions,
+      onSingleAnswer = onSingleAnswer,
       modifier = modifier,
     )
     return
@@ -135,21 +152,32 @@ fun DynamicFormField(
       )
 
     FormFieldInputType.NUMBER -> {
-      val rangeError = if (singleValue.isNotBlank() &&
-        !FormNumericRangeValidator.isWithinRange(field.numericRange, singleValue)
-      ) {
-        val range = field.numericRange
-        "Must be between ${range?.min?.toInt()} and ${range?.max?.toInt()}"
-      } else {
-        null
+      // `mobile_number` is a plain `number` in the schema but must be exactly 10 digits — cap input
+      // and validate here (see MobileNumberRule). Other number fields keep the numericRange check.
+      val isMobile = field.questionCode == MobileNumberRule.QUESTION_CODE
+      val error = when {
+        isMobile ->
+          if (singleValue.isNotBlank() && !MobileNumberRule.isComplete(singleValue)) {
+            stringResource(R.string.enrollment_error_mobile)
+          } else {
+            null
+          }
+        singleValue.isNotBlank() && !FormNumericRangeValidator.isWithinRange(field.numericRange, singleValue) -> {
+          val range = field.numericRange
+          "Must be between ${range?.min?.toInt()} and ${range?.max?.toInt()}"
+        }
+        else -> null
       }
       AppTextInputField(
         label = field.label,
         placeholder = field.label,
         value = singleValue,
-        onValueChange = { new -> onSingleAnswer(new.filter { it.isDigit() }) },
+        onValueChange = { new ->
+          val digits = new.filter { it.isDigit() }
+          onSingleAnswer(if (isMobile) digits.take(MobileNumberRule.REQUIRED_DIGITS) else digits)
+        },
         keyboardType = KeyboardType.Number,
-        errorText = rangeError,
+        errorText = error,
         modifier = modifier,
       )
     }
@@ -254,6 +282,41 @@ fun DynamicFormField(
         color = MaterialTheme.colorScheme.error,
         modifier = modifier,
       )
+  }
+}
+
+/**
+ * Geography / project_name field. Options are the backend-provided units for this level (via
+ * [DynamicMotherRegistrationViewModel.optionsFor] → `optionsFromVersionGeography`). Exactly one
+ * option (the normal case — the Sakhi's single assigned unit, already pre-selected in the answers)
+ * renders read-only so it can't be left blank or changed to a wrong value; more than one renders a
+ * dropdown. Zero options (a backend gap: this level missing from `geography`) renders as an empty,
+ * submit-gating dropdown rather than silently passing — the same "notice the gap" behavior as a
+ * choice field with no way to populate it.
+ */
+@Composable
+private fun GeographyField(
+  field: FormFieldSchema,
+  selectedValue: String,
+  loadOptions: suspend () -> List<FormFieldOption>,
+  onSingleAnswer: (String?) -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  var options by remember(field.questionCode) { mutableStateOf<List<FormFieldOption>>(emptyList()) }
+  LaunchedEffect(field.questionCode) { options = loadOptions() }
+
+  val single = options.singleOrNull()
+  if (single != null) {
+    AppReadOnlyField(label = field.label, value = single.label, modifier = modifier)
+  } else {
+    AppDropdownField(
+      label = field.label,
+      placeholder = field.label,
+      options = options.map { it.label },
+      selectedIndex = options.indexOfFirst { it.valueCode == selectedValue }.takeIf { it >= 0 },
+      onSelected = { index -> onSingleAnswer(options.getOrNull(index)?.valueCode) },
+      modifier = modifier,
+    )
   }
 }
 

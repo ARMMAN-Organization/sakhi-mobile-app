@@ -9,6 +9,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import org.armman.sakhi.ui.beneficiaries.BeneficiariesScreen
 import org.armman.sakhi.ui.beneficiaryprofile.BeneficiaryProfileScreen
+import org.armman.sakhi.ui.childregistration.DynamicChildRegistrationScreen
 import org.armman.sakhi.ui.enrollment.EnrollmentScreen
 import org.armman.sakhi.ui.forms.DynamicMotherRegistrationScreen
 import org.armman.sakhi.ui.home.HomeScreen
@@ -31,6 +32,9 @@ object Routes {
   /** CR-018: dynamic, backend-schema-driven Pregnant Woman enrollment — the real path from the
    * entry selector now, replacing the static Consent/Personal Info/Health History steps. */
   const val MOTHER_REGISTRATION = "enrollment/mother-registration"
+  /** CR-020: dynamic, backend-schema-driven Children Register — the "Child" path from the entry
+   * selector, a standalone fork of the mother-registration flow. */
+  const val CHILD_REGISTRATION = "enrollment/child-registration"
   const val PRE_VISIT_HEALTH_HISTORY = "previsit-health-history/{beneficiaryId}/{visitId}/{label}"
   const val VISIT_FORM = "visit-form/{beneficiaryId}/{visitId}/{label}"
 
@@ -125,6 +129,7 @@ fun AppNavHost() {
         onBack = { navController.popBackStack() },
         onProfile = { navController.navigate(Routes.PROFILE) },
         onPregnantWomanSelected = { navController.navigate(Routes.MOTHER_REGISTRATION) },
+        onChildSelected = { navController.navigate(Routes.CHILD_REGISTRATION) },
       )
     }
     composable(Routes.MOTHER_REGISTRATION) {
@@ -133,6 +138,18 @@ fun AppNavHost() {
         onSubmitted = {
           // Same destination the static flow's COMPLETE step used to land on — back to Home,
           // with the whole Enrollment sub-graph cleared so system back doesn't re-enter it.
+          navController.navigate(Routes.HOME) {
+            popUpTo(Routes.ENROLLMENT) { inclusive = true }
+          }
+        },
+      )
+    }
+    composable(Routes.CHILD_REGISTRATION) {
+      DynamicChildRegistrationScreen(
+        onBack = { navController.popBackStack() },
+        onSubmitted = {
+          // Back to Home, clearing the whole Enrollment sub-graph so system back doesn't re-enter
+          // it — same behaviour as the mother-registration path.
           navController.navigate(Routes.HOME) {
             popUpTo(Routes.ENROLLMENT) { inclusive = true }
           }

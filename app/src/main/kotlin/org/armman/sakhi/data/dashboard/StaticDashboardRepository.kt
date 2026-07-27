@@ -23,7 +23,6 @@ class StaticDashboardRepository @Inject constructor(
     delay(NETWORK_LATENCY_MS) // Simulate a round trip so the loading state is visible.
     return DashboardSummary(
       sakhiName = currentUserRepository.getProfile()?.displayName ?: "Tarini Swaraj",
-      pendingUploadCount = 8,
       lastUploadedOn = LocalDate.of(2026, 4, 14),
       activeVisits = ActiveVisits(
         month = YearMonth.of(2026, 1),

@@ -9,7 +9,8 @@ import java.time.YearMonth
  */
 data class DashboardSummary(
   val sakhiName: String,
-  val pendingUploadCount: Int,
+  // The Data Upload badge count is NOT part of the dashboard summary — it's derived live from the
+  // local draft store (see HomeViewModel.pendingUploadCount), so a real sync always reflects it.
   val lastUploadedOn: LocalDate,
   val activeVisits: ActiveVisits,
   val activeBeneficiaries: ActiveBeneficiaries,

@@ -16,7 +16,6 @@ class StaticDashboardRepositoryTest {
     val summary = repository.getSummary()
 
     assertEquals("Tarini Swaraj", summary.sakhiName)
-    assertEquals(8, summary.pendingUploadCount)
     assertEquals(12, summary.activeVisits.openCount)
     assertEquals(2, summary.activeVisits.endingCount)
     assertEquals(5, summary.activeVisits.pendingReferralCount)
@@ -29,7 +28,6 @@ class StaticDashboardRepositoryTest {
     val summary = repository.getSummary()
     val b = summary.activeBeneficiaries
 
-    assertTrue(summary.pendingUploadCount >= 0)
     assertTrue(summary.activeVisits.openCount >= 0)
     assertTrue(summary.activeVisits.endingCount >= 0)
     assertTrue(summary.activeVisits.pendingReferralCount >= 0)

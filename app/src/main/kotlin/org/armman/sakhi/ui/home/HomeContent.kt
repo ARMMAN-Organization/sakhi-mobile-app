@@ -56,6 +56,7 @@ import java.util.Locale
 @Composable
 internal fun HomeContent(
   summary: DashboardSummary,
+  pendingUploadCount: Int,
   onAllBeneficiaries: () -> Unit = {},
   onSeeVisitTracker: () -> Unit = {},
   onRegisterNew: () -> Unit = {},
@@ -69,7 +70,7 @@ internal fun HomeContent(
         .verticalScroll(rememberScrollState())
         .padding(horizontal = Dimens.ItemSpacing, vertical = Dimens.ScreenPadding),
     ) {
-      SakhiRow(summary, onDataUploadClick)
+      SakhiRow(summary, pendingUploadCount, onDataUploadClick)
       ActiveVisitsCard(summary, onSeeVisitTracker)
       ActiveBeneficiariesCard(summary)
     }
@@ -79,7 +80,7 @@ internal fun HomeContent(
 
 /** Sakhi name + Data Upload pill on one row, "Updated" caption under the pill. */
 @Composable
-private fun SakhiRow(summary: DashboardSummary, onDataUploadClick: () -> Unit) {
+private fun SakhiRow(summary: DashboardSummary, pendingUploadCount: Int, onDataUploadClick: () -> Unit) {
   val updatedOn = summary.lastUploadedOn.format(
     DateTimeFormatter.ofPattern("EEE, d MMM", Locale.getDefault()),
   )
@@ -105,7 +106,7 @@ private fun SakhiRow(summary: DashboardSummary, onDataUploadClick: () -> Unit) {
     )
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
       val isTablet = LocalConfiguration.current.screenWidthDp >= Dimens.TabletMinWidthDp
-      DataUploadPill(pendingCount = summary.pendingUploadCount, onClick = onDataUploadClick)
+      DataUploadPill(pendingCount = pendingUploadCount, onClick = onDataUploadClick)
       Text(
         text = stringResource(R.string.home_updated_on, updatedOn),
         style = if (isTablet) {
