@@ -39,7 +39,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import org.armman.sakhi.R
 import org.armman.sakhi.ui.theme.Dimens
@@ -48,10 +53,53 @@ import org.armman.sakhi.ui.theme.NeutralG400
 import org.armman.sakhi.ui.theme.NeutralG75
 import org.armman.sakhi.ui.theme.White
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private val FieldShape = RoundedCornerShape(8.dp)
+
+/** The required-field marker appended to a label, e.g. "Mother's name *". */
+private const val RequiredMarker = " *"
+
+/**
+ * A field label with a red `*` appended when [required].
+ *
+ * Built as an [androidx.compose.ui.text.AnnotatedString] rather than two `Text`s so the marker
+ * wraps with the label instead of being pushed onto its own line by a long Marathi label, and so
+ * the whole thing stays one node for TalkBack. `contentDescription` spells out "required" because
+ * a bare `*` is announced as "star", which carries no meaning to a screen-reader user.
+ */
+@Composable
+private fun FieldLabelText(label: String, required: Boolean, modifier: Modifier = Modifier) {
+  val errorColor = MaterialTheme.colorScheme.error
+  val text = remember(label, required, errorColor) {
+    buildAnnotatedString {
+      append(label)
+      if (required) {
+        withStyle(SpanStyle(color = errorColor)) { append(RequiredMarker) }
+      }
+    }
+  }
+  val description = if (required) {
+    stringResource(R.string.field_required_content_description, label)
+  } else {
+    null
+  }
+  Text(
+    text = text,
+    style = MaterialTheme.typography.labelLarge,
+    color = NeutralG400,
+    modifier = modifier.then(
+      if (description != null) {
+        Modifier.semantics { contentDescription = description }
+      } else {
+        Modifier
+      },
+    ),
+  )
+}
 
 /** Shared label + optional error scaffolding for enrollment form fields. */
 @Composable
@@ -59,13 +107,13 @@ private fun FieldFrame(
   label: String,
   errorText: String?,
   modifier: Modifier = Modifier,
+  required: Boolean = false,
   content: @Composable () -> Unit,
 ) {
   Column(modifier = modifier.fillMaxWidth()) {
-    Text(
-      text = label,
-      style = MaterialTheme.typography.labelLarge,
-      color = NeutralG400,
+    FieldLabelText(
+      label = label,
+      required = required,
       modifier = Modifier.padding(bottom = 4.dp),
     )
     content()
@@ -109,6 +157,7 @@ fun AppDropdownField(
   modifier: Modifier = Modifier,
   errorText: String? = null,
   enabled: Boolean = true,
+  required: Boolean = false,
 ) {
   var expanded by remember { mutableStateOf(false) }
   var fieldWidthPx by remember { mutableIntStateOf(0) }
@@ -120,7 +169,7 @@ fun AppDropdownField(
     }
   }
 
-  FieldFrame(label = label, errorText = errorText, modifier = modifier) {
+  FieldFrame(label = label, errorText = errorText, modifier = modifier, required = required) {
     Box {
       Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -166,9 +215,28 @@ fun AppDropdownField(
   }
 }
 
+/** Nearest date within [min]..[max] (either bound optional), so a picker seeded from an
+ * out-of-range value still opens on a month the user can actually pick in. */
+private fun LocalDate.coerceIntoRange(min: LocalDate?, max: LocalDate?): LocalDate = when {
+  min != null && isBefore(min) -> min
+  max != null && isAfter(max) -> max
+  else -> this
+}
+
+private fun LocalDate.startOfDayMillis(): Long =
+  atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+private fun LocalDate.endOfDayMillis(): Long =
+  atTime(LocalTime.MAX).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
 /**
  * Date field per the design's "Enter LMP" pattern: outlined box with a
  * trailing calendar icon, opening the platform date picker.
+ *
+ * [minDate]/[maxDate] bound what the picker will let the Sakhi choose (both inclusive, both
+ * optional). This is prevention only — a caller that bounds the picker must still validate the
+ * stored value, since a draft saved by an older build or an answer restored from the backend never
+ * passed through this dialog. See [org.armman.sakhi.data.forms.FormDateRuleset].
  */
 @Composable
 fun AppDateField(
@@ -178,20 +246,30 @@ fun AppDateField(
   onDateSelected: (LocalDate) -> Unit,
   modifier: Modifier = Modifier,
   errorText: String? = null,
+  required: Boolean = false,
+  minDate: LocalDate? = null,
+  maxDate: LocalDate? = null,
 ) {
   val context = LocalContext.current
   val formatter = remember { DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.getDefault()) }
   val openPicker = {
-    val seed = value ?: LocalDate.now()
-    DatePickerDialog(
+    // Clamp the seed into range so the dialog never opens on a month the bounds forbid (which
+    // reads as a broken picker: every day greyed out).
+    val seed = (value ?: maxDate ?: LocalDate.now()).coerceIntoRange(minDate, maxDate)
+    val dialog = DatePickerDialog(
       context,
       { _, year, month, day -> onDateSelected(LocalDate.of(year, month + 1, day)) },
       seed.year,
       seed.monthValue - 1,
       seed.dayOfMonth,
-    ).show()
+    )
+    // Bounds must be applied before show(). Android's DatePicker takes epoch millis, and a bound of
+    // "today" has to include all of today — hence start-of-day for min and end-of-day for max.
+    minDate?.let { dialog.datePicker.minDate = it.startOfDayMillis() }
+    maxDate?.let { dialog.datePicker.maxDate = it.endOfDayMillis() }
+    dialog.show()
   }
-  FieldFrame(label = label, errorText = errorText, modifier = modifier) {
+  FieldFrame(label = label, errorText = errorText, modifier = modifier, required = required) {
     Row(
       verticalAlignment = Alignment.CenterVertically,
       modifier = Modifier
@@ -231,8 +309,9 @@ fun AppPhoneField(
   onValueChange: (String) -> Unit,
   modifier: Modifier = Modifier,
   errorText: String? = null,
+  required: Boolean = false,
 ) {
-  FieldFrame(label = label, errorText = errorText, modifier = modifier) {
+  FieldFrame(label = label, errorText = errorText, modifier = modifier, required = required) {
     Row(
       verticalAlignment = Alignment.CenterVertically,
       modifier = Modifier
@@ -294,8 +373,9 @@ fun AppTextInputField(
   modifier: Modifier = Modifier,
   errorText: String? = null,
   keyboardType: KeyboardType = KeyboardType.Text,
+  required: Boolean = false,
 ) {
-  FieldFrame(label = label, errorText = errorText, modifier = modifier) {
+  FieldFrame(label = label, errorText = errorText, modifier = modifier, required = required) {
     Box(
       modifier = Modifier
         .fillMaxWidth()
@@ -338,8 +418,9 @@ fun AppRadioGroup(
   modifier: Modifier = Modifier,
   errorText: String? = null,
   horizontal: Boolean = false,
+  required: Boolean = false,
 ) {
-  FieldFrame(label = label, errorText = errorText, modifier = modifier) {
+  FieldFrame(label = label, errorText = errorText, modifier = modifier, required = required) {
     if (horizontal) {
       Row(horizontalArrangement = Arrangement.spacedBy(Dimens.ScreenPadding)) {
         options.forEachIndexed { index, option ->
@@ -383,8 +464,9 @@ fun AppCheckboxGroup(
   modifier: Modifier = Modifier,
   errorText: String? = null,
   enabled: (Int) -> Boolean = { true },
+  required: Boolean = false,
 ) {
-  FieldFrame(label = label, errorText = errorText, modifier = modifier) {
+  FieldFrame(label = label, errorText = errorText, modifier = modifier, required = required) {
     Column(verticalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing)) {
       options.forEachIndexed { index, option ->
         SelectableRow(
@@ -411,6 +493,7 @@ fun AppSingleCheckbox(
   checked: Boolean,
   onCheckedChange: (Boolean) -> Unit,
   modifier: Modifier = Modifier,
+  required: Boolean = false,
 ) {
   Row(modifier = modifier.fillMaxWidth()) {
     SelectableRow(
@@ -419,6 +502,7 @@ fun AppSingleCheckbox(
       iconSelected = R.drawable.ic_checkbox_selected,
       iconUnselected = R.drawable.ic_checkbox,
       onClick = { onCheckedChange(!checked) },
+      required = required,
     )
   }
 }
@@ -432,7 +516,30 @@ private fun SelectableRow(
   iconUnselected: Int,
   onClick: () -> Unit,
   enabled: Boolean = true,
+  /** Only ever true for a standalone [AppSingleCheckbox] that *is* a required field. Options inside
+   * a radio/checkbox group are never individually required — the group's own label carries the
+   * marker — so this stays false there. */
+  required: Boolean = false,
 ) {
+  val labelColor = when {
+    !enabled -> NeutralG75
+    selected -> MaterialTheme.colorScheme.primary
+    else -> NeutralG400
+  }
+  val errorColor = MaterialTheme.colorScheme.error
+  val labelText = remember(label, required, errorColor) {
+    buildAnnotatedString {
+      append(label)
+      if (required) {
+        withStyle(SpanStyle(color = errorColor)) { append(RequiredMarker) }
+      }
+    }
+  }
+  val description = if (required) {
+    stringResource(R.string.field_required_content_description, label)
+  } else {
+    null
+  }
   Row(
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing),
@@ -449,12 +556,13 @@ private fun SelectableRow(
       modifier = Modifier.size(24.dp),
     )
     Text(
-      text = label,
+      text = labelText,
       style = MaterialTheme.typography.bodyLarge,
-      color = when {
-        !enabled -> NeutralG75
-        selected -> MaterialTheme.colorScheme.primary
-        else -> NeutralG400
+      color = labelColor,
+      modifier = if (description != null) {
+        Modifier.semantics { contentDescription = description }
+      } else {
+        Modifier
       },
     )
   }

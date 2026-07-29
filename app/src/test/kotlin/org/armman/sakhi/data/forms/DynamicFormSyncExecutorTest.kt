@@ -12,6 +12,7 @@ import org.armman.sakhi.data.enrollment.EnrollmentSyncOutcome
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import retrofit2.Response
@@ -88,6 +89,56 @@ class DynamicFormSyncExecutorTest {
         lastErrorMessage = null,
       ),
     )
+  }
+
+  /** Puts a draft in the exact state a killed/cancelled sync pass leaves behind. */
+  private suspend fun seedOrphanedSyncingDraft(localBeneficiaryId: String = "local-1") {
+    seedPendingDraft(localBeneficiaryId)
+    dao.upsert(
+      requireNotNull(dao.getByLocalBeneficiaryId(localBeneficiaryId))
+        .copy(syncStatus = EnrollmentSyncStatus.SYNCING),
+    )
+  }
+
+  @Test
+  fun `a draft orphaned in SYNCING is reclaimed and uploaded by the next run`() = runTest {
+    // Regression: SYNCING is written before the network attempt, but getPendingSync() selects only
+    // PENDING/FAILED. A pass killed mid-attempt (process death, OS stopping the worker, or
+    // WorkManager cancelling it for a fresh manual tap) used to strand the draft permanently — the
+    // Home badge counted it as pending forever while no sync could ever pick it up.
+    seedOrphanedSyncingDraft()
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    val outcome = executor.run()
+
+    assertEquals(EnrollmentSyncOutcome.COMPLETED, outcome)
+    assertEquals(1, enrollmentApi.callCount)
+    assertEquals(EnrollmentSyncStatus.SYNCED, dao.getByLocalBeneficiaryId("local-1")?.syncStatus)
+  }
+
+  @Test
+  fun `reclaiming SYNCING leaves SYNCED and DUPLICATE_CONFLICT drafts untouched`() = runTest {
+    seedPendingDraft("synced-1")
+    dao.upsert(
+      requireNotNull(dao.getByLocalBeneficiaryId("synced-1")).copy(syncStatus = EnrollmentSyncStatus.SYNCED),
+    )
+    seedPendingDraft("dupe-1")
+    dao.upsert(
+      requireNotNull(dao.getByLocalBeneficiaryId("dupe-1"))
+        .copy(syncStatus = EnrollmentSyncStatus.DUPLICATE_CONFLICT),
+    )
+
+    executor.run()
+
+    // Re-uploading an already-SYNCED draft would be wasteful, and a DUPLICATE_CONFLICT is held for
+    // the Sakhi to resolve — neither is an orphan, so neither may be swept back into PENDING.
+    assertEquals(EnrollmentSyncStatus.SYNCED, dao.getByLocalBeneficiaryId("synced-1")?.syncStatus)
+    assertEquals(
+      EnrollmentSyncStatus.DUPLICATE_CONFLICT,
+      dao.getByLocalBeneficiaryId("dupe-1")?.syncStatus,
+    )
+    assertEquals(0, enrollmentApi.callCount)
   }
 
   private fun successfulBeneficiaryResponse() = Response.success(
@@ -172,6 +223,71 @@ class DynamicFormSyncExecutorTest {
     val entity = requireNotNull(dao.getByLocalBeneficiaryId("local-1"))
     assertEquals(EnrollmentSyncStatus.FAILED, entity.syncStatus)
     assertEquals(1, entity.retryCount)
+  }
+
+  @Test
+  fun `runOne on a 400 validation error returns Failed carrying the DTO-path fieldErrors`() = runTest {
+    seedPendingDraft()
+    val body = """
+      {"success":false,"message":"pii.firstName: String must contain at least 1 character(s)",
+      "errorCode":"VALIDATION_ERROR",
+      "fieldErrors":{"pii.firstName":"String must contain at least 1 character(s)"}}
+    """.trimIndent()
+    enrollmentApi.response = Response.error(400, body.toResponseBody("application/json".toMediaType()))
+
+    val result = executor.runOne("local-1")
+
+    assertTrue(result is DynamicFormSyncItemResult.Failed)
+    assertEquals(
+      "String must contain at least 1 character(s)",
+      (result as DynamicFormSyncItemResult.Failed).fieldErrors["pii.firstName"],
+    )
+  }
+
+  @Test
+  fun `runOne never surfaces the raw response body, but still logs it on the draft`() = runTest {
+    // The bug this guards: the banner used to read
+    // `POST /beneficiaries failed: HTTP 400 — {"success":false,…,"traceId":"5c42c1e5…"}`.
+    seedPendingDraft()
+    val body = """
+      {"success":false,"message":"motherDetails.lmpDate: lmpDate cannot be in the future",
+      "errorCode":"VALIDATION_ERROR","traceId":"5c42c1e51d2ae1d079ec420f587d6eac",
+      "fieldErrors":{"motherDetails.lmpDate":"lmpDate cannot be in the future"}}
+    """.trimIndent()
+    enrollmentApi.response = Response.error(400, body.toResponseBody("application/json".toMediaType()))
+
+    val result = executor.runOne("local-1")
+
+    val message = requireNotNull((result as DynamicFormSyncItemResult.Failed).message)
+    assertEquals("LMP date cannot be in the future", message)
+    // The raw body is still kept for debugging — it just doesn't reach the screen.
+    val entity = requireNotNull(dao.getByLocalBeneficiaryId("local-1"))
+    assertTrue(requireNotNull(entity.lastErrorMessage).contains("traceId"))
+  }
+
+  @Test
+  fun `runOne on a 500 with a non-envelope body shows the generic sentence`() = runTest {
+    seedPendingDraft()
+    enrollmentApi.response = Response.error(500, "server error".toResponseBody("text/plain".toMediaType()))
+
+    val result = executor.runOne("local-1")
+
+    assertEquals(SubmitErrorCopy.GENERIC, (result as DynamicFormSyncItemResult.Failed).message)
+  }
+
+  @Test
+  fun `runOne on a 422 returns Failed with empty fieldErrors (banner-only)`() = runTest {
+    seedPendingDraft()
+    val body = """
+      {"success":false,"message":"pii.phcId does not refer to a known geography unit.",
+      "errorCode":"UNPROCESSABLE"}
+    """.trimIndent()
+    enrollmentApi.response = Response.error(422, body.toResponseBody("application/json".toMediaType()))
+
+    val result = executor.runOne("local-1")
+
+    assertTrue(result is DynamicFormSyncItemResult.Failed)
+    assertTrue((result as DynamicFormSyncItemResult.Failed).fieldErrors.isEmpty())
   }
 
   @Test

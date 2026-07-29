@@ -26,23 +26,24 @@ import javax.inject.Singleton
 class RoomEnrollmentRepository @Inject constructor(
   private val dao: EnrollmentDraftDao,
   private val secureStore: SecureKeyValueStore,
-  private val syncScheduler: EnrollmentSyncScheduler,
   private val connectivityChecker: ConnectivityChecker,
   private val syncExecutor: EnrollmentSyncExecutor,
 ) : EnrollmentRepository {
 
   override suspend fun saveEnrollment(record: EnrollmentRecord): Result<Unit> = runCatching {
+    // Local save only. Uploading is the Sakhi's explicit Data Upload action (SRS §3A.1 manual
+    // trigger); this deliberately schedules nothing.
     saveLocally(record)
-    // Nudge a sync attempt immediately — a no-op (deferred by WorkManager) if currently offline,
-    // an immediate submit if online. Never blocks this save on the outcome.
-    syncScheduler.syncNow()
   }
 
   override suspend fun submitEnrollment(record: EnrollmentRecord): EnrollmentSubmitResult {
     saveLocally(record)
 
+    // Offline: the draft is safely persisted and waits in the queue for the Sakhi's Data Upload
+    // tap. Nothing is scheduled here — a WorkManager job enqueued now would carry a
+    // NetworkType.CONNECTED constraint and fire by itself on reconnect, which is the auto-sync
+    // SRS §3A.1 rules out.
     if (!connectivityChecker.isOnline()) {
-      syncScheduler.syncNow()
       return EnrollmentSubmitResult.QueuedOffline
     }
 
@@ -56,8 +57,8 @@ class RoomEnrollmentRepository @Inject constructor(
       is EnrollmentSyncItemResult.Retryable, null -> {
         // Transient (e.g. connectivity dropped mid-call despite the isOnline() check above), or
         // no draft row found (shouldn't happen right after saveLocally — guard only). Fall back
-        // to the offline-first guarantee rather than blocking the Sakhi indefinitely.
-        syncScheduler.syncNow()
+        // to the offline-first guarantee rather than blocking the Sakhi indefinitely: the draft
+        // stays PENDING for the next manual Data Upload.
         EnrollmentSubmitResult.QueuedOffline
       }
     }

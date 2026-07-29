@@ -14,6 +14,8 @@ import org.armman.sakhi.data.auth.LoginResult
 import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
+import org.armman.sakhi.data.lookup.FakeLookupRepository
+import org.armman.sakhi.data.lookup.LookupWarmer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -77,7 +79,7 @@ class LoginViewModelTest {
   private lateinit var viewModel: LoginViewModel
 
   private fun createViewModel() {
-    viewModel = LoginViewModel(repository, sessionStore)
+    viewModel = LoginViewModel(repository, sessionStore, LookupWarmer(FakeLookupRepository()))
   }
 
   @Before

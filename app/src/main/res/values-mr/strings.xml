@@ -2,6 +2,7 @@
   <string name="app_name">आरोग्य सखी</string>
   <!-- Home dashboard -->
   <string name="home_welcome">स्वागत, आरोग्य सखी</string>
+  <string name="app_logo_content_description">आरोग्य सखी — गर्भधारणा आणि बाल संगोपन</string>
   <string name="home_profile_content_description">प्रोफाइल</string>
   <string name="home_data_upload">डेटा अपलोड</string>
   <string name="home_updated_on">%1$s रोजी अपडेट केले</string>
@@ -16,8 +17,8 @@
   <!-- Forms Uploaded sync-status modal -->
   <string name="home_upload_modal_title">%1$d/%2$d फॉर्म अपलोड झाले</string>
   <string name="home_upload_modal_empty">अद्याप कोणताही फॉर्म सबमिट केलेला नाही.</string>
-  <string name="home_upload_modal_retry">पुन्हा प्रयत्न करा</string>
   <string name="home_upload_modal_form_label">माता नोंदणी</string>
+  <string name="home_upload_modal_child_form_label">बाल नोंदणी</string>
   <string name="home_upload_modal_category_forms">%1$d/%2$d फॉर्म</string>
   <string name="home_upload_status_synced">अपलोड झाले</string>
   <string name="home_upload_status_pending">प्रलंबित</string>
@@ -255,6 +256,10 @@
   <string name="enrollment_error_name_chars">फक्त अक्षरे आणि रिकाम्या जागांना परवानगी आहे</string>
   <string name="enrollment_error_age_range">वय १० ते ५० वर्षांदरम्यान असावे</string>
   <string name="enrollment_error_mobile">वैध १० अंकी मोबाईल क्रमांक भरा</string>
+  <string name="enrollment_error_registration_date_future">नोंदणीची तारीख भविष्यातील असू शकत नाही</string>
+  <string name="enrollment_error_number_range">%1$d ते %2$d दरम्यान असावे</string>
+  <string name="form_error_cross_field_lte">%1$s हे %2$s पेक्षा जास्त असू शकत नाही</string>
+  <string name="form_error_cross_field_sum_equals">%1$s हे %2$s च्या एकूण बेरजेइतके असावे</string>
   <string name="enrollment_error_household_range">२ ते १५ दरम्यान असावे</string>
   <string name="enrollment_error_children_exceed">कुटुंब सदस्यांपेक्षा जास्त असू शकत नाही</string>
   <string name="enrollment_error_years">वैध वर्षांची संख्या भरा</string>
@@ -475,4 +480,5 @@
   <string name="child_reg_ineligible_mother">नोंदणीकृत मातेच्या बाळाची नोंदणी जन्मानंतर ६ महिन्यांच्या (१८३ दिवस) आत करणे आवश्यक आहे.</string>
   <string name="child_reg_duplicate">जुळणारे बाळाचे रेकॉर्ड आधीच अस्तित्वात आहे. नवीन रेकॉर्ड म्हणून नोंदणी सुरू ठेवायची का?</string>
   <string name="child_reg_submit_failed">नोंदणी सबमिट करता आली नाही. कृपया फॉर्म तपासून पुन्हा प्रयत्न करा.</string>
+  <string name="field_required_content_description">%1$s, आवश्यक</string>
 </resources>

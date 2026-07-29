@@ -308,6 +308,10 @@ class DynamicChildRegistrationViewModel @Inject constructor(
    * in range. Cross-field/eligibility rules are only enforced at final submit via [isReadyToSubmit]. */
   fun isSectionReady(section: String): Boolean {
     if (_uiState.value.version == null) return false
+    // Refused consent blocks forward navigation on the tab that holds the consent question, so the
+    // Sakhi is stopped right there rather than only at final Submit.
+    val holdsConsent = fieldsInSection(section).any { it.questionCode == DID_WE_RECEIVE_CONSENT }
+    if (holdsConsent && _uiState.value.validationError == ChildValidationError.CONSENT_REFUSED) return false
     return fieldsAnsweredAndInRange(fieldsInSection(section))
   }
 

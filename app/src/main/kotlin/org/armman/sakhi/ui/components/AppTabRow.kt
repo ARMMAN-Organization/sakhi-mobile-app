@@ -21,20 +21,39 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG50
 
+/** How far a label-hugging tab's indicator extends past its label on each side. */
+private val HUG_TAB_INDICATOR_OVERHANG = 2.dp
+
 /**
  * Style-guide tab row: selected tab in primary with a rounded indicator,
  * unselected in grey; hairline divider across the full width underneath.
  *
- * Rows may mix one- and two-line labels (Enrollment stepper on mobile):
- * every tab is stretched to the row height, its label vertically centered,
- * and the indicator anchored to the row bottom so it sits ON the divider —
- * never floating under a shorter label.
+ * Two width strategies, chosen by [distributeEvenly]:
+ *
+ * - **`false` (list screens, e.g. My Beneficiaries):** tabs hug their labels and
+ *   sit left-aligned with a fixed gap. Labels there are short and always fit.
+ * - **`true` (form steppers, e.g. Enrollment / Visit Form):** every tab gets an
+ *   *equal* share of the row width. This is what the design shows — four steps
+ *   across the width, longer labels wrapping to two lines at a word boundary
+ *   ("Personal / Info", "Health / History") while short ones stay on one line.
+ *
+ * The equal share matters for correctness, not just looks: sizing stepper tabs
+ * to their intrinsic widths overflows a narrow screen, and because a [Row]
+ * measures children in order, the leading tabs eat the whole width and the last
+ * one ("Summary") is left with almost none — so it hard-wraps one character per
+ * line. Equal weights make starvation impossible at any screen width.
+ *
+ * Rows may mix one- and two-line labels, so every tab is stretched to the row
+ * height with its label pushed to the bottom. One-line labels therefore share a
+ * baseline with the *last* line of their two-line neighbours (per the design)
+ * and the indicator stays anchored on the divider rather than floating under a
+ * shorter label.
  */
 @Composable
 fun AppTabRow(
@@ -43,15 +62,11 @@ fun AppTabRow(
   onTabSelected: (Int) -> Unit,
   modifier: Modifier = Modifier,
   distributeEvenly: Boolean = false,
-  indicatorOverhang: Dp = 2.dp,
 ) {
   Column(modifier = modifier.fillMaxWidth()) {
-    // Alignment intent: default = tabs left-aligned with even gaps;
-    // distributeEvenly = tabs spread across the full row width (Enrollment
-    // stepper). Each tab's text is centered over its own indicator.
     Row(
       horizontalArrangement =
-        if (distributeEvenly) Arrangement.SpaceBetween
+        if (distributeEvenly) Arrangement.Start
         else Arrangement.spacedBy(Dimens.ScreenPadding),
       modifier = Modifier
         .fillMaxWidth()
@@ -59,30 +74,42 @@ fun AppTabRow(
     ) {
       tabs.forEachIndexed { index, title ->
         val selected = index == selectedIndex
-        // The symmetric padding makes the indicator overhang the label
-        // equally on both sides, keeping the text centered over it.
         Column(
           horizontalAlignment = Alignment.CenterHorizontally,
           modifier = Modifier
-            .width(IntrinsicSize.Max)
-            .fillMaxHeight()
-            .clickable { onTabSelected(index) }
-            .padding(horizontal = indicatorOverhang),
-        ) {
-          // Label centered in the space above the indicator, so one-line
-          // labels align to the middle of two-line neighbours.
-          Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.weight(1f),
-          ) {
-            Text(
-              text = title,
-              style = MaterialTheme.typography.titleMedium,
-              color = if (selected) MaterialTheme.colorScheme.primary else NeutralG200,
-              textAlign = TextAlign.Center,
-              modifier = Modifier.padding(vertical = Dimens.SmallSpacing),
+            .then(
+              // Equal share per tab, so no tab can be starved of width; otherwise
+              // hug the label, with a small symmetric inset so the indicator
+              // overhangs it evenly on both sides.
+              if (distributeEvenly) {
+                Modifier.weight(1f)
+              } else {
+                Modifier
+                  .width(IntrinsicSize.Max)
+                  .padding(horizontal = HUG_TAB_INDICATOR_OVERHANG)
+              },
             )
-          }
+            .fillMaxHeight()
+            .clickable { onTabSelected(index) },
+        ) {
+          // Pushes the label to the bottom of the tab so single-line labels line
+          // up with the second line of their two-line neighbours.
+          Spacer(modifier = Modifier.weight(1f))
+          // `maxLines`/`overflow` are a safety net: a label too long even for its
+          // own equal share degrades to a clipped two-line ellipsis instead of a
+          // per-character stack. Note the weight above is deliberately on the
+          // Spacer, never on the Text — in the `IntrinsicSize.Max` branch a
+          // weighted Text reports an intrinsic width of 0 (weight and intrinsic
+          // measurement don't compose) and collapses the tab.
+          Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = if (selected) MaterialTheme.colorScheme.primary else NeutralG200,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(vertical = Dimens.SmallSpacing),
+          )
           if (selected) {
             Box(
               modifier = Modifier

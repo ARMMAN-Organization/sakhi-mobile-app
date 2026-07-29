@@ -12,10 +12,10 @@ import java.time.LocalDate
  */
 interface DynamicFormDraftRepository {
 
-  /** Saves (or overwrites — re-submit safety) the draft keyed by [localBeneficiaryId], and
-   * nudges an immediate sync attempt. Always succeeds locally; does not wait for or report the
-   * backend outcome — prefer [submitDraft] from the Submit button so a validation/conflict error
-   * while online is caught before the user navigates away. */
+  /** Saves (or overwrites — re-submit safety) the draft keyed by [localBeneficiaryId]. Always
+   * succeeds locally and never touches the network: uploading happens only on the Sakhi's manual
+   * Data Upload action (SRS §3A.1). Prefer [submitDraft] from the Submit button so a
+   * validation/conflict error while online is caught before the user navigates away. */
   suspend fun saveDraft(
     localBeneficiaryId: String,
     formCode: String,
@@ -29,8 +29,9 @@ interface DynamicFormDraftRepository {
    * Saves the draft locally, then — only while online — attempts the real backend submission
    * (both API calls) immediately and returns its outcome, so the caller can keep the user
    * on-screen and show the actual error instead of navigating away on a local save that says
-   * nothing about the backend. While offline, saves locally and queues background sync as before
-   * ([DynamicFormSubmitResult.QueuedOffline]) — this never blocks on connectivity.
+   * nothing about the backend. While offline it saves locally and leaves the draft PENDING for the
+   * next manual Data Upload ([DynamicFormSubmitResult.QueuedOffline]) — this never blocks on
+   * connectivity, and never schedules a background upload of its own.
    */
   suspend fun submitDraft(
     localBeneficiaryId: String,

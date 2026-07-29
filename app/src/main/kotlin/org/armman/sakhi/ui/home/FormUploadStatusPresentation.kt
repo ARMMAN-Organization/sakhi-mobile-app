@@ -23,11 +23,12 @@ import kotlin.math.roundToInt
  * Pulled out of [FormsUploadedModal] so these rules are unit-testable with plain JUnit — this
  * repo has no Compose UI test harness (no `createComposeRule` usage exists anywhere).
  *
- * Only one category exists today ([MOTHER_REGISTRATION_FORM_CODE]), since the static enrollment
- * flow is deprecated in favor of this dynamic one; [categoryLabelRes] is a `when` specifically so
- * adding a second category later (e.g. a Referral Form) is a one-line addition, not a rewrite.
+ * Two categories are surfaced today — Mother Registration (CR-018) and Children Register (CR-020),
+ * merged by [org.armman.sakhi.data.sync.UploadRecordsSource]. [categoryLabelRes] is a `when`
+ * specifically so adding a third (e.g. a Referral Form) is a one-line addition, not a rewrite.
  */
 private const val MOTHER_REGISTRATION_FORM_CODE = "MOTHER_REGISTRATION"
+private const val CHILD_REGISTRATION_FORM_CODE = "CHILD_REGISTRATION"
 
 /** Which icon a category (or, before aggregation, a single record) renders. */
 internal enum class UploadStatusIconKind {
@@ -105,10 +106,14 @@ internal fun categoryIconKind(statuses: List<EnrollmentSyncStatus>): UploadStatu
   return UploadStatusIconKind.PENDING
 }
 
-/** Display label for a form category. Only one category exists today; extend this `when` when a
- * second one ships. */
+/**
+ * Display label for a form category. The `else` branch falls back to the Mother Registration label
+ * rather than crashing or showing a raw form code, since an unmapped code can only come from a
+ * queue this screen doesn't know about yet — extend this `when` when a new form ships.
+ */
 internal fun categoryLabelRes(formCode: String): Int = when (formCode) {
   MOTHER_REGISTRATION_FORM_CODE -> R.string.home_upload_modal_form_label
+  CHILD_REGISTRATION_FORM_CODE -> R.string.home_upload_modal_child_form_label
   else -> R.string.home_upload_modal_form_label
 }
 

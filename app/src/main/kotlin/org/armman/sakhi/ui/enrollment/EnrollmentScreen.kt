@@ -259,7 +259,6 @@ private fun EnrollmentBody(
               viewModel.goToStep(EnrollmentStep.entries[EnrollmentStep.CONSENT.ordinal + index])
             },
             distributeEvenly = true,
-            indicatorOverhang = Dimens.TabIndicatorOverhang,
             modifier = Modifier.padding(top = Dimens.ItemSpacing),
           )
           StepContent(state = state, viewModel = viewModel)

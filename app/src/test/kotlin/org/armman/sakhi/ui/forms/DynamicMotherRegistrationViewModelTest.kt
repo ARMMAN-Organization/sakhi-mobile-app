@@ -2,20 +2,27 @@ package org.armman.sakhi.ui.forms
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import org.armman.sakhi.data.forms.DOB_QUESTION_CODE
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.DynamicFormSubmitResult
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
 import org.armman.sakhi.data.forms.FormGeographyUnit
+import org.armman.sakhi.data.forms.FormObstetricRuleset
 import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.FormsRepository
 import org.armman.sakhi.data.forms.GeographyFieldOptionsResolver
+import org.armman.sakhi.data.forms.LMP_DATE_QUESTION_CODE
+import org.armman.sakhi.data.forms.REGISTRATION_DATE_QUESTION_CODE
+import org.armman.sakhi.data.forms.SubmitErrorCopy
 import org.armman.sakhi.data.geography.GeographyRepository
 import org.armman.sakhi.data.geography.GeographyUnit
 import org.armman.sakhi.data.geography.SakhiAssignment
@@ -24,6 +31,7 @@ import org.armman.sakhi.data.lookup.LookupValue
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -85,6 +93,8 @@ class DynamicMotherRegistrationViewModelTest {
     }
 
     override suspend fun getUploadRecords(): List<FormUploadRecord> = emptyList()
+
+    override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = flowOf(emptyList())
   }
 
   private val dispatcher = StandardTestDispatcher()
@@ -533,7 +543,9 @@ class DynamicMotherRegistrationViewModelTest {
 
   @Test
   fun `submit on backend validation failure reports Failed with the backend message — screen must not navigate`() = runTest {
-    val draftRepository = FakeDraftRepository(DynamicFormSubmitResult.Failed("gravida total mismatch"))
+    // A sentence whose leading token is not a known DTO field name, so SubmitErrorCopy passes it
+    // through verbatim (no field-label substitution) — the case this test cares about.
+    val draftRepository = FakeDraftRepository(DynamicFormSubmitResult.Failed("Obstetric totals do not add up"))
     val vm = viewModel(listOf(field("mobile_number", section = "Personal Info")), draftRepository)
     vm.setAnswer("mobile_number", "9876543210")
 
@@ -542,7 +554,7 @@ class DynamicMotherRegistrationViewModelTest {
 
     val state = vm.uiState.value.submissionState
     assertTrue(state is SubmissionState.Failed)
-    assertEquals("gravida total mismatch", (state as SubmissionState.Failed).message)
+    assertEquals("Obstetric totals do not add up", (state as SubmissionState.Failed).message)
   }
 
   @Test
@@ -582,5 +594,486 @@ class DynamicMotherRegistrationViewModelTest {
 
     assertEquals(0, draftRepository.submitCallCount)
     assertEquals(SubmissionState.Idle, vm.uiState.value.submissionState)
+  }
+
+  // --- submit(): inline field-level errors from a 400 VALIDATION_ERROR --------------------------
+
+  private fun fieldErrorFields() = listOf(
+    field("first_name", section = "Personal Info", inputType = "text"),
+    field("still_births", section = "Health History", inputType = "number"),
+  )
+
+  private fun readyViewModelFor(draftRepository: FakeDraftRepository): DynamicMotherRegistrationViewModel {
+    val vm = viewModel(fieldErrorFields(), draftRepository)
+    vm.setAnswer("first_name", "x")
+    vm.setAnswer("still_births", "1")
+    return vm
+  }
+
+  @Test
+  fun `submit 400 with fieldErrors sets inline errors, a generic banner, and a scroll target`() = runTest {
+    val draftRepository = FakeDraftRepository(
+      DynamicFormSubmitResult.Failed(
+        message = "raw backend text the Sakhi should not have to read",
+        fieldErrors = mapOf(
+          "pii.firstName" to "First name is required",
+          "motherDetails.stillbirths" to "too many",
+        ),
+      ),
+    )
+    val vm = readyViewModelFor(draftRepository)
+
+    vm.submit()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val state = vm.uiState.value
+    // DTO paths mapped to question_codes and shown inline.
+    assertEquals("First name is required", state.fieldErrors["first_name"])
+    assertEquals("too many", state.fieldErrors["still_births"])
+    // Generic banner, not the raw backend message, since the fields now carry the detail.
+    val banner = state.submissionState
+    assertTrue(banner is SubmissionState.Failed)
+    assertEquals("Please fix the highlighted fields and submit again.", (banner as SubmissionState.Failed).message)
+    // Jumps to the first errored field in schema order (first_name, on Personal Info).
+    assertEquals("Personal Info", state.errorScroll?.section)
+    assertEquals("first_name", state.errorScroll?.questionCode)
+  }
+
+  @Test
+  fun `a fieldError on a question this schema does not declare still shows a clean banner`() = runTest {
+    // The reported bug: `lmp_date` isn't in this version's schema, so nothing maps, and the banner
+    // used to fall through to the raw exception text (endpoint + HTTP code + whole JSON body).
+    val draftRepository = FakeDraftRepository(
+      DynamicFormSubmitResult.Failed(
+        message = "motherDetails.lmpDate: lmpDate cannot be in the future",
+        fieldErrors = mapOf("motherDetails.lmpDate" to "lmpDate cannot be in the future"),
+      ),
+    )
+    val vm = readyViewModelFor(draftRepository)
+
+    vm.submit()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val state = vm.uiState.value
+    assertTrue(state.fieldErrors.isEmpty())
+    assertEquals(
+      "LMP date cannot be in the future",
+      (state.submissionState as SubmissionState.Failed).message,
+    )
+  }
+
+  @Test
+  fun `an inline field error is humanized too, not left in DTO wording`() = runTest {
+    val draftRepository = FakeDraftRepository(
+      DynamicFormSubmitResult.Failed(
+        message = null,
+        fieldErrors = mapOf("pii.firstName" to "firstName must contain at least 1 character(s)"),
+      ),
+    )
+    val vm = readyViewModelFor(draftRepository)
+
+    vm.submit()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(
+      "First name must contain at least 1 character(s)",
+      vm.uiState.value.fieldErrors["first_name"],
+    )
+  }
+
+  @Test
+  fun `a failure with no usable message falls back to the generic sentence`() = runTest {
+    val draftRepository = FakeDraftRepository(DynamicFormSubmitResult.Failed(message = null))
+    val vm = readyViewModelFor(draftRepository)
+
+    vm.submit()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(
+      SubmitErrorCopy.GENERIC,
+      (vm.uiState.value.submissionState as SubmissionState.Failed).message,
+    )
+  }
+
+  @Test
+  fun `editing a flagged field clears only its inline error`() = runTest {
+    val draftRepository = FakeDraftRepository(
+      DynamicFormSubmitResult.Failed(
+        message = "raw",
+        fieldErrors = mapOf(
+          "pii.firstName" to "First name is required",
+          "motherDetails.stillbirths" to "too many",
+        ),
+      ),
+    )
+    val vm = readyViewModelFor(draftRepository)
+    vm.submit()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    vm.setAnswer("first_name", "Meera")
+
+    val fieldErrors = vm.uiState.value.fieldErrors
+    assertFalse(fieldErrors.containsKey("first_name"))
+    assertEquals("too many", fieldErrors["still_births"])
+  }
+
+  @Test
+  fun `scroll target points at the section holding the first errored field`() = runTest {
+    val draftRepository = FakeDraftRepository(
+      DynamicFormSubmitResult.Failed(
+        message = "raw",
+        fieldErrors = mapOf("motherDetails.stillbirths" to "too many"),
+      ),
+    )
+    val vm = viewModel(
+      listOf(
+        field("did_we_receive_consent", section = "Consent", inputType = "radio"),
+        field("still_births", section = "Health History", inputType = "number"),
+      ),
+      draftRepository,
+    )
+    vm.setAnswer("did_we_receive_consent", "yes")
+    vm.setAnswer("still_births", "1")
+
+    vm.submit()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals("Health History", vm.uiState.value.errorScroll?.section)
+    assertEquals("still_births", vm.uiState.value.errorScroll?.questionCode)
+  }
+
+  @Test
+  fun `submit failure with no fieldErrors stays banner-only with the raw message`() = runTest {
+    val draftRepository = FakeDraftRepository(
+      DynamicFormSubmitResult.Failed(
+        message = "pii.phcId does not refer to a known geography unit.",
+        fieldErrors = emptyMap(),
+      ),
+    )
+    val vm = viewModel(listOf(field("mobile_number", section = "Personal Info")), draftRepository)
+    vm.setAnswer("mobile_number", "9876543210")
+
+    vm.submit()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val state = vm.uiState.value
+    assertTrue(state.fieldErrors.isEmpty())
+    assertNull(state.errorScroll)
+    assertEquals(
+      "pii.phcId does not refer to a known geography unit.",
+      (state.submissionState as SubmissionState.Failed).message,
+    )
+  }
+
+  // --- Obstetric history gate (Registration_PW_D rows 45-50) ------------------------------------
+
+  private fun obstetricViewModel() = viewModel(
+    listOf(
+      field(FormObstetricRuleset.GRAVIDA, section = "Health History", inputType = "number"),
+      field(FormObstetricRuleset.PARA, section = "Health History", inputType = "number"),
+      field(FormObstetricRuleset.LIVING_CHILDREN, section = "Health History", inputType = "number"),
+      field(FormObstetricRuleset.ABORTIONS, section = "Health History", inputType = "number"),
+      field(FormObstetricRuleset.STILL_BIRTHS, section = "Health History", inputType = "number"),
+    ),
+  )
+
+  /** Fills every obstetric field in one call; unspecified figures default to zero. */
+  private fun DynamicMotherRegistrationViewModel.answerObstetrics(
+    gravida: String,
+    para: String = "0",
+    living: String = "0",
+    abortions: String = "0",
+    stillBirths: String = "0",
+  ) {
+    setAnswer(FormObstetricRuleset.GRAVIDA, gravida)
+    setAnswer(FormObstetricRuleset.PARA, para)
+    setAnswer(FormObstetricRuleset.LIVING_CHILDREN, living)
+    setAnswer(FormObstetricRuleset.ABORTIONS, abortions)
+    setAnswer(FormObstetricRuleset.STILL_BIRTHS, stillBirths)
+  }
+
+  @Test
+  fun `an inconsistent gravida blocks its tab and submission`() = runTest {
+    val vm = obstetricViewModel()
+
+    // QA's case: Gravida 6 alongside zeros, which total 0.
+    vm.answerObstetrics(gravida = "6")
+
+    // Blocked on the Health History tab itself, not only at Submit.
+    assertFalse(vm.isSectionReady("Health History"))
+    assertFalse(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `a consistent obstetric history passes the gate`() = runTest {
+    val vm = obstetricViewModel()
+
+    vm.answerObstetrics(gravida = "4", para = "3", living = "2", abortions = "1", stillBirths = "1")
+
+    assertTrue(vm.isSectionReady("Health History"))
+    assertTrue(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `correcting gravida clears the block`() = runTest {
+    val vm = obstetricViewModel()
+
+    vm.answerObstetrics(gravida = "6", living = "1", abortions = "1")
+    assertFalse(vm.isSectionReady("Health History"))
+
+    vm.setAnswer(FormObstetricRuleset.GRAVIDA, "2")
+    assertTrue(vm.isSectionReady("Health History"))
+  }
+
+  @Test
+  fun `para above gravida blocks the gate`() = runTest {
+    val vm = obstetricViewModel()
+
+    vm.answerObstetrics(gravida = "2", para = "3", living = "2")
+
+    assertFalse(vm.isSectionReady("Health History"))
+  }
+
+  // --- Spec date rules gate (Registration_PW_D rows 7 / 13 / 23) -------------------------------
+
+  @Test
+  fun `future date of birth blocks its tab and submission`() = runTest {
+    val vm = viewModel(
+      listOf(field(DOB_QUESTION_CODE, section = "Personal Info", inputType = "date")),
+    )
+
+    vm.setAnswer(DOB_QUESTION_CODE, vm.registrationDate.plusDays(1).toString())
+
+    assertFalse(vm.isSectionReady("Personal Info"))
+    assertFalse(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `date of birth inside the accepted age range passes the gate`() = runTest {
+    val vm = viewModel(
+      listOf(field(DOB_QUESTION_CODE, section = "Personal Info", inputType = "date")),
+    )
+
+    vm.setAnswer(DOB_QUESTION_CODE, vm.registrationDate.minusYears(25).toString())
+
+    assertTrue(vm.isSectionReady("Personal Info"))
+    assertTrue(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `date of birth outside the 10 to 50 age range blocks the gate`() = runTest {
+    val vm = viewModel(
+      listOf(field(DOB_QUESTION_CODE, section = "Personal Info", inputType = "date")),
+    )
+
+    vm.setAnswer(DOB_QUESTION_CODE, vm.registrationDate.minusYears(9).toString())
+    assertFalse(vm.isSectionReady("Personal Info"))
+
+    vm.setAnswer(DOB_QUESTION_CODE, vm.registrationDate.minusYears(60).toString())
+    assertFalse(vm.isSectionReady("Personal Info"))
+  }
+
+  @Test
+  fun `future lmp blocks its tab and submission`() = runTest {
+    val vm = viewModel(
+      listOf(field(LMP_DATE_QUESTION_CODE, section = "Personal Info", inputType = "date")),
+    )
+
+    vm.setAnswer(LMP_DATE_QUESTION_CODE, vm.registrationDate.plusDays(1).toString())
+
+    assertFalse(vm.isSectionReady("Personal Info"))
+    assertFalse(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `lmp inside the spec window passes the gate`() = runTest {
+    val vm = viewModel(
+      listOf(field(LMP_DATE_QUESTION_CODE, section = "Personal Info", inputType = "date")),
+    )
+
+    vm.setAnswer(LMP_DATE_QUESTION_CODE, vm.registrationDate.minusDays(60).toString())
+
+    assertTrue(vm.isSectionReady("Personal Info"))
+    assertTrue(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `future registration date blocks its tab and submission`() = runTest {
+    val vm = viewModel(
+      listOf(field(REGISTRATION_DATE_QUESTION_CODE, section = "Personal Info", inputType = "date")),
+    )
+
+    vm.setAnswer(REGISTRATION_DATE_QUESTION_CODE, vm.registrationDate.plusDays(1).toString())
+
+    assertFalse(vm.isSectionReady("Personal Info"))
+    assertFalse(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `registration date of today passes the gate`() = runTest {
+    val vm = viewModel(
+      listOf(field(REGISTRATION_DATE_QUESTION_CODE, section = "Personal Info", inputType = "date")),
+    )
+
+    vm.setAnswer(REGISTRATION_DATE_QUESTION_CODE, vm.registrationDate.toString())
+
+    assertTrue(vm.isSectionReady("Personal Info"))
+    assertTrue(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `a date field with no spec rule is not gated on dates`() = runTest {
+    val vm = viewModel(
+      listOf(field("some_other_date", section = "Personal Info", inputType = "date")),
+    )
+
+    vm.setAnswer("some_other_date", vm.registrationDate.plusYears(1).toString())
+
+    assertTrue(vm.isSectionReady("Personal Info"))
+  }
+
+  // --- Consent refused hard stop -------------------------------------------------------------
+
+  @Test
+  fun `consent refused blocks the Consent tab and submission`() = runTest {
+    val vm = viewModel(
+      listOf(field("did_we_receive_consent", section = "Consent", inputType = "radio")),
+    )
+
+    vm.setAnswer("did_we_receive_consent", "no")
+
+    assertTrue(vm.consentRefused())
+    assertFalse(vm.isSectionReady("Consent"))
+    assertFalse(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `consent given unblocks the Consent tab and allows submission`() = runTest {
+    val vm = viewModel(
+      listOf(field("did_we_receive_consent", section = "Consent", inputType = "radio")),
+    )
+
+    vm.setAnswer("did_we_receive_consent", "yes")
+
+    assertFalse(vm.consentRefused())
+    assertTrue(vm.isSectionReady("Consent"))
+    assertTrue(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `re-answering consent no then yes clears the block`() = runTest {
+    val vm = viewModel(
+      listOf(field("did_we_receive_consent", section = "Consent", inputType = "radio")),
+    )
+
+    vm.setAnswer("did_we_receive_consent", "no")
+    assertFalse(vm.isSectionReady("Consent"))
+
+    vm.setAnswer("did_we_receive_consent", "yes")
+    assertFalse(vm.consentRefused())
+    assertTrue(vm.isSectionReady("Consent"))
+    assertTrue(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `unanswered consent is not treated as a refusal`() = runTest {
+    val vm = viewModel(
+      listOf(field("did_we_receive_consent", section = "Consent", inputType = "radio")),
+    )
+
+    // No answer yet: not a refusal (no banner), but still blocked by the normal required-field gate.
+    assertFalse(vm.consentRefused())
+    assertFalse(vm.isSectionReady("Consent"))
+  }
+
+  @Test
+  fun `consent refused overrides an otherwise complete form`() = runTest {
+    val vm = viewModel(
+      listOf(
+        field("did_we_receive_consent", section = "Consent", inputType = "radio"),
+        field("mobile_number", section = "Personal Info"),
+      ),
+    )
+
+    vm.setAnswer("mobile_number", "9876543210")
+    vm.setAnswer("did_we_receive_consent", "no")
+
+    assertFalse(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `submit is a no-op when consent is refused`() = runTest {
+    val draftRepository = FakeDraftRepository()
+    val vm = viewModel(
+      listOf(field("did_we_receive_consent", section = "Consent", inputType = "radio")),
+      draftRepository,
+    )
+
+    vm.setAnswer("did_we_receive_consent", "no")
+    vm.submit()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(0, draftRepository.submitCallCount)
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Beneficiary name character rule (form spec S.No 19). The renderer filters the input, so these
+  // cover values that bypassed it — a draft saved before the rule shipped, or a restored answer.
+  // ---------------------------------------------------------------------------------------------
+
+  private fun nameFormFields() = listOf(
+    field("first_name", section = "Personal Info"),
+    field("middle_name", section = "Personal Info", required = false),
+    field("last_name", section = "Personal Info"),
+    field("enter_the_beneficiary_address", section = "Personal Info"),
+  )
+
+  private fun DynamicMotherRegistrationViewModel.answerCleanNames() {
+    setAnswer("first_name", "Reema")
+    setAnswer("last_name", "Devi")
+    setAnswer("enter_the_beneficiary_address", "Pada 4, Dhadgaon")
+  }
+
+  @Test
+  fun `a name holding special characters blocks the section and submit`() = runTest {
+    val vm = viewModel(nameFormFields())
+
+    vm.answerCleanNames()
+    vm.setAnswer("first_name", "Reema#")
+
+    assertFalse(vm.isSectionReady("Personal Info"))
+    assertFalse(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `clean names leave the section ready`() = runTest {
+    val vm = viewModel(nameFormFields())
+
+    vm.answerCleanNames()
+
+    assertTrue(vm.isSectionReady("Personal Info"))
+    assertTrue(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `an optional middle name still blocks when it holds special characters`() = runTest {
+    val vm = viewModel(nameFormFields())
+
+    vm.answerCleanNames()
+    vm.setAnswer("middle_name", "Devi@")
+
+    assertFalse(vm.isSectionReady("Personal Info"))
+  }
+
+  @Test
+  fun `the name rule does not leak to other text fields`() = runTest {
+    // Addresses legitimately contain digits and punctuation — filtering them would be a regression.
+    val vm = viewModel(nameFormFields())
+
+    vm.answerCleanNames()
+    vm.setAnswer("enter_the_beneficiary_address", "Plot #12, Ward-3")
+
+    assertTrue(vm.isSectionReady("Personal Info"))
+    assertTrue(vm.isReadyToSubmit())
   }
 }

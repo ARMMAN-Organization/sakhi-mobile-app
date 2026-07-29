@@ -28,6 +28,19 @@ class FormUploadStatusPresentationTest {
     formCode: String = "MOTHER_REGISTRATION",
   ) = FormUploadRecord(localBeneficiaryId = id, formCode = formCode, syncStatus = status, createdAtEpochMillis = 0L)
 
+  @Test
+  fun `mother and child registration get distinct category labels`() {
+    // Both queues now feed this modal (UploadRecordsSource merges them), so a shared label would
+    // make two different categories indistinguishable to the Sakhi.
+    assertNotEquals(categoryLabelRes("MOTHER_REGISTRATION"), categoryLabelRes("CHILD_REGISTRATION"))
+  }
+
+  @Test
+  fun `an unmapped form code falls back to a real label rather than blank`() {
+    // A code from a queue this screen doesn't know about yet must still render something readable.
+    assertEquals(categoryLabelRes("MOTHER_REGISTRATION"), categoryLabelRes("SOME_FUTURE_FORM"))
+  }
+
   // --- groupUploadRecordsByCategory ------------------------------------------------------------
 
   @Test

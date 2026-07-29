@@ -1,5 +1,6 @@
 <resources>
   <string name="app_name">Arogya Sakhi</string>
+  <string name="app_logo_content_description">Arogya Sakhi — Pregnancy and Child Care</string>
   <!-- Home dashboard -->
   <string name="home_welcome">Welcome, Arogya Sakhi</string>
   <string name="home_profile_content_description">Profile</string>
@@ -16,8 +17,8 @@
   <!-- Forms Uploaded sync-status modal -->
   <string name="home_upload_modal_title">%1$d/%2$d Forms Uploaded</string>
   <string name="home_upload_modal_empty">No forms submitted yet.</string>
-  <string name="home_upload_modal_retry">Retry</string>
   <string name="home_upload_modal_form_label">Mother Registration</string>
+  <string name="home_upload_modal_child_form_label">Children Register</string>
   <string name="home_upload_modal_category_forms">%1$d/%2$d Forms</string>
   <string name="home_upload_status_synced">Uploaded</string>
   <string name="home_upload_status_pending">Pending</string>
@@ -256,6 +257,12 @@
   <string name="enrollment_error_name_chars">Only letters and spaces are allowed</string>
   <string name="enrollment_error_age_range">Age must be between 10 and 50 years</string>
   <string name="enrollment_error_mobile">Enter a valid 10-digit mobile number</string>
+  <string name="enrollment_error_number_range">Must be between %1$d and %2$d</string>
+  <!-- Cross-field rules from the form's validationJson; see CrossFieldMessages. -->
+  <string name="form_error_cross_field_lte">%1$s cannot be more than %2$s</string>
+  <string name="form_error_cross_field_sum_equals">%1$s must equal the total of %2$s</string>
+  <!-- Registration_PW_D spec row 13; the DOB/LMP messages above are reused, see FormDateRuleset. -->
+  <string name="enrollment_error_registration_date_future">Registration date cannot be in the future</string>
   <string name="enrollment_error_household_range">Must be between 2 and 15</string>
   <string name="enrollment_error_children_exceed">Cannot be more than family members</string>
   <string name="enrollment_error_years">Enter a valid number of years</string>
@@ -489,4 +496,5 @@
   <string name="child_reg_ineligible_mother">A child of a registered mother must be registered within 6 months (183 days) of birth.</string>
   <string name="child_reg_duplicate">A matching child record already exists. Continue registering this as a new record?</string>
   <string name="child_reg_submit_failed">Registration could not be submitted. Please review the form and try again.</string>
+  <string name="field_required_content_description">%1$s, required</string>
 </resources>

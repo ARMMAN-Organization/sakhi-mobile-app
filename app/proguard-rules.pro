@@ -25,6 +25,19 @@
 # (RemoteAuthRepository.loginOnline / SessionStore / OfflineCredentialCache).
 -keep class org.armman.sakhi.data.auth.** { *; }
 
+# Same reflection hazard as data/auth above, for the other packages whose DTOs are only
+# reached via Retrofit's erased Response<T> generic or gson.fromJson(json, X::class.java) —
+# never `new`d directly, so R8 drops them from the dex in release builds unless kept whole.
+# forms: FormsApi/FormSubmissionApi + RemoteFormsRepository/DynamicFormSyncExecutor
+# (this is the package that was stripped and caused "Couldn't load the enrollment form").
+# enrollment: EnrollmentApi (createBeneficiary) + EnrollmentSyncExecutor/RoomEnrollmentRepository.
+# lookup: LookupApi (getCategory) + RemoteLookupRepository.
+# childregistration: ChildFormDraftPayload via ChildFormSyncExecutor's gson.fromJson.
+-keep class org.armman.sakhi.data.forms.** { *; }
+-keep class org.armman.sakhi.data.enrollment.** { *; }
+-keep class org.armman.sakhi.data.lookup.** { *; }
+-keep class org.armman.sakhi.data.childregistration.** { *; }
+
 # Retrofit's own recommended R8 rules. Retrofit builds each call's generic return type
 # (Response<LoginResponseDto>) from the service interface method's signature/annotations at
 # runtime; stripping those causes GsonConverterFactory to hand back the wrong type and

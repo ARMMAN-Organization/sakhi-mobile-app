@@ -3,7 +3,15 @@ package org.armman.sakhi.data.forms
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
-private const val LMP_DATE_QUESTION_CODE = "lmp_date"
+/** LMP question the EDD/gestational-age values derive from, and the subject of
+ * [FormDateRuleset]'s LMP window rule. */
+const val LMP_DATE_QUESTION_CODE = "lmp_date"
+
+/** ANC registration date. NOTE the backend's spelling — `registrtion_date`, missing the second
+ * `a` — kept verbatim because it is the live `question_code`; see
+ * `DynamicFormSubmissionMapper.QuestionCode.REGISTRATION_DATE`. */
+const val REGISTRATION_DATE_QUESTION_CODE = "registrtion_date"
+
 private const val EDD_OFFSET_DAYS = 280L
 private const val DAYS_PER_WEEK = 7L
 

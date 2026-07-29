@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +42,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import org.armman.sakhi.R
 import org.armman.sakhi.data.forms.FormFieldInputType
 import org.armman.sakhi.data.forms.FormFieldSchema
+import org.armman.sakhi.data.forms.FormObstetricRuleset
 import org.armman.sakhi.ui.components.AppTabRow
 import org.armman.sakhi.ui.components.BackHeader
 import org.armman.sakhi.ui.components.PrimaryButton
@@ -192,13 +194,39 @@ private fun FormContent(
   val isSummaryTab = safeIndex >= schemaSections.size
   val currentSchemaSection = schemaSections.getOrNull(safeIndex)
 
+  // A field-attributable submit failure jumps to the section holding the first flagged field; the
+  // list itself then scrolls to the field (see DynamicFormFieldList). One-shot: the ViewModel
+  // clears errorScroll once the list reports it scrolled.
+  LaunchedEffect(state.errorScroll) {
+    val target = state.errorScroll ?: return@LaunchedEffect
+    val sectionIndex = schemaSections.indexOf(target.section)
+    if (sectionIndex >= 0) onTabSelected(sectionIndex)
+  }
+
+  // Violated cross-field rules (e.g. "children under 5" higher than "family members"), resolved
+  // once per composition: attributed to the field that should show them inline, and listed in a
+  // banner on the Summary tab so a rule spanning other tabs still explains a blocked Submit.
+  val labelOf = labelResolver(viewModel.visibleFields())
+  val crossFieldMessages: Map<String, String> = buildMap {
+    CrossFieldErrorAttribution.byQuestionCode(viewModel.crossFieldViolations())
+      .forEach { (code, rule) -> crossFieldMessage(rule, labelOf)?.let { put(code, it) } }
+    // Spec obstetric rules (Gravida/Para/abortions/still births/dead children) are checked here
+    // rather than server-side: validationJson can express neither a sum with a constant term nor
+    // "live births", which the form never captures directly. A backend rule saying the same thing
+    // already occupies the field's slot, so `putIfAbsent` keeps one message per field.
+    viewModel.visibleFields().forEach { field ->
+      FormObstetricRuleset.violationFor(field.questionCode, state.answers)
+        ?.let { violation -> obstetricMessage(violation) }
+        ?.let { putIfAbsent(field.questionCode, it) }
+    }
+  }
+
   Column(modifier = Modifier.fillMaxSize()) {
     AppTabRow(
       tabs = tabs,
       selectedIndex = safeIndex,
       onTabSelected = onTabSelected,
       distributeEvenly = true,
-      indicatorOverhang = Dimens.TabIndicatorOverhang,
       modifier = Modifier.padding(horizontal = Dimens.ScreenPadding, vertical = Dimens.ItemSpacing),
     )
 
@@ -221,9 +249,35 @@ private fun FormContent(
           fields = currentSchemaSection?.let(viewModel::fieldsInSection).orEmpty(),
           state = state,
           viewModel = viewModel,
+          crossFieldMessages = crossFieldMessages,
           isConsentSection = currentSchemaSection == CONSENT_SECTION,
+          // Only scroll within the list once it's the section the flagged field lives on — the tab
+          // switch below moves there first, then this list (now holding the field) scrolls to it.
+          scrollTarget = state.errorScroll?.takeIf { it.section == currentSchemaSection },
+          onScrolled = viewModel::onErrorScrollHandled,
         )
       }
+    }
+
+    // Summary tab is where Submit lives, so any violated cross-field rule is spelled out here even
+    // when the fields it references sit on earlier tabs — otherwise Submit is disabled with no
+    // on-screen reason.
+    if (isSummaryTab && crossFieldMessages.isNotEmpty()) {
+      StatusBanner(
+        message = crossFieldMessages.values.joinToString(separator = "\n"),
+        variant = StatusBannerVariant.Error,
+        modifier = Modifier.padding(horizontal = Dimens.ScreenPadding, vertical = Dimens.SmallSpacing),
+      )
+    }
+
+    // Consent refused ("Did we receive consent? → No") is a hard stop: a blocking banner above the
+    // action bar, with Next/Submit disabled by the ViewModel gates so the Sakhi stays put.
+    if (viewModel.consentRefused()) {
+      StatusBanner(
+        message = stringResource(R.string.enrollment_consent_refused),
+        variant = StatusBannerVariant.Error,
+        modifier = Modifier.padding(horizontal = Dimens.ScreenPadding, vertical = Dimens.SmallSpacing),
+      )
     }
 
     FormActionBar(
@@ -245,9 +299,27 @@ private fun DynamicFormFieldList(
   fields: List<FormFieldSchema>,
   state: DynamicFormUiState,
   viewModel: DynamicMotherRegistrationViewModel,
+  /** Violated cross-field rule messages keyed by `question_code`; see [CrossFieldErrorAttribution]. */
+  crossFieldMessages: Map<String, String>,
   isConsentSection: Boolean,
+  scrollTarget: ErrorScrollTarget?,
+  onScrolled: () -> Unit,
 ) {
   val context = LocalContext.current
+  val listState = rememberLazyListState()
+
+  // Scroll to the flagged field once this list is the one holding it. Keyed on the one-shot token
+  // AND [fields] so it also fires right after a tab switch swaps in this section's fields (the token
+  // alone wouldn't retrigger, since this composable instance is reused across sections).
+  LaunchedEffect(scrollTarget?.token, fields) {
+    val target = scrollTarget ?: return@LaunchedEffect
+    val fieldIndex = fields.indexOfFirst { it.questionCode == target.questionCode }
+    if (fieldIndex < 0) return@LaunchedEffect
+    // The Consent tab prepends one intro item before the field items; offset the index by it.
+    val itemIndex = fieldIndex + if (isConsentSection) 1 else 0
+    listState.animateScrollToItem(itemIndex)
+    onScrolled()
+  }
   // Live capture into app-private storage, one target file per question_code — mirrors
   // EnrollmentScreen's consent photo / VisitFormScreen's sonography report, but keyed per field
   // rather than a single hardcoded file, since the dynamic schema can declare more than one
@@ -272,6 +344,7 @@ private fun DynamicFormFieldList(
     if (isConsentSection) fields.indexOfFirst { it.inputType == FormFieldInputType.RADIO } else -1
 
   LazyColumn(
+    state = listState,
     contentPadding = PaddingValues(Dimens.ScreenPadding),
     verticalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
     modifier = Modifier.fillMaxSize(),
@@ -298,8 +371,12 @@ private fun DynamicFormFieldList(
         DynamicFormField(
           field = field,
           answers = state.answers,
+          registrationDate = viewModel.registrationDate,
           mediaCompleted = field.questionCode in state.mediaCompleted,
           capturedImageUri = state.capturedImages[field.questionCode],
+          // Server error first (it reflects the last submit attempt), then a live cross-field
+          // violation, so the Sakhi always sees a reason rather than a dead Submit button.
+          errorText = state.fieldErrors[field.questionCode] ?: crossFieldMessages[field.questionCode],
           loadOptions = { viewModel.optionsFor(field) },
           onSingleAnswer = { value -> viewModel.setAnswer(field.questionCode, value) },
           onMultiAnswer = { values -> viewModel.setMultiAnswer(field.questionCode, values) },

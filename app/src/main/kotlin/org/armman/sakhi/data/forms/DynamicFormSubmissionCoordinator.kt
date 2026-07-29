@@ -1,5 +1,6 @@
 package org.armman.sakhi.data.forms
 
+import org.armman.sakhi.data.enrollment.ApiErrorParser
 import org.armman.sakhi.data.enrollment.EnrollmentApi
 import java.time.LocalDate
 import java.util.UUID
@@ -9,18 +10,47 @@ import javax.inject.Singleton
 private const val FORM_CODE = "MOTHER_REGISTRATION"
 
 sealed class DynamicFormSubmissionException(message: String) : Exception(message) {
+  /**
+   * The one sentence to show the Sakhi, or null to let the caller pick a fallback. Deliberately
+   * separate from [Exception.message], which stays diagnostic (endpoint, HTTP code, raw body) for
+   * logs and the draft's `lastErrorMessage` debug column — rendering that in the UI is exactly the
+   * bug this exists to fix. See [SubmitErrorCopy].
+   */
+  open val userMessage: String? get() = null
+
   data class MappingFailed(val mappingCause: Throwable) : DynamicFormSubmissionException(
     mappingCause.message ?: "Could not map the form's answers for submission",
   )
 
-  data class BeneficiaryCreationFailed(val httpCode: Int, val body: String?) :
-    DynamicFormSubmissionException("POST /beneficiaries failed: HTTP $httpCode — $body")
+  /**
+   * [errorCode] and [fieldErrors] are parsed from the [body] via [ApiErrorParser]: for a
+   * `400 VALIDATION_ERROR` [fieldErrors] carries the backend's per-field messages keyed by dotted
+   * DTO path (`pii.firstName`, `motherDetails.stillbirths`, …); for a `422 UNPROCESSABLE` or any
+   * other shape it's empty (those aren't field-attributable and surface as a page-level banner).
+   * [body] is retained verbatim for the draft's debug log — see [DynamicFormSyncExecutor.markFailed].
+   */
+  data class BeneficiaryCreationFailed(
+    val httpCode: Int,
+    val body: String?,
+    val errorCode: String? = null,
+    val fieldErrors: Map<String, String> = emptyMap(),
+    val apiMessage: String? = null,
+  ) : DynamicFormSubmissionException("POST /beneficiaries failed: HTTP $httpCode — $body") {
+    override val userMessage: String get() = SubmitErrorCopy.forApiError(apiMessage, fieldErrors)
+  }
 
   data object NoBeneficiaryIdReturned :
-    DynamicFormSubmissionException("Beneficiary created but no id was returned in the response")
+    DynamicFormSubmissionException("Beneficiary created but no id was returned in the response") {
+    override val userMessage: String get() = SubmitErrorCopy.GENERIC
+  }
 
-  data class FormSubmissionFailed(val httpCode: Int, val body: String?) :
-    DynamicFormSubmissionException("POST /forms/$FORM_CODE/submissions failed: HTTP $httpCode — $body")
+  data class FormSubmissionFailed(
+    val httpCode: Int,
+    val body: String?,
+    val apiMessage: String? = null,
+  ) : DynamicFormSubmissionException("POST /forms/$FORM_CODE/submissions failed: HTTP $httpCode — $body") {
+    override val userMessage: String get() = SubmitErrorCopy.forApiError(apiMessage, emptyMap())
+  }
 }
 
 /**
@@ -64,9 +94,17 @@ class DynamicFormSubmissionCoordinator @Inject constructor(
 
     val beneficiaryResponse = enrollmentApi.createBeneficiary(beneficiaryRequest)
     if (!beneficiaryResponse.isSuccessful) {
+      val rawBody = beneficiaryResponse.errorBody()?.string()
+      val apiError = ApiErrorParser.parse(rawBody)
       throw DynamicFormSubmissionException.BeneficiaryCreationFailed(
-        beneficiaryResponse.code(),
-        beneficiaryResponse.errorBody()?.string(),
+        httpCode = beneficiaryResponse.code(),
+        body = rawBody,
+        errorCode = apiError.errorCode,
+        fieldErrors = apiError.fieldErrors,
+        // ApiErrorParser echoes the whole body back as `message` when the response isn't the
+        // expected envelope (plain-text 500s, HTML gateway pages). That's not a sentence worth
+        // showing, so treat "message == body" as "no usable message" and let the UI fall back.
+        apiMessage = apiError.message?.takeIf { it != rawBody },
       )
     }
     val serverBeneficiaryId = beneficiaryResponse.body()?.data?.id
@@ -86,9 +124,11 @@ class DynamicFormSubmissionCoordinator @Inject constructor(
     )
     val submissionResponse = formSubmissionApi.createSubmission(FORM_CODE, submissionRequest)
     if (!submissionResponse.isSuccessful) {
+      val rawSubmissionBody = submissionResponse.errorBody()?.string()
       throw DynamicFormSubmissionException.FormSubmissionFailed(
-        submissionResponse.code(),
-        submissionResponse.errorBody()?.string(),
+        httpCode = submissionResponse.code(),
+        body = rawSubmissionBody,
+        apiMessage = ApiErrorParser.parse(rawSubmissionBody).message?.takeIf { it != rawSubmissionBody },
       )
     }
   }

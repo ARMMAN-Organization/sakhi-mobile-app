@@ -41,6 +41,11 @@ class ChildFormSyncExecutor @Inject constructor(
   /** Processes every PENDING draft — used by the background [ChildFormSyncWorker]. Sole source of
    * truth for whether WorkManager's job itself should be retried. */
   suspend fun run(): EnrollmentSyncOutcome {
+    // Reclaim drafts orphaned in SYNCING by a pass that never finished — otherwise they're excluded
+    // from getPendingSync() forever while still counting toward the Home badge. See
+    // ChildFormDraftDao.reclaimStaleSyncing.
+    dao.reclaimStaleSyncing()
+
     val pending = dao.getPendingSync()
     if (pending.isEmpty()) return EnrollmentSyncOutcome.COMPLETED
 

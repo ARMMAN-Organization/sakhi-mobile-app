@@ -31,7 +31,15 @@ private const val LOOKUP_UNAVAILABLE_USER_MESSAGE =
 sealed interface DynamicFormSyncItemResult {
   data object Synced : DynamicFormSyncItemResult
   data class DuplicateConflict(val message: String?) : DynamicFormSyncItemResult
-  data class Failed(val message: String?) : DynamicFormSyncItemResult
+
+  /** [fieldErrors] carries a `400 VALIDATION_ERROR`'s per-field messages keyed by dotted DTO path
+   * (empty for every other failure), threaded up to the ViewModel where it's mapped to
+   * `question_code`s and shown inline. See [DynamicFormSubmissionException.BeneficiaryCreationFailed]. */
+  data class Failed(
+    val message: String?,
+    val fieldErrors: Map<String, String> = emptyMap(),
+  ) : DynamicFormSyncItemResult
+
   data class Retryable(val message: String?) : DynamicFormSyncItemResult
 }
 
@@ -52,6 +60,13 @@ class DynamicFormSyncExecutor @Inject constructor(
    * from before [runOne] was added: still the sole source of truth for whether WorkManager's job
    * itself should be retried. */
   suspend fun run(): EnrollmentSyncOutcome {
+    // Reclaim drafts orphaned in SYNCING by a previous pass that never finished (process death, the
+    // OS stopping the worker, or WorkManager cancelling it because a fresh manual tap replaced it).
+    // Without this they are excluded from getPendingSync() forever while still showing as pending
+    // in the Home badge — visible to the Sakhi, impossible to upload. See
+    // DynamicFormDraftDao.reclaimStaleSyncing for why re-attempting them is safe.
+    dao.reclaimStaleSyncing()
+
     val pending = dao.getPendingSync()
     if (pending.isEmpty()) return EnrollmentSyncOutcome.COMPLETED
 
@@ -181,7 +196,7 @@ class DynamicFormSyncExecutor @Inject constructor(
                   lastErrorMessage = error.message,
                 ),
               )
-              DynamicFormSyncItemResult.DuplicateConflict(error.message)
+              DynamicFormSyncItemResult.DuplicateConflict(error.userMessage)
             }
 
             error is IOException || error.cause is IOException -> {
@@ -197,27 +212,43 @@ class DynamicFormSyncExecutor @Inject constructor(
               // actionable message to the Sakhi — mapping the internal "lookup not seeded?" case to
               // plain language, since to her it just means reference data hasn't loaded yet.
               markFailed(draft, error.message)
-              DynamicFormSyncItemResult.Failed(userFacingMessage(error))
+              DynamicFormSyncItemResult.Failed(userFacingMessage(error), fieldErrorsOf(error))
             }
           }
         },
       )
     } catch (e: HttpException) {
+      // Retrofit's own message is the bare HTTP status line ("Bad Request") — accurate, but it
+      // tells the Sakhi nothing she can act on. Keep it on the draft for debugging, show generic.
       markFailed(draft, e.message())
-      DynamicFormSyncItemResult.Failed(e.message())
+      DynamicFormSyncItemResult.Failed(SubmitErrorCopy.GENERIC)
     }
   }
 
-  /** The message actually shown to the Sakhi for a failed submit: the internal "lookup not
-   * available" mapping failure becomes [LOOKUP_UNAVAILABLE_USER_MESSAGE]; everything else keeps its
-   * own message (raw backend errors are already meaningful enough to surface). */
-  private fun userFacingMessage(error: Throwable): String? =
+  /** The backend's per-field validation messages (dotted DTO paths → message) when the failure is
+   * a `400 VALIDATION_ERROR` on beneficiary creation; empty for every other error. Kept DTO-path
+   * keyed here (this layer has no schema) — the ViewModel maps it to `question_code`s. */
+  private fun fieldErrorsOf(error: Throwable): Map<String, String> =
+    (error as? DynamicFormSubmissionException.BeneficiaryCreationFailed)?.fieldErrors ?: emptyMap()
+
+  /**
+   * The message actually shown to the Sakhi for a failed submit. The internal "lookup not
+   * available" mapping failure becomes [LOOKUP_UNAVAILABLE_USER_MESSAGE]; a backend failure uses
+   * its own [DynamicFormSubmissionException.userMessage], which is the cleaned single sentence —
+   * never [Throwable.message], which for these exceptions embeds the endpoint, HTTP code and the
+   * verbatim response body (that raw text still goes to the draft's debug column via
+   * [markFailed]). Anything else that has no usable message falls back to [SubmitErrorCopy.GENERIC]
+   * rather than putting a stack-trace-ish string on screen.
+   */
+  private fun userFacingMessage(error: Throwable): String =
     if (error is DynamicFormSubmissionException.MappingFailed &&
       error.mappingCause is EnrollmentMappingException.LookupNotAvailable
     ) {
       LOOKUP_UNAVAILABLE_USER_MESSAGE
     } else {
-      error.message
+      (error as? DynamicFormSubmissionException)?.userMessage
+        ?: SubmitErrorCopy.humanize(error.message)
+        ?: SubmitErrorCopy.GENERIC
     }
 
   private suspend fun markFailed(draft: DynamicFormDraftEntity, errorMessage: String?) {

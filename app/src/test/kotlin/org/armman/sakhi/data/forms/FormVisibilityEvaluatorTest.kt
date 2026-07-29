@@ -49,4 +49,67 @@ class FormVisibilityEvaluatorTest {
 
     assertTrue(FormVisibilityEvaluator.isVisible(field(condition), answers))
   }
+
+  // --- gte / lt / isSet -------------------------------------------------------------------------
+  // The reported bug: "When was your last pregnancy?" must only appear once Gravida >= 2. Before
+  // these operators existed, a `gte` rule fell through to the unknown-operator branch above and the
+  // question showed for every Gravida, including 1.
+
+  private fun gravida(value: String) = FormAnswers(singleValues = mapOf("gravida" to value))
+
+  private fun gteTwo(operator: String = "gte") =
+    field(FormVisibleWhen(field = "gravida", value = "2", operator = operator))
+
+  @Test
+  fun `gte hides the field below the threshold and shows it at or above`() {
+    assertFalse(FormVisibilityEvaluator.isVisible(gteTwo(), gravida("1")))
+    assertTrue(FormVisibilityEvaluator.isVisible(gteTwo(), gravida("2")))
+    assertTrue(FormVisibilityEvaluator.isVisible(gteTwo(), gravida("5")))
+    assertTrue(FormVisibilityEvaluator.isVisible(gteTwo(), gravida("14")))
+  }
+
+  @Test
+  fun `gte on an unanswered governing field stays hidden`() {
+    assertFalse(FormVisibilityEvaluator.isVisible(gteTwo(), FormAnswers()))
+    assertFalse(FormVisibilityEvaluator.isVisible(gteTwo(), gravida("")))
+  }
+
+  @Test
+  fun `a non-numeric answer fails open rather than hiding a question`() {
+    // Losing a required answer costs a re-visit; showing a spare question costs a moment.
+    assertTrue(FormVisibilityEvaluator.isVisible(gteTwo(), gravida("abc")))
+  }
+
+  @Test
+  fun `a non-numeric rule value fails open`() {
+    val condition = FormVisibleWhen(field = "gravida", value = "two", operator = "gte")
+
+    assertTrue(FormVisibilityEvaluator.isVisible(field(condition), gravida("1")))
+  }
+
+  @Test
+  fun `lt is the strict inverse of gte at the boundary`() {
+    val ltTwo = field(FormVisibleWhen(field = "gravida", value = "2", operator = "lt"))
+
+    assertTrue(FormVisibilityEvaluator.isVisible(ltTwo, gravida("1")))
+    assertFalse(FormVisibilityEvaluator.isVisible(ltTwo, gravida("2")))
+    assertFalse(FormVisibilityEvaluator.isVisible(ltTwo, gravida("3")))
+  }
+
+  @Test
+  fun `decimal answers compare numerically, not as strings`() {
+    // "10" < "2" as a string compare — the bug this guards against.
+    assertTrue(FormVisibilityEvaluator.isVisible(gteTwo(), gravida("10")))
+  }
+
+  @Test
+  fun `isSet carries no value and asks only about presence`() {
+    // The backend types `value` as optional, so an isSet rule sends none at all.
+    val isSet = field(FormVisibleWhen(field = "gravida", value = null, operator = "isSet"))
+
+    assertTrue(FormVisibilityEvaluator.isVisible(isSet, gravida("1")))
+    assertTrue(FormVisibilityEvaluator.isVisible(isSet, gravida("0")))
+    assertFalse(FormVisibilityEvaluator.isVisible(isSet, gravida("")))
+    assertFalse(FormVisibilityEvaluator.isVisible(isSet, FormAnswers()))
+  }
 }

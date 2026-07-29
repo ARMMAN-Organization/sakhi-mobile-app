@@ -25,6 +25,13 @@ class FakeDynamicFormDraftDao : DynamicFormDraftDao {
       .filter { it.syncStatus == EnrollmentSyncStatus.PENDING || it.syncStatus == EnrollmentSyncStatus.FAILED }
       .sortedBy { it.createdAtEpochMillis }
 
+  override suspend fun reclaimStaleSyncing(): Int {
+    val stale = rows.values.filter { it.syncStatus == EnrollmentSyncStatus.SYNCING }
+    stale.forEach { rows[it.localBeneficiaryId] = it.copy(syncStatus = EnrollmentSyncStatus.PENDING) }
+    if (stale.isNotEmpty()) emitCurrent()
+    return stale.size
+  }
+
   override suspend fun getAll(): List<DynamicFormDraftEntity> = sortedRows()
 
   override fun observeAll(): Flow<List<DynamicFormDraftEntity>> = allFlow

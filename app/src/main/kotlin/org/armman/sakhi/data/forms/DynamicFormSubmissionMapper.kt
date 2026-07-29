@@ -135,9 +135,12 @@ class DynamicFormSubmissionMapper @Inject constructor(
 
     CreateBeneficiaryRequestDto(
       pii = BeneficiaryPiiDto(
-        firstName = answers.valueOf(QuestionCode.FIRST_NAME).orEmpty(),
-        middleName = answers.valueOf(QuestionCode.MIDDLE_NAME)?.takeIf { it.isNotBlank() },
-        lastName = answers.valueOf(QuestionCode.LAST_NAME).orEmpty(),
+        // Trimmed: BeneficiaryNameRule allows spaces (names have them), so leading/trailing space
+        // survives input filtering and must not reach the backend's PII fields or the duplicate
+        // -detection hash built from the name. A whitespace-only middle name is no middle name.
+        firstName = answers.valueOf(QuestionCode.FIRST_NAME).orEmpty().trim(),
+        middleName = answers.valueOf(QuestionCode.MIDDLE_NAME)?.trim()?.takeIf { it.isNotBlank() },
+        lastName = answers.valueOf(QuestionCode.LAST_NAME).orEmpty().trim(),
         phone = answers.valueOf(QuestionCode.MOBILE_NUMBER),
         alternatePhone = null,
         dateOfBirth = dateOfBirth,

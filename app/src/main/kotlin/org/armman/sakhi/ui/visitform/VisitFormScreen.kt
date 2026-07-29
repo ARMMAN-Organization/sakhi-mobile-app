@@ -256,7 +256,6 @@ private fun VisitFormBody(
         selectedIndex = state.currentStep.ordinal,
         onTabSelected = { index -> viewModel.goToStep(VisitFormStep.entries[index]) },
         distributeEvenly = true,
-        indicatorOverhang = Dimens.TabIndicatorOverhang,
         modifier = Modifier.padding(top = Dimens.ItemSpacing),
       )
       when (state.currentStep) {

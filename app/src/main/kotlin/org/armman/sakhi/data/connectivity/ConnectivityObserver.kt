@@ -18,7 +18,7 @@ import javax.inject.Singleton
  * change. Kept separate from [ConnectivityChecker] (a one-shot `isOnline()`) so its many existing
  * callers/fakes are untouched — this interface exists specifically to drive event-driven work like
  * auto-retrying offline submissions the moment the network returns (see
- * [org.armman.sakhi.data.forms.ReconnectSyncTrigger]).
+ * [org.armman.sakhi.data.forms.ReconnectLookupWarmer]).
  */
 interface ConnectivityObserver {
   /** `true` when there is an internet-validated network path. Distinct-until-changed. */

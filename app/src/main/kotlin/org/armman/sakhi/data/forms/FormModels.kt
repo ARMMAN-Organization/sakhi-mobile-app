@@ -44,12 +44,18 @@ data class FormFieldOption(
   @SerializedName("value_code") val valueCode: String,
 )
 
-/** `field`/`value`/`operator` condition gating whether a field is shown. Only `"eq"` has been
- * observed; an unrecognized operator is treated as "always visible" — the safer failure mode is
- * showing an extra field, not silently hiding a required one. */
+/**
+ * `field`/`value`/`operator` condition gating whether a field is shown — the backend's SRS
+ * Category 5 skip logic. Operators are `eq`, `gte`, `lt` and `isSet`, matching the service's own
+ * `visibleWhen` enum; see [FormVisibilityEvaluator] for the semantics and failure modes.
+ *
+ * [value] is nullable because the backend types it `z.any().optional()`: an `isSet` rule carries no
+ * value at all, and Gson would happily leave a non-null `String` property null, producing a value
+ * that violates its own type the moment anything touched it.
+ */
 data class FormVisibleWhen(
   val field: String,
-  val value: String,
+  val value: String?,
   val operator: String,
 )
 

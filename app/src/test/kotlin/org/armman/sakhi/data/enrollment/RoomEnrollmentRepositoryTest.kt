@@ -52,7 +52,7 @@ class RoomEnrollmentRepositoryTest {
     // Reuses the same dao/secureStore as the repository so runOne() sees the row saveEnrollment
     // just wrote — matching how the real Hilt graph wires a single instance of each.
     syncExecutor = EnrollmentSyncExecutor(dao, secureStore, mapper, api)
-    repository = RoomEnrollmentRepository(dao, secureStore, syncScheduler, connectivityChecker, syncExecutor)
+    repository = RoomEnrollmentRepository(dao, secureStore, connectivityChecker, syncExecutor)
   }
 
   private fun record(beneficiaryId: String = "b-1") = EnrollmentRecord(
@@ -149,10 +149,11 @@ class RoomEnrollmentRepositoryTest {
   }
 
   @Test
-  fun `saveEnrollment nudges the sync scheduler`() = runTest {
+  fun `saveEnrollment schedules no upload - sync is the Sakhi's manual Data Upload action`() = runTest {
     repository.saveEnrollment(record())
 
-    assertEquals(1, syncScheduler.syncNowCallCount)
+    // SRS 3A.1 is manual-trigger-only; see the equivalent test on the mother queue.
+    assertEquals(0, syncScheduler.syncNowCallCount)
   }
 
   @Test
@@ -237,14 +238,14 @@ class RoomEnrollmentRepositoryTest {
   }
 
   @Test
-  fun `submitEnrollment offline saves locally, queues sync, and returns QueuedOffline without calling the API`() = runTest {
+  fun `submitEnrollment offline saves locally and returns QueuedOffline without calling the API or scheduling`() = runTest {
     connectivityChecker.online = false
 
     val result = repository.submitEnrollment(record())
 
     assertEquals(EnrollmentSubmitResult.QueuedOffline, result)
     assertEquals(0, api.createCallCount)
-    assertEquals(1, syncScheduler.syncNowCallCount)
+    assertEquals(0, syncScheduler.syncNowCallCount)
     assertEquals(EnrollmentSyncStatus.PENDING, dao.getByBeneficiaryId("b-1")?.syncStatus)
   }
 
@@ -256,7 +257,7 @@ class RoomEnrollmentRepositoryTest {
     val result = repository.submitEnrollment(record())
 
     assertEquals(EnrollmentSubmitResult.QueuedOffline, result)
-    assertEquals(1, syncScheduler.syncNowCallCount)
+    assertEquals(0, syncScheduler.syncNowCallCount)
     assertEquals(EnrollmentSyncStatus.PENDING, dao.getByBeneficiaryId("b-1")?.syncStatus)
   }
 }

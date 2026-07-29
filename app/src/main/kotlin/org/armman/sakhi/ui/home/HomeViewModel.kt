@@ -15,9 +15,9 @@ import kotlinx.coroutines.launch
 import org.armman.sakhi.data.dashboard.DashboardRepository
 import org.armman.sakhi.data.dashboard.DashboardSummary
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
-import org.armman.sakhi.data.forms.DynamicFormDraftRepository
-import org.armman.sakhi.data.forms.DynamicFormSyncScheduler
 import org.armman.sakhi.data.forms.FormUploadRecord
+import org.armman.sakhi.data.sync.ManualSyncTrigger
+import org.armman.sakhi.data.sync.UploadRecordsSource
 import javax.inject.Inject
 
 /** UI state for the Home dashboard — loading, error and success. */
@@ -42,17 +42,18 @@ private const val SUBSCRIPTION_TIMEOUT_MS = 5_000L
 @HiltViewModel
 class HomeViewModel @Inject constructor(
   private val dashboardRepository: DashboardRepository,
-  private val dynamicFormDraftRepository: DynamicFormDraftRepository,
-  private val syncScheduler: DynamicFormSyncScheduler,
+  private val uploadRecordsSource: UploadRecordsSource,
+  private val manualSyncTrigger: ManualSyncTrigger,
 ) : ViewModel() {
 
   private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
   val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
-  /** Live draft list from Room — re-emits as the sync worker advances statuses, which is what
-   * makes both the badge and the open modal update without any user action. */
+  /** Live draft list across every surfaced offline queue — re-emits as the sync worker advances
+   * statuses, which is what makes both the badge and the open modal update during an upload
+   * without any further user action. */
   private val uploadRecords: StateFlow<List<FormUploadRecord>> =
-    dynamicFormDraftRepository.observeUploadRecords()
+    uploadRecordsSource.observeAll()
       // Fail closed to an empty list rather than crashing the Home screen if the local read errors —
       // this is a read-only status view; the underlying drafts are untouched.
       .catch { emit(emptyList()) }
@@ -89,15 +90,22 @@ class HomeViewModel @Inject constructor(
     }
   }
 
-  /** Opens the "Forms Uploaded" modal. Records come live from [uploadRecords]; no manual load. */
+  /**
+   * The Data Upload pill: **starts the upload and opens the progress modal**, in that order.
+   *
+   * This is the app's only manual sync trigger (SRS §3A.1 — *"Data Sync — Manual trigger"*), and
+   * per the Figma "Data Sync Behaviour" board the modal itself carries no action button: the pill
+   * tap is the action, and the modal is the live progress view of it. Every tap really does start an
+   * attempt (the schedulers use `ExistingWorkPolicy.REPLACE`, never `KEEP`), and re-attempting an
+   * in-flight draft is safe because both API calls are idempotent on their local UUIDs — so this
+   * doubles as the retry affordance for FAILED drafts, which is why the modal needs no button.
+   *
+   * Sync starts before the modal is shown so the first frame the Sakhi sees already reflects work
+   * in progress rather than a stale PENDING list.
+   */
   fun onDataUploadClicked() {
+    manualSyncTrigger.syncAllQueues()
     _modalVisible.value = true
-  }
-
-  /** Immediately re-attempts upload of every pending/failed draft. Enqueues the sync worker (which
-   * runs as soon as there's connectivity); the modal reflects progress live via [uploadRecords]. */
-  fun onRetryUpload() {
-    syncScheduler.syncNow()
   }
 
   /** Dismisses the modal. */

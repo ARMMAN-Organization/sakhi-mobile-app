@@ -36,7 +36,6 @@ import androidx.compose.ui.window.DialogProperties
 import org.armman.sakhi.R
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.FormUploadRecord
-import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG400
@@ -50,11 +49,15 @@ import org.armman.sakhi.ui.theme.softShadow
 
 /**
  * "Forms Uploaded" sync-status modal for the Home screen's Data Upload pill, matching the Figma
- * reference's actual structure: **one card per form category** (e.g. "Mother Registration"), each
- * showing an aggregate "synced/total" count, a single progress bar, and a single status icon —
- * not one card per individual submission. Only one category exists today since the static
- * enrollment flow is deprecated; see [groupUploadRecordsByCategory] for how a second category
- * would slot in later.
+ * "Data Sync Behaviour" board's structure: **one card per form category** (e.g. "Mother
+ * Registration"), each showing an aggregate "synced/total" count, a single progress bar, and a
+ * single status icon — not one card per individual submission.
+ *
+ * **This is a read-only progress view — it has no action button, by design.** The board shows only
+ * a close affordance, because the Data Upload pill *is* the manual sync trigger (SRS §3A.1;
+ * see `HomeViewModel.onDataUploadClicked`). An earlier build put a "Retry" button here; that made
+ * the pill a no-op that merely opened a dialog, and it has been removed. Retrying a FAILED draft is
+ * the same gesture as any other upload: tap the pill again.
  *
  * Two deliberate departures from the Figma reference, both prior decisions in this build:
  * - No ETA pill ("2 mins left" in the reference) — a reliable estimate isn't available from real
@@ -64,16 +67,12 @@ import org.armman.sakhi.ui.theme.softShadow
  *   doesn't demonstrate a mixed-outcome category, so this rule was confirmed explicitly rather
  *   than assumed (see [categoryIconKind]'s doc for the full priority order).
  *
- * The header and the single category card show the same fraction while only one category exists
- * — accepted as-is; the structure is ready to scale the moment a second category exists.
- *
  * [FormUploadRecord] deliberately excludes PII (see its doc), so no per-record decryption happens
  * just to render this list.
  */
 @Composable
 fun FormsUploadedModal(
   records: List<FormUploadRecord>,
-  onRetry: () -> Unit,
   onDismiss: () -> Unit,
 ) {
   Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -85,7 +84,6 @@ fun FormsUploadedModal(
       Column(modifier = Modifier.padding(Dimens.ScreenPadding)) {
         val categories = remember(records) { groupUploadRecordsByCategory(records) }
         val syncedCount = records.count { it.syncStatus == EnrollmentSyncStatus.SYNCED }
-        val hasPending = records.any { it.syncStatus != EnrollmentSyncStatus.SYNCED }
 
         // Small circular close button on its own row at the top-right, inside the modal (per the
         // Figma reference — not overlapping the corner). Sized down to match the app's compact
@@ -130,19 +128,6 @@ fun FormsUploadedModal(
               UploadCategoryCard(summary)
             }
           }
-        }
-
-        // Retry is shown only while something still needs uploading (pending/failed). It re-triggers
-        // the sync worker immediately; the list above updates live as statuses advance, so no
-        // separate progress spinner is needed here.
-        if (hasPending) {
-          PrimaryButton(
-            text = stringResource(R.string.home_upload_modal_retry),
-            onClick = onRetry,
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(top = Dimens.ItemSpacing),
-          )
         }
       }
     }

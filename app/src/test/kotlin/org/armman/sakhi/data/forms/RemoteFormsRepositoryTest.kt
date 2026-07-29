@@ -5,6 +5,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 import retrofit2.Response
@@ -118,6 +119,41 @@ class RemoteFormsRepositoryTest {
 
     assertEquals("v0", loaded?.versionNo)
     assertNull(loaded?.geography)
+  }
+
+  @Test
+  fun `a visibleWhen block parses from the wire shape, numeric value included`() = runTest {
+    // Nothing else pins the JSON key or the value's type: the backend sends camelCase `visibleWhen`
+    // with `value: z.any()`, so a numeric 2 arrives unquoted. A key or type mismatch is silent —
+    // Gson leaves the property null and the field renders unconditionally, which is exactly the
+    // "shown regardless of Gravida" bug.
+    val store = FakeSecureKeyValueStore()
+    val json = """
+      {"id":"version-vw","formDefinitionId":"def-1","versionNo":"v2",
+       "schemaJson":[{"label":"When was your last pregnancy?","required":false,"input_type":"radio",
+        "question_code":"when_was_your_last_pregnancy",
+        "visibleWhen":{"field":"gravida_total_number_of_pregnancies","operator":"gte","value":2}}],
+       "validationJson":[],"effectiveFrom":"2026-07-20T00:00:00Z","status":"PUBLISHED"}
+    """.trimIndent()
+    store.putString("form_active_version_MOTHER_REGISTRATION", json)
+
+    val offlineApi = FakeFormsApi().apply { exceptionToThrow = IOException("offline") }
+    val field = requireNotNull(
+      RemoteFormsRepository(offlineApi, store).getActiveVersion("MOTHER_REGISTRATION"),
+    ).schemaJson.single()
+
+    val condition = requireNotNull(field.visibleWhen)
+    assertEquals("gravida_total_number_of_pregnancies", condition.field)
+    assertEquals("gte", condition.operator)
+    assertEquals("2", condition.value)
+
+    // …and it actually gates the field once parsed.
+    assertFalse(
+      FormVisibilityEvaluator.isVisible(
+        field,
+        FormAnswers(singleValues = mapOf("gravida_total_number_of_pregnancies" to "1")),
+      ),
+    )
   }
 
   @Test

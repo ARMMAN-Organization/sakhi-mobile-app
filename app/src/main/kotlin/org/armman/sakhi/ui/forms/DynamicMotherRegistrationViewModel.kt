@@ -9,19 +9,25 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.armman.sakhi.data.forms.AGE_FROM_DOB_QUESTION_CODES
+import org.armman.sakhi.data.forms.BeneficiaryFieldErrorMapper
+import org.armman.sakhi.data.forms.BeneficiaryNameRule
 import org.armman.sakhi.data.forms.COMPUTED_AGE_FROM_DOB
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormComputedFieldEvaluator
 import org.armman.sakhi.data.forms.FormCrossFieldRule
 import org.armman.sakhi.data.forms.FormCrossFieldValidator
+import org.armman.sakhi.data.forms.FormDateRuleset
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
 import org.armman.sakhi.data.forms.FormNumericRangeValidator
+import org.armman.sakhi.data.forms.FormObstetricRuleset
 import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.FormVisibilityEvaluator
 import org.armman.sakhi.data.forms.FormFieldInputType
 import org.armman.sakhi.data.forms.MobileNumberRule
 import org.armman.sakhi.data.forms.NonRenderableQuestionCodes
+import org.armman.sakhi.data.forms.REGISTRATION_DATE_QUESTION_CODE
+import org.armman.sakhi.data.forms.SubmitErrorCopy
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.DynamicFormSubmitResult
 import org.armman.sakhi.data.forms.FormsRepository
@@ -35,6 +41,12 @@ import javax.inject.Inject
 
 /** The one dynamic form CR-018 covers so far. */
 private const val FORM_CODE = "MOTHER_REGISTRATION"
+
+/** Consent gate: the `did_we_receive_consent` radio answered "no" is a hard stop per the SRS /
+ * form spec ("If No → stop form") — the backend also 422s on it. Kept as a local copy (matching the
+ * child flow's own constants) so the two enrollment ViewModels stay decoupled. */
+private const val DID_WE_RECEIVE_CONSENT = "did_we_receive_consent"
+private const val CONSENT_NO = "no"
 
 /** Tab label for any visible field whose schema `section` is missing (older cached schema
  * versions predating the `section` key, or a future field the backend forgets to tag) — a
@@ -61,6 +73,14 @@ sealed interface SubmissionState {
   data class Failed(val message: String) : SubmissionState
 }
 
+/**
+ * One-shot signal to move the Sakhi to the first field a `400 VALIDATION_ERROR` flagged: switch to
+ * its [section] tab and scroll its list to [questionCode]. [token] makes it fire again even when
+ * the same field fails a second time (a plain equal value wouldn't retrigger the screen's effect);
+ * the screen clears it via [DynamicMotherRegistrationViewModel.onErrorScrollHandled] once consumed.
+ */
+data class ErrorScrollTarget(val section: String, val questionCode: String, val token: Long)
+
 /** One label/value line in the Summary tab's review. */
 data class SummaryRow(val label: String, val value: String)
 
@@ -82,6 +102,14 @@ data class DynamicFormUiState(
   /** `image` fields' captured app-private file URI, keyed by question_code — null/absent means
    * not yet captured. Separate from [answers] for the same reason as [mediaCompleted]. */
   val capturedImages: Map<String, String> = emptyMap(),
+  /** Per-field submit errors from a backend `400 VALIDATION_ERROR`, keyed by `question_code` and
+   * rendered inline under the field. Populated on submit failure, cleared for a field as soon as
+   * the Sakhi edits it, and cleared entirely on the next submit attempt. Empty when the failure
+   * wasn't field-attributable (e.g. `422`), which keeps it a page-level banner only. */
+  val fieldErrors: Map<String, String> = emptyMap(),
+  /** Non-null right after a field-attributable submit failure — the screen consumes it once to
+   * jump to the first flagged field, then calls [DynamicMotherRegistrationViewModel.onErrorScrollHandled]. */
+  val errorScroll: ErrorScrollTarget? = null,
 )
 
 /**
@@ -130,8 +158,36 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
         return@launch
       }
       _uiState.update { it.copy(isLoading = false, version = version) }
+      prefillRegistrationDate()
       prefillAutoSelectedGeography()
       recomputeDerivedFields()
+    }
+  }
+
+  /**
+   * Pre-fills `registrtion_date` with today, per form spec row 13 ("Automatically popup todays
+   * date").
+   *
+   * Until this ran, nothing ever wrote that answer: the field was absent from the live schema, so it
+   * never rendered, and [org.armman.sakhi.data.forms.DynamicFormSubmissionMapper] quietly fell back
+   * to its own `registrationDate` when building the beneficiary DTO. The date therefore reached
+   * `/beneficiaries` but was **missing from the `formData` blob** sent to `/submissions` (that
+   * payload is just the answers), which would start failing the moment the schema declares the field
+   * required.
+   *
+   * Writing it as a real answer fixes the payload gap now and means the field renders already filled
+   * with today — editable, capped at today by [FormDateRuleset] — as soon as the backend adds it to
+   * the schema, with no further app change.
+   *
+   * Skips a field that already has an answer so a resumed draft keeps the date it was started on
+   * rather than silently jumping to today.
+   */
+  private fun prefillRegistrationDate() {
+    if (!_uiState.value.answers.valueOf(REGISTRATION_DATE_QUESTION_CODE).isNullOrBlank()) return
+    _uiState.update {
+      it.copy(
+        answers = it.answers.withSingleValue(REGISTRATION_DATE_QUESTION_CODE, registrationDate.toString()),
+      )
     }
   }
 
@@ -161,12 +217,22 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
   }
 
   fun setAnswer(questionCode: String, value: String?) {
-    _uiState.update { it.copy(answers = it.answers.withSingleValue(questionCode, value)) }
+    _uiState.update {
+      it.copy(
+        answers = it.answers.withSingleValue(questionCode, value),
+        fieldErrors = it.fieldErrors - questionCode,
+      )
+    }
     recomputeDerivedFields()
   }
 
   fun setMultiAnswer(questionCode: String, values: List<String>) {
-    _uiState.update { it.copy(answers = it.answers.withMultiValue(questionCode, values)) }
+    _uiState.update {
+      it.copy(
+        answers = it.answers.withMultiValue(questionCode, values),
+        fieldErrors = it.fieldErrors - questionCode,
+      )
+    }
   }
 
   /** Called once the Sakhi has watched/listened to a `media` field's content in full (the
@@ -180,6 +246,7 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
       it.copy(
         mediaCompleted = it.mediaCompleted + questionCode,
         answers = it.answers.withSingleValue(questionCode, "true"),
+        fieldErrors = it.fieldErrors - questionCode,
       )
     }
   }
@@ -193,6 +260,7 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
       it.copy(
         capturedImages = if (uri == null) it.capturedImages - questionCode else it.capturedImages + (questionCode to uri),
         answers = it.answers.withSingleValue(questionCode, uri),
+        fieldErrors = it.fieldErrors - questionCode,
       )
     }
   }
@@ -262,6 +330,13 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
       .mapIndexed { index, value -> FormFieldOption(label = value.valueLabel, sortOrder = index, valueCode = value.valueCode) }
   }
 
+  /** Whether the Sakhi answered "no" to `did_we_receive_consent` — a hard stop: the enrollment
+   * cannot advance past the Consent tab or be submitted (see [isSectionReady]/[isReadyToSubmit]),
+   * and the screen shows a blocking banner. Consent unanswered (null) is NOT a refusal — that stays
+   * a normal required-field gate. */
+  fun consentRefused(): Boolean =
+    _uiState.value.answers.valueOf(DID_WE_RECEIVE_CONSENT) == CONSENT_NO
+
   /** Cross-field rules currently violated (empty = fine, or not yet evaluable — see
    * [FormCrossFieldValidator]). */
   fun crossFieldViolations(): List<FormCrossFieldRule> {
@@ -306,7 +381,27 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
       entered.isNullOrBlank() || MobileNumberRule.isComplete(entered)
     }
 
-    return allRequiredAnswered && allRangesValid && mobileValid
+    // Beneficiary name fields take letters and spaces only (form spec S.No 19). The renderer
+    // already filters the input, so this gate exists for values that bypassed it — a draft saved
+    // before this rule shipped, or an answer restored from the backend. Blank is handled by the
+    // required-field gate above. See BeneficiaryNameRule.
+    val namesValid = fields.all { field ->
+      if (!BeneficiaryNameRule.appliesTo(field.questionCode)) return@all true
+      BeneficiaryNameRule.isValid(state.answers.valueOf(field.questionCode))
+    }
+
+    // Spec date rules (DOB age 10-50, LMP 31..239 days before registration, registration date not
+    // future). Blank/unparseable is not a date-range failure — the required-field gate above owns
+    // blank. See FormDateRuleset.
+    val datesValid = FormDateRuleset.allDatesValid(fields, state.answers, registrationDate)
+
+    // Obstetric-history consistency (Gravida = Para + abortions + 1, Para/abortions <= Gravida, dead
+    // children <= live births). Gated per-tab as well as at submit so the Sakhi is stopped on the
+    // Health History tab, where the fields are, rather than at the end. See FormObstetricRuleset.
+    val obstetricValid = FormObstetricRuleset.allValid(fields, state.answers)
+
+    return allRequiredAnswered && allRangesValid && mobileValid && namesValid &&
+      datesValid && obstetricValid
   }
 
   /** Per-tab gate for the "next tab" button: every visible required field in [section] answered
@@ -314,14 +409,20 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
    * [isReadyToSubmit], so an early tab isn't blocked by a rule whose other fields live later. */
   fun isSectionReady(section: String): Boolean {
     if (_uiState.value.version == null) return false
+    // Refused consent blocks forward navigation on the tab that holds the consent question, so the
+    // Sakhi is stopped right there rather than only at final Submit.
+    val holdsConsent = fieldsInSection(section).any { it.questionCode == DID_WE_RECEIVE_CONSENT }
+    if (holdsConsent && consentRefused()) return false
     return fieldsAnsweredAndInRange(fieldsInSection(section))
   }
 
   /** Whether every currently-visible required field has an answer, every `number` field with a
-   * `numericRange` satisfies it, and no cross-field rule is violated. */
+   * `numericRange` satisfies it, no cross-field rule is violated, and consent was not refused. */
   fun isReadyToSubmit(): Boolean {
     if (_uiState.value.version == null) return false
-    return fieldsAnsweredAndInRange(visibleFields()) && crossFieldViolations().isEmpty()
+    return !consentRefused() &&
+      fieldsAnsweredAndInRange(visibleFields()) &&
+      crossFieldViolations().isEmpty()
   }
 
   /**
@@ -384,7 +485,11 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
     if (state.submissionState is SubmissionState.Saving) return
     if (!isReadyToSubmit()) return
 
-    _uiState.update { it.copy(submissionState = SubmissionState.Saving) }
+    // Clear any prior field errors up front so a fresh attempt starts clean (and a stale inline
+    // error can't linger next to a field the Sakhi already fixed).
+    _uiState.update {
+      it.copy(submissionState = SubmissionState.Saving, fieldErrors = emptyMap(), errorScroll = null)
+    }
     viewModelScope.launch {
       val result = draftRepository.submitDraft(
         localBeneficiaryId = beneficiaryId,
@@ -394,18 +499,76 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
         answers = state.answers,
         registrationDate = registrationDate,
       )
-      _uiState.update {
-        it.copy(
-          submissionState = when (result) {
-            is DynamicFormSubmitResult.Synced, is DynamicFormSubmitResult.QueuedOffline ->
-              SubmissionState.Success
-            is DynamicFormSubmitResult.DuplicateConflict ->
-              SubmissionState.Failed(result.message ?: "A possible duplicate beneficiary already exists")
-            is DynamicFormSubmitResult.Failed ->
-              SubmissionState.Failed(result.message ?: "Could not submit the form")
-          },
-        )
+      _uiState.update { current ->
+        when (result) {
+          is DynamicFormSubmitResult.Synced, is DynamicFormSubmitResult.QueuedOffline ->
+            current.copy(submissionState = SubmissionState.Success, fieldErrors = emptyMap(), errorScroll = null)
+
+          is DynamicFormSubmitResult.DuplicateConflict ->
+            current.copy(
+              submissionState = SubmissionState.Failed(
+                SubmitErrorCopy.humanize(result.message)
+                  ?: "A possible duplicate beneficiary already exists",
+              ),
+              fieldErrors = emptyMap(),
+              errorScroll = null,
+            )
+
+          is DynamicFormSubmitResult.Failed -> applyFieldErrors(current, result)
+        }
       }
     }
+  }
+
+  /** Maps a [DynamicFormSubmitResult.Failed]'s DTO-path `fieldErrors` to `question_code`s and, when
+   * any map to a real field, shows a generic banner plus per-field inline errors and jumps to the
+   * first flagged field. With none attributable (a `422`, or a `400` on a field this schema version
+   * doesn't declare), it stays a banner-only error carrying the backend's sentence — cleaned by
+   * [SubmitErrorCopy], never the raw response body. */
+  private fun applyFieldErrors(
+    current: DynamicFormUiState,
+    result: DynamicFormSubmitResult.Failed,
+  ): DynamicFormUiState {
+    val mapped = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(result.fieldErrors, knownQuestionCodes())
+      // The backend words these in DTO terms ("lmpDate cannot be in the future"); under a field
+      // label that reads like a leaked internal name, so give it the same clean-up as the banner.
+      .mapValues { (_, message) -> SubmitErrorCopy.humanize(message) ?: message }
+    if (mapped.isEmpty()) {
+      return current.copy(
+        submissionState = SubmissionState.Failed(
+          SubmitErrorCopy.humanize(result.message) ?: SubmitErrorCopy.GENERIC,
+        ),
+        fieldErrors = emptyMap(),
+        errorScroll = null,
+      )
+    }
+    return current.copy(
+      submissionState = SubmissionState.Failed("Please fix the highlighted fields and submit again."),
+      fieldErrors = mapped,
+      errorScroll = firstErroredFieldTarget(mapped.keys),
+    )
+  }
+
+  /** Every `question_code` the active schema declares — the set [BeneficiaryFieldErrorMapper] needs
+   * to decide whether a DTO path maps onto a real field (and to pick the name fallback). */
+  private fun knownQuestionCodes(): Set<String> =
+    _uiState.value.version?.schemaJson?.map { it.questionCode }?.toSet().orEmpty()
+
+  /** The first currently-visible field (schema order) carrying one of [erroredCodes], as an
+   * [ErrorScrollTarget]; null if none of them is visible (e.g. all hidden by `visibleWhen`), in
+   * which case there's nothing to scroll to and the inline errors simply can't render. */
+  private fun firstErroredFieldTarget(erroredCodes: Set<String>): ErrorScrollTarget? {
+    val field = visibleFields().firstOrNull { it.questionCode in erroredCodes } ?: return null
+    return ErrorScrollTarget(
+      section = sectionOf(field),
+      questionCode = field.questionCode,
+      token = System.nanoTime(),
+    )
+  }
+
+  /** Consumes [DynamicFormUiState.errorScroll] once the screen has navigated/scrolled to the field,
+   * so the one-shot doesn't re-fire on the next recomposition. */
+  fun onErrorScrollHandled() {
+    _uiState.update { it.copy(errorScroll = null) }
   }
 }

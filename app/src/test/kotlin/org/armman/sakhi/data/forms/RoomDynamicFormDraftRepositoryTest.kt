@@ -60,7 +60,7 @@ class RoomDynamicFormDraftRepositoryTest {
     // Reuses the same dao/secureStore as the repository so runOne() sees the row submitDraft just
     // wrote — matching how the real Hilt graph wires a single instance of each.
     syncExecutor = DynamicFormSyncExecutor(dao, secureStore, coordinator)
-    repository = RoomDynamicFormDraftRepository(dao, secureStore, syncScheduler, connectivityChecker, syncExecutor)
+    repository = RoomDynamicFormDraftRepository(dao, secureStore, connectivityChecker, syncExecutor)
   }
 
   private val answers = FormAnswers(
@@ -112,12 +112,15 @@ class RoomDynamicFormDraftRepositoryTest {
   }
 
   @Test
-  fun `saveDraft nudges the sync scheduler`() = runTest {
+  fun `saveDraft schedules no upload - sync is the Sakhi's manual Data Upload action`() = runTest {
     repository.saveDraft(
       "local-1", "MOTHER_REGISTRATION", "version-1", "submission-uuid-1", answers, LocalDate.now(),
     )
 
-    assertEquals(1, syncScheduler.syncNowCallCount)
+    // SRS 3A.1 is manual-trigger-only. Enqueueing WorkManager work here would carry a
+    // NetworkType.CONNECTED constraint and therefore fire by itself on reconnect — auto-sync by
+    // another name.
+    assertEquals(0, syncScheduler.syncNowCallCount)
   }
 
   @Test
@@ -191,6 +194,26 @@ class RoomDynamicFormDraftRepositoryTest {
   }
 
   @Test
+  fun `submitDraft online 400 validation error carries fieldErrors end-to-end`() = runTest {
+    connectivityChecker.online = true
+    val body = """
+      {"success":false,"message":"pii.firstName: String must contain at least 1 character(s)",
+      "errorCode":"VALIDATION_ERROR",
+      "fieldErrors":{"pii.firstName":"String must contain at least 1 character(s)"}}
+    """.trimIndent()
+    enrollmentApi.response = Response.error(400, body.toResponseBody("application/json".toMediaType()))
+
+    val result = submit()
+
+    assertTrue(result is DynamicFormSubmitResult.Failed)
+    assertEquals(
+      "String must contain at least 1 character(s)",
+      (result as DynamicFormSubmitResult.Failed).fieldErrors["pii.firstName"],
+    )
+    assertEquals(EnrollmentSyncStatus.FAILED, dao.getByLocalBeneficiaryId("local-1")?.syncStatus)
+  }
+
+  @Test
   fun `submitDraft online duplicate conflict returns DuplicateConflict`() = runTest {
     connectivityChecker.online = true
     enrollmentApi.response = Response.error(
@@ -205,7 +228,7 @@ class RoomDynamicFormDraftRepositoryTest {
   }
 
   @Test
-  fun `submitDraft offline saves locally, queues sync, and returns QueuedOffline without calling either API`() = runTest {
+  fun `submitDraft offline saves locally and returns QueuedOffline without calling either API or scheduling`() = runTest {
     connectivityChecker.online = false
 
     val result = submit()
@@ -213,7 +236,9 @@ class RoomDynamicFormDraftRepositoryTest {
     assertEquals(DynamicFormSubmitResult.QueuedOffline, result)
     assertEquals(0, enrollmentApi.callCount)
     assertEquals(0, formSubmissionApi.callCount)
-    assertEquals(1, syncScheduler.syncNowCallCount)
+    // The draft waits as PENDING for the Sakhi's Data Upload tap. Scheduling here would upload it
+    // automatically on reconnect, which SRS 3A.1 rules out.
+    assertEquals(0, syncScheduler.syncNowCallCount)
     assertEquals(EnrollmentSyncStatus.PENDING, dao.getByLocalBeneficiaryId("local-1")?.syncStatus)
   }
 
@@ -225,7 +250,9 @@ class RoomDynamicFormDraftRepositoryTest {
     val result = submit()
 
     assertEquals(DynamicFormSubmitResult.QueuedOffline, result)
-    assertEquals(1, syncScheduler.syncNowCallCount)
+    // Same rule as the plain-offline case: left PENDING for the next manual Data Upload, not
+    // auto-scheduled.
+    assertEquals(0, syncScheduler.syncNowCallCount)
     assertEquals(EnrollmentSyncStatus.PENDING, dao.getByLocalBeneficiaryId("local-1")?.syncStatus)
   }
 

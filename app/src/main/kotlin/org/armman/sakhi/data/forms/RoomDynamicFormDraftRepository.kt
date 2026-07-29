@@ -27,7 +27,6 @@ import javax.inject.Singleton
 class RoomDynamicFormDraftRepository @Inject constructor(
   private val dao: DynamicFormDraftDao,
   private val secureStore: SecureKeyValueStore,
-  private val syncScheduler: DynamicFormSyncScheduler,
   private val connectivityChecker: ConnectivityChecker,
   private val syncExecutor: DynamicFormSyncExecutor,
 ) : DynamicFormDraftRepository {
@@ -40,11 +39,9 @@ class RoomDynamicFormDraftRepository @Inject constructor(
     answers: FormAnswers,
     registrationDate: LocalDate,
   ): Result<Unit> = runCatching {
+    // Local save only. Uploading is the Sakhi's explicit Data Upload action (SRS §3A.1 manual
+    // trigger); this deliberately schedules nothing.
     saveLocally(localBeneficiaryId, formCode, formVersionId, localSubmissionUuid, answers, registrationDate)
-    // No-op (deferred by WorkManager) if offline, immediate submit if online — never blocks this
-    // save on the outcome, which is what makes the Sakhi's "Submit" instant regardless of
-    // connectivity.
-    syncScheduler.syncNow()
   }
 
   override suspend fun submitDraft(
@@ -57,8 +54,11 @@ class RoomDynamicFormDraftRepository @Inject constructor(
   ): DynamicFormSubmitResult {
     saveLocally(localBeneficiaryId, formCode, formVersionId, localSubmissionUuid, answers, registrationDate)
 
+    // Offline: the draft is safely persisted and waits in the queue for the Sakhi's Data Upload
+    // tap. Nothing is scheduled here — a WorkManager job enqueued now would carry a
+    // NetworkType.CONNECTED constraint and fire by itself on reconnect, which is the auto-sync
+    // SRS §3A.1 rules out.
     if (!connectivityChecker.isOnline()) {
-      syncScheduler.syncNow()
       return DynamicFormSubmitResult.QueuedOffline
     }
 
@@ -66,12 +66,12 @@ class RoomDynamicFormDraftRepository @Inject constructor(
       is DynamicFormSyncItemResult.Synced -> DynamicFormSubmitResult.Synced
       is DynamicFormSyncItemResult.DuplicateConflict ->
         DynamicFormSubmitResult.DuplicateConflict(result.message)
-      is DynamicFormSyncItemResult.Failed -> DynamicFormSubmitResult.Failed(result.message)
+      is DynamicFormSyncItemResult.Failed -> DynamicFormSubmitResult.Failed(result.message, result.fieldErrors)
       is DynamicFormSyncItemResult.Retryable, null -> {
         // Transient (connectivity dropped mid-call despite the isOnline() check above), or no
         // draft row found (shouldn't happen right after saveLocally — guard only). Fall back to
-        // the offline-first guarantee rather than blocking the Sakhi indefinitely.
-        syncScheduler.syncNow()
+        // the offline-first guarantee rather than blocking the Sakhi indefinitely: the draft stays
+        // PENDING for the next manual Data Upload.
         DynamicFormSubmitResult.QueuedOffline
       }
     }

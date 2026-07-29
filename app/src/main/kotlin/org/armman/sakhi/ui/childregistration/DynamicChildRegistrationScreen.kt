@@ -54,7 +54,10 @@ import org.armman.sakhi.ui.components.SecondaryButton
 import org.armman.sakhi.ui.components.StatusBanner
 import org.armman.sakhi.ui.components.StatusBannerVariant
 import org.armman.sakhi.ui.enrollment.steps.EnrollmentCompleteContent
+import org.armman.sakhi.ui.forms.CrossFieldErrorAttribution
 import org.armman.sakhi.ui.forms.DynamicFormField
+import org.armman.sakhi.ui.forms.crossFieldMessage
+import org.armman.sakhi.ui.forms.labelResolver
 import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG100
 import org.armman.sakhi.ui.theme.NeutralG200
@@ -194,13 +197,20 @@ private fun FormContent(
   val isSummaryTab = safeIndex >= schemaSections.size
   val currentSchemaSection = schemaSections.getOrNull(safeIndex)
 
+  // Violated cross-field rules, attributed to the field that should show them inline and listed in
+  // a Summary-tab banner — without this a violation only disabled Submit, with nothing on screen.
+  val labelOf = labelResolver(viewModel.visibleFields())
+  val crossFieldMessages: Map<String, String> = buildMap {
+    CrossFieldErrorAttribution.byQuestionCode(viewModel.crossFieldViolations())
+      .forEach { (code, rule) -> crossFieldMessage(rule, labelOf)?.let { put(code, it) } }
+  }
+
   Column(modifier = Modifier.fillMaxSize()) {
     AppTabRow(
       tabs = tabs,
       selectedIndex = safeIndex,
       onTabSelected = onTabSelected,
       distributeEvenly = true,
-      indicatorOverhang = Dimens.TabIndicatorOverhang,
       modifier = Modifier.padding(horizontal = Dimens.ScreenPadding, vertical = Dimens.ItemSpacing),
     )
 
@@ -221,9 +231,20 @@ private fun FormContent(
           fields = currentSchemaSection?.let(viewModel::fieldsInSection).orEmpty(),
           state = state,
           viewModel = viewModel,
+          crossFieldMessages = crossFieldMessages,
           isConsentSection = currentSchemaSection == CONSENT_SECTION,
         )
       }
+    }
+
+    // Summary tab hosts Submit, so a cross-field rule referencing fields on earlier tabs still
+    // explains itself here rather than leaving Submit disabled for no visible reason.
+    if (isSummaryTab && crossFieldMessages.isNotEmpty()) {
+      StatusBanner(
+        message = crossFieldMessages.values.joinToString(separator = "\n"),
+        variant = StatusBannerVariant.Error,
+        modifier = Modifier.padding(horizontal = Dimens.ScreenPadding, vertical = Dimens.SmallSpacing),
+      )
     }
 
     // Inline client-side eligibility/consent error (blocks Submit), rendered above the action bar.
@@ -260,6 +281,8 @@ private fun ChildFormFieldList(
   fields: List<FormFieldSchema>,
   state: ChildFormUiState,
   viewModel: DynamicChildRegistrationViewModel,
+  /** Violated cross-field rule messages keyed by `question_code`; see [CrossFieldErrorAttribution]. */
+  crossFieldMessages: Map<String, String>,
   isConsentSection: Boolean,
 ) {
   val context = LocalContext.current
@@ -309,6 +332,8 @@ private fun ChildFormFieldList(
         DynamicFormField(
           field = field,
           answers = state.answers,
+          registrationDate = viewModel.registrationDate,
+          errorText = crossFieldMessages[field.questionCode],
           mediaCompleted = field.questionCode in state.mediaCompleted,
           capturedImageUri = state.capturedImages[field.questionCode],
           loadOptions = { viewModel.optionsFor(field) },

@@ -12,6 +12,8 @@ import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormFieldSchema
 import org.armman.sakhi.data.forms.FormNumericRange
 import org.armman.sakhi.data.forms.FormUploadRecord
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.FormsRepository
 import org.armman.sakhi.data.forms.GeographyFieldOptionsResolver
@@ -80,6 +82,8 @@ class DynamicChildRegistrationViewModelTest {
     }
 
     override suspend fun getUploadRecords(): List<FormUploadRecord> = emptyList()
+
+    override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = flowOf(emptyList())
   }
 
   private val dispatcher = StandardTestDispatcher()
@@ -398,6 +402,21 @@ class DynamicChildRegistrationViewModelTest {
 
     assertEquals(ChildValidationError.CONSENT_REFUSED, vm.uiState.value.validationError)
     assertFalse(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `consent answered no blocks the Consent tab's next button`() = runTest {
+    val vm = viewModel(
+      listOf(field("did_we_receive_consent", section = "Consent", required = true, inputType = "radio")),
+    )
+
+    vm.setAnswer("did_we_receive_consent", "no")
+    dispatcher.scheduler.advanceUntilIdle()
+    assertFalse(vm.isSectionReady("Consent"))
+
+    vm.setAnswer("did_we_receive_consent", "yes")
+    dispatcher.scheduler.advanceUntilIdle()
+    assertTrue(vm.isSectionReady("Consent"))
   }
 
   // --- submit -----------------------------------------------------------------------------------

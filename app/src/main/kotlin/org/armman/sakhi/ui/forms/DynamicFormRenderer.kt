@@ -1,7 +1,9 @@
 package org.armman.sakhi.ui.forms
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -27,10 +29,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import org.armman.sakhi.R
 import org.armman.sakhi.data.forms.AGE_FROM_DOB_QUESTION_CODES
+import org.armman.sakhi.data.forms.BeneficiaryNameRule
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormDateRuleset
 import org.armman.sakhi.data.forms.FormFieldInputType
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
+import org.armman.sakhi.data.forms.FormNumericInputRule
 import org.armman.sakhi.data.forms.FormNumericRangeValidator
 import org.armman.sakhi.data.forms.GeographyQuestionCodes
 import org.armman.sakhi.data.forms.MobileNumberRule
@@ -105,6 +110,10 @@ private val CONSENT_CHECKBOX_QUESTION_CODES = setOf(
 fun DynamicFormField(
   field: FormFieldSchema,
   answers: FormAnswers,
+  /** The form's registration date (the hosting ViewModel's own `registrationDate`). Reference point
+   * for [FormDateRuleset]'s bounds/validation, so the picker limits and the derived age field agree
+   * on the same "now". */
+  registrationDate: LocalDate,
   mediaCompleted: Boolean,
   capturedImageUri: String?,
   loadOptions: suspend () -> List<FormFieldOption>,
@@ -113,15 +122,105 @@ fun DynamicFormField(
   onPlayMedia: () -> Unit,
   onCaptureImage: () -> Unit,
   modifier: Modifier = Modifier,
+  /** Server-side per-field validation message (from a `400 VALIDATION_ERROR`), shown inline under
+   * the field. For text/number fields it feeds the widget's own `errorText` slot and takes
+   * precedence over the local range/mobile hint; for every other field type it renders as a
+   * trailing error line. Null = no server error for this field. */
+  errorText: String? = null,
 ) {
   val singleValue = answers.valueOf(field.questionCode).orEmpty()
   val multiValue = answers.multiValueOf(field.questionCode)
 
+  // Text/number/date branches surface [errorText] through the input widget's own error slot; every
+  // other branch gets a trailing [FieldErrorText] appended below it, so a select/radio/geography
+  // field can show a server error too. Tracked so the trailing line isn't duplicated for the
+  // widget-native cases.
+  val rendersErrorInline = field.computedFrom == null &&
+    field.questionCode !in AGE_FROM_DOB_QUESTION_CODES &&
+    field.questionCode !in GeographyQuestionCodes.ALL &&
+    field.inputType in INLINE_ERROR_INPUT_TYPES
+
+  Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    DynamicFormFieldBody(
+      field = field,
+      answers = answers,
+      registrationDate = registrationDate,
+      singleValue = singleValue,
+      multiValue = multiValue,
+      mediaCompleted = mediaCompleted,
+      capturedImageUri = capturedImageUri,
+      loadOptions = loadOptions,
+      onSingleAnswer = onSingleAnswer,
+      onMultiAnswer = onMultiAnswer,
+      onPlayMedia = onPlayMedia,
+      onCaptureImage = onCaptureImage,
+      serverErrorText = errorText,
+    )
+    if (errorText != null && !rendersErrorInline) {
+      FieldErrorText(errorText)
+    }
+  }
+}
+
+/** `input_type`s whose widget has its own `errorText` slot and therefore renders a server error
+ * inline itself (so no separate trailing error line is added for them). */
+private val INLINE_ERROR_INPUT_TYPES = setOf(
+  FormFieldInputType.TEXT,
+  FormFieldInputType.TEXT_GEO,
+  FormFieldInputType.NUMBER,
+  FormFieldInputType.DATE,
+)
+
+/** User-facing message for a [FormDateRuleset.Violation]. Reuses the static enrollment flow's
+ * existing (already translated) messages, so both flows word the same rule identically. */
+@StringRes
+private fun FormDateRuleset.Violation.messageRes(): Int = when (this) {
+  FormDateRuleset.Violation.AGE_OUT_OF_RANGE -> R.string.enrollment_error_age_range
+  FormDateRuleset.Violation.LMP_FUTURE -> R.string.enrollment_error_lmp_future
+  FormDateRuleset.Violation.LMP_TOO_RECENT -> R.string.enrollment_error_lmp_recent
+  FormDateRuleset.Violation.LMP_TOO_OLD -> R.string.enrollment_error_lmp_old
+  FormDateRuleset.Violation.REGISTRATION_DATE_IN_FUTURE -> R.string.enrollment_error_registration_date_future
+}
+
+/** Inline error line shown under a field whose widget has no native error slot (select, radio,
+ * checkbox, geography, media, image, read-only). Matches the [AppTextInputField] error tone. */
+@Composable
+private fun FieldErrorText(message: String, modifier: Modifier = Modifier) {
+  Text(
+    text = message,
+    style = MaterialTheme.typography.bodySmall,
+    color = MaterialTheme.colorScheme.error,
+    modifier = modifier,
+  )
+}
+
+/**
+ * Renders the field widget itself, dispatching on [FormFieldSchema.inputType]. Split out from
+ * [DynamicFormField] so the wrapper there can uniformly append an inline [FieldErrorText] for the
+ * field types that need one. [serverErrorText] is only consumed by the text/number/date branches
+ * (their widgets have a native error slot — see [INLINE_ERROR_INPUT_TYPES]); other branches ignore
+ * it and the wrapper renders their trailing error instead.
+ */
+@Composable
+private fun DynamicFormFieldBody(
+  field: FormFieldSchema,
+  answers: FormAnswers,
+  registrationDate: LocalDate,
+  singleValue: String,
+  multiValue: List<String>,
+  mediaCompleted: Boolean,
+  capturedImageUri: String?,
+  loadOptions: suspend () -> List<FormFieldOption>,
+  onSingleAnswer: (String?) -> Unit,
+  onMultiAnswer: (List<String>) -> Unit,
+  onPlayMedia: () -> Unit,
+  onCaptureImage: () -> Unit,
+  serverErrorText: String?,
+) {
   if (field.computedFrom != null || field.questionCode in AGE_FROM_DOB_QUESTION_CODES) {
     AppReadOnlyField(
       label = field.label,
       value = singleValue.ifBlank { "Auto-calculated" },
-      modifier = modifier,
     )
     return
   }
@@ -136,60 +235,109 @@ fun DynamicFormField(
       selectedValue = singleValue,
       loadOptions = loadOptions,
       onSingleAnswer = onSingleAnswer,
-      modifier = modifier,
     )
     return
   }
 
-  when (field.inputType) {
-    FormFieldInputType.TEXT, FormFieldInputType.TEXT_GEO ->
-      AppTextInputField(
-        label = field.label,
-        placeholder = field.label,
-        value = singleValue,
-        onValueChange = onSingleAnswer,
-        modifier = modifier,
-      )
+  // Red `*` next to the label of every field the Sakhi must fill in. See [RequiredFieldMarker] for
+  // which fields qualify. Deliberately not applied to `placeholder`, which reuses `field.label` —
+  // an asterisk inside the greyed-out hint text would read as part of the expected input.
+  val required = RequiredFieldMarker.isShownFor(field)
 
-    FormFieldInputType.NUMBER -> {
-      // `mobile_number` is a plain `number` in the schema but must be exactly 10 digits — cap input
-      // and validate here (see MobileNumberRule). Other number fields keep the numericRange check.
-      val isMobile = field.questionCode == MobileNumberRule.QUESTION_CODE
-      val error = when {
-        isMobile ->
-          if (singleValue.isNotBlank() && !MobileNumberRule.isComplete(singleValue)) {
-            stringResource(R.string.enrollment_error_mobile)
-          } else {
-            null
-          }
-        singleValue.isNotBlank() && !FormNumericRangeValidator.isWithinRange(field.numericRange, singleValue) -> {
-          val range = field.numericRange
-          "Must be between ${range?.min?.toInt()} and ${range?.max?.toInt()}"
-        }
-        else -> null
+  when (field.inputType) {
+    FormFieldInputType.TEXT, FormFieldInputType.TEXT_GEO -> {
+      // Beneficiary name questions take letters and spaces only (form spec S.No 19) — special
+      // characters are filtered out as they're typed or pasted, so they can never reach the
+      // answer. Every other TEXT field (address, RCH number, …) keeps the raw pass-through.
+      // See BeneficiaryNameRule.
+      val isName = BeneficiaryNameRule.appliesTo(field.questionCode)
+      // Unreachable by typing thanks to the filter above; this covers a value that got in another
+      // way (older draft, backend-restored answer) so the Sakhi sees *why* Next is blocked rather
+      // than facing a disabled button with no explanation.
+      val localError = if (isName && !BeneficiaryNameRule.isValid(singleValue)) {
+        stringResource(R.string.enrollment_error_name_chars)
+      } else {
+        null
       }
       AppTextInputField(
         label = field.label,
         placeholder = field.label,
         value = singleValue,
         onValueChange = { new ->
-          val digits = new.filter { it.isDigit() }
-          onSingleAnswer(if (isMobile) digits.take(MobileNumberRule.REQUIRED_DIGITS) else digits)
+          onSingleAnswer(if (isName) BeneficiaryNameRule.sanitize(new) else new)
         },
-        keyboardType = KeyboardType.Number,
-        errorText = error,
-        modifier = modifier,
+        // Server error wins on submit; once the Sakhi edits the field its server error is cleared
+        // (ViewModel.setAnswer), so the local hint takes over again — no double error.
+        errorText = serverErrorText ?: localError,
+        required = required,
       )
     }
 
-    FormFieldInputType.DATE ->
+    FormFieldInputType.NUMBER -> {
+      // `mobile_number` is a plain `number` in the schema but must be exactly 10 digits — cap input
+      // and validate here (see MobileNumberRule). Other number fields keep the numericRange check.
+      val isMobile = field.questionCode == MobileNumberRule.QUESTION_CODE
+      val localError = when {
+        isMobile ->
+          if (singleValue.isNotBlank() && !MobileNumberRule.isComplete(singleValue)) {
+            stringResource(R.string.enrollment_error_mobile)
+          } else {
+            null
+          }
+        singleValue.isNotBlank() && !FormNumericRangeValidator.isWithinRange(field.numericRange, singleValue) ->
+          // A missing `min` reads as 0, which is accurate here: the input filter accepts digits
+          // only, so no negative value can reach this field anyway.
+          stringResource(
+            R.string.enrollment_error_number_range,
+            field.numericRange?.min?.toInt() ?: 0,
+            field.numericRange?.max?.toInt() ?: 0,
+          )
+        else -> null
+      }
+      // Spec digit cap (e.g. household members = "2 digit"), so out-of-length values can't be typed
+      // at all; the range message above covers right-length-but-out-of-range entries.
+      val maxDigits = FormNumericInputRule.maxDigits(field)
+      AppTextInputField(
+        label = field.label,
+        placeholder = field.label,
+        value = singleValue,
+        onValueChange = { new ->
+          val digits = new.filter { it.isDigit() }
+          onSingleAnswer(
+            when {
+              isMobile -> digits.take(MobileNumberRule.REQUIRED_DIGITS)
+              maxDigits != null -> digits.take(maxDigits)
+              else -> digits
+            },
+          )
+        },
+        keyboardType = KeyboardType.Number,
+        // Server error wins on submit; once the Sakhi edits the field its server error is cleared
+        // (ViewModel.setAnswer), so the local range/mobile hint takes over again — no double error.
+        errorText = serverErrorText ?: localError,
+        required = required,
+      )
+    }
+
+    FormFieldInputType.DATE -> {
+      // Spec-driven bounds (DOB age range, LMP window, registration date not future) — the picker
+      // won't offer an out-of-range date, and any value that got in another way (older draft,
+      // backend-restored answer) shows the matching message. Server error still wins.
+      val bounds = FormDateRuleset.boundsFor(field.questionCode, answers, registrationDate)
+      val localError = FormDateRuleset
+        .violationFor(field.questionCode, answers, registrationDate)
+        ?.let { stringResource(it.messageRes()) }
       AppDateField(
         label = field.label,
         placeholder = field.label,
         value = singleValue.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
         onDateSelected = { date -> onSingleAnswer(date.toString()) },
-        modifier = modifier,
+        errorText = serverErrorText ?: localError,
+        required = required,
+        minDate = bounds?.min,
+        maxDate = bounds?.max,
       )
+    }
 
     FormFieldInputType.SELECT -> {
       var options by remember(field.questionCode) { mutableStateOf<List<FormFieldOption>>(emptyList()) }
@@ -200,7 +348,7 @@ fun DynamicFormField(
         options = options.map { it.label },
         selectedIndex = options.indexOfFirst { it.valueCode == singleValue }.takeIf { it >= 0 },
         onSelected = { index -> onSingleAnswer(options.getOrNull(index)?.valueCode) },
-        modifier = modifier,
+        required = required,
       )
     }
 
@@ -212,7 +360,7 @@ fun DynamicFormField(
           label = field.label,
           checked = singleValue == VALUE_YES,
           onCheckedChange = { checked -> onSingleAnswer(if (checked) VALUE_YES else VALUE_NO) },
-          modifier = modifier,
+          required = required,
         )
       } else {
         var options by remember(field.questionCode) { mutableStateOf<List<FormFieldOption>>(emptyList()) }
@@ -222,7 +370,7 @@ fun DynamicFormField(
           options = options.map { it.label },
           selectedIndex = options.indexOfFirst { it.valueCode == singleValue }.takeIf { it >= 0 },
           onSelected = { index -> onSingleAnswer(options.getOrNull(index)?.valueCode) },
-          modifier = modifier,
+          required = required,
         )
       }
 
@@ -242,7 +390,7 @@ fun DynamicFormField(
           val updated = if (code in multiValue) multiValue - code else multiValue + code
           onMultiAnswer(updated)
         },
-        modifier = modifier,
+        required = required,
       )
     }
 
@@ -253,16 +401,15 @@ fun DynamicFormField(
       // the only distinguishing signal available.
       when (field.questionCode) {
         QUESTION_CODE_CONSENT_AUDIO ->
-          MediaPlayButton(label = field.label, completed = mediaCompleted, onPlay = onPlayMedia, modifier = modifier)
+          MediaPlayButton(label = field.label, completed = mediaCompleted, onPlay = onPlayMedia)
         QUESTION_CODE_CONSENT_VIDEO ->
           MediaField(
             label = stringResource(R.string.enrollment_consent_welcome),
             completed = mediaCompleted,
             onPlay = onPlayMedia,
-            modifier = modifier,
           )
         else ->
-          MediaField(label = field.label, completed = mediaCompleted, onPlay = onPlayMedia, modifier = modifier)
+          MediaField(label = field.label, completed = mediaCompleted, onPlay = onPlayMedia)
       }
 
     FormFieldInputType.IMAGE ->
@@ -270,7 +417,6 @@ fun DynamicFormField(
         label = field.label,
         captured = capturedImageUri != null,
         onCapture = onCaptureImage,
-        modifier = modifier,
       )
 
     FormFieldInputType.UNKNOWN ->
@@ -280,7 +426,6 @@ fun DynamicFormField(
         text = "Unsupported field type for \"${field.label}\" (${field.inputTypeRaw}) — app update needed.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.error,
-        modifier = modifier,
       )
   }
 }
@@ -307,6 +452,7 @@ private fun GeographyField(
 
   val single = options.singleOrNull()
   if (single != null) {
+    // Pre-selected and unchangeable — no required marker; there is nothing for the Sakhi to do.
     AppReadOnlyField(label = field.label, value = single.label, modifier = modifier)
   } else {
     AppDropdownField(
@@ -316,6 +462,7 @@ private fun GeographyField(
       selectedIndex = options.indexOfFirst { it.valueCode == selectedValue }.takeIf { it >= 0 },
       onSelected = { index -> onSingleAnswer(options.getOrNull(index)?.valueCode) },
       modifier = modifier,
+      required = RequiredFieldMarker.isShownFor(field),
     )
   }
 }

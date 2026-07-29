@@ -109,6 +109,29 @@ class DynamicFormSubmissionMapperTest {
   }
 
   @Test
+  fun `names are trimmed and a whitespace-only middle name maps to null`() = runTest {
+    // BeneficiaryNameRule allows spaces, so padding survives the input filter and must be stripped
+    // before it reaches the PII fields or the name-based duplicate-detection hash.
+    sessionStore.saveSession(session)
+    val answers = answeredForm().let { base ->
+      base.copy(
+        singleValues = base.singleValues + mapOf(
+          "first_name" to "  Reema  ",
+          "middle_name" to "   ",
+          "last_name" to " Devi ",
+        ),
+      )
+    }
+
+    val dto = mapper.toCreateBeneficiaryRequest("local-case-1", answers, LocalDate.of(2026, 7, 20))
+      .getOrThrow()
+
+    assertEquals("Reema", dto.pii.firstName)
+    assertEquals(null, dto.pii.middleName)
+    assertEquals("Devi", dto.pii.lastName)
+  }
+
+  @Test
   fun `consent not given blocks submission`() = runTest {
     sessionStore.saveSession(session)
 

@@ -1,5 +1,7 @@
 package org.armman.sakhi.data.childregistration
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
@@ -24,7 +26,6 @@ import javax.inject.Singleton
 class RoomChildFormDraftRepository @Inject constructor(
   private val dao: ChildFormDraftDao,
   private val secureStore: SecureKeyValueStore,
-  private val syncScheduler: ChildFormSyncScheduler,
   private val connectivityChecker: ConnectivityChecker,
   private val syncExecutor: ChildFormSyncExecutor,
 ) : ChildFormDraftRepository {
@@ -37,10 +38,9 @@ class RoomChildFormDraftRepository @Inject constructor(
     answers: FormAnswers,
     registrationDate: LocalDate,
   ): Result<Unit> = runCatching {
+    // Local save only. Uploading is the Sakhi's explicit Data Upload action (SRS §3A.1 manual
+    // trigger); this deliberately schedules nothing.
     saveLocally(localBeneficiaryId, formCode, formVersionId, localSubmissionUuid, answers, registrationDate)
-    // No-op (deferred by WorkManager) if offline, immediate submit if online — never blocks this
-    // save on the outcome, which makes the Sakhi's "Submit" instant regardless of connectivity.
-    syncScheduler.syncNow()
   }
 
   override suspend fun submitDraft(
@@ -53,8 +53,11 @@ class RoomChildFormDraftRepository @Inject constructor(
   ): ChildFormSubmitResult {
     saveLocally(localBeneficiaryId, formCode, formVersionId, localSubmissionUuid, answers, registrationDate)
 
+    // Offline: the draft is safely persisted and waits in the queue for the Sakhi's Data Upload
+    // tap. Nothing is scheduled here — a WorkManager job enqueued now would carry a
+    // NetworkType.CONNECTED constraint and fire by itself on reconnect, which is the auto-sync
+    // SRS §3A.1 rules out.
     if (!connectivityChecker.isOnline()) {
-      syncScheduler.syncNow()
       return ChildFormSubmitResult.QueuedOffline
     }
 
@@ -66,22 +69,25 @@ class RoomChildFormDraftRepository @Inject constructor(
       is ChildFormSyncItemResult.Retryable, null -> {
         // Transient (connectivity dropped mid-call despite the isOnline() check), or no draft row
         // found (shouldn't happen right after saveLocally — guard only). Fall back to the
-        // offline-first guarantee rather than blocking the Sakhi indefinitely.
-        syncScheduler.syncNow()
+        // offline-first guarantee rather than blocking the Sakhi indefinitely: the draft stays
+        // PENDING for the next manual Data Upload.
         ChildFormSubmitResult.QueuedOffline
       }
     }
   }
 
   override suspend fun getUploadRecords(): List<FormUploadRecord> =
-    dao.getAll().map { entity ->
-      FormUploadRecord(
-        localBeneficiaryId = entity.localBeneficiaryId,
-        formCode = entity.formCode,
-        syncStatus = entity.syncStatus,
-        createdAtEpochMillis = entity.createdAtEpochMillis,
-      )
-    }
+    dao.getAll().map { it.toUploadRecord() }
+
+  override fun observeUploadRecords(): Flow<List<FormUploadRecord>> =
+    dao.observeAll().map { entities -> entities.map { it.toUploadRecord() } }
+
+  private fun ChildFormDraftEntity.toUploadRecord() = FormUploadRecord(
+    localBeneficiaryId = localBeneficiaryId,
+    formCode = formCode,
+    syncStatus = syncStatus,
+    createdAtEpochMillis = createdAtEpochMillis,
+  )
 
   private suspend fun saveLocally(
     localBeneficiaryId: String,

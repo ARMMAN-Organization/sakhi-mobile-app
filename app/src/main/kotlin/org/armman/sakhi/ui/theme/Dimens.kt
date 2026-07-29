@@ -32,13 +32,22 @@ object Dimens {
   val TabIndicatorHeight = 4.dp
   val CardAccentHeight = 6.dp
   val AvatarSize = 44.dp
+
+  /** Height of the Arogya Sakhi logo lockup in a screen header (width follows the asset ratio). */
+  val HeaderLogoHeight = 52.dp
+
+  /** Height of the logo lockup on the Login screen. */
+  val LoginLogoHeight = 156.dp
+
+  /**
+   * Breathing room between the logo lockup's laid-out bounds and the artwork. The PNG bleeds to all
+   * four edges, so without this inset the wordmark sits flush against neighbouring content.
+   */
+  val LogoContentPadding = 4.dp
   val SmallButtonHeight = 44.dp
 
   /** Horizontal content inset on tablet screens (measured from tablet designs). */
   val ScreenPaddingTablet = 48.dp
-
-  /** Stepper tab indicator extends this much beyond the label on each side. */
-  val TabIndicatorOverhang = 10.dp
 
   // Enrollment tokens measured from the Enrollment form designs (150dpi).
   /** Height of a "Register New Beneficiary as" option card. */

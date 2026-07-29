@@ -208,6 +208,35 @@ class DynamicFormSubmissionCoordinatorTest {
     val error = result.exceptionOrNull() as DynamicFormSubmissionException.BeneficiaryCreationFailed
     assertEquals(400, error.httpCode)
     assertTrue(error.body.orEmpty().contains("Invalid uuid"))
+    // The parsed envelope is now carried on the exception for inline attribution downstream.
+    assertEquals("VALIDATION_ERROR", error.errorCode)
+    assertEquals("Invalid uuid", error.fieldErrors["pii.villageId"])
+    assertEquals(0, formSubmissionApi.callCount)
+  }
+
+  @Test
+  fun `a 422 unprocessable from beneficiaries carries the message but no fieldErrors`() = runTest {
+    // The real geography case: 422 with a plain message and no per-field map — must stay
+    // banner-only (empty fieldErrors), never attributed to a field.
+    val body = """
+      {"success":false,"message":"pii.phcId does not refer to a known geography unit.",
+      "errorCode":"UNPROCESSABLE","traceId":"abc123"}
+    """.trimIndent()
+    enrollmentApi.response = Response.error(422, body.toResponseBody("application/json".toMediaType()))
+
+    val result = coordinator.submit(
+      formVersionId = "version-v6",
+      localCaseUuid = "local-case-1",
+      localSubmissionUuid = "local-submission-1",
+      answers = consistentAnswers(),
+      fallbackRegistrationDate = LocalDate.now(),
+    )
+
+    assertTrue(result.isFailure)
+    val error = result.exceptionOrNull() as DynamicFormSubmissionException.BeneficiaryCreationFailed
+    assertEquals(422, error.httpCode)
+    assertEquals("UNPROCESSABLE", error.errorCode)
+    assertTrue(error.fieldErrors.isEmpty())
     assertEquals(0, formSubmissionApi.callCount)
   }
 
