@@ -7,8 +7,10 @@ import org.armman.sakhi.data.enrollment.ChildDetailsDto
 import org.armman.sakhi.data.enrollment.ConsentDto
 import org.armman.sakhi.data.enrollment.CreateBeneficiaryRequestDto
 import org.armman.sakhi.data.enrollment.EnrollmentMappingException
+import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.GeographyQuestionCodes
+import org.armman.sakhi.data.forms.registrationDateAnswer
 import org.armman.sakhi.data.lookup.LookupRepository
 import java.time.LocalDate
 import javax.inject.Inject
@@ -24,11 +26,14 @@ private const val VALUE_CODE_CHILD = "CHILD"
  * and rejects (HTTP 422) any required field that's absent, so `formData` carries every answer, not
  * just the ones without a beneficiary-DTO home. See [toFormSubmissionData]. */
 private object QuestionCode {
-  const val WHO_ARE_YOU_REGISTERING = "who_are_you_registering_in_the_program"
-  const val PATH_REGISTERED_MOTHER = "child_of_a_registered_pregnant_woman"
+  // The path radio and infant DOB are aliased from the shared declaration rather than re-typed:
+  // FormDateRuleset and DynamicChildRegistrationViewModel key their eligibility rules off the same
+  // strings, and a rename that reached only two of the three would fail at submit, not at build.
+  const val WHO_ARE_YOU_REGISTERING = ChildRegistrationQuestionCodes.WHO_ARE_YOU_REGISTERING
+  const val PATH_REGISTERED_MOTHER = ChildRegistrationQuestionCodes.PATH_REGISTERED_MOTHER
+  const val DATE_OF_BIRTH_OF_INFANT = ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT
   const val MOTHER_BENEFICIARY_ID = "mother_beneficiary_id"
   const val DID_WE_RECEIVE_CONSENT = "did_we_receive_consent"
-  const val DATE_OF_BIRTH_OF_INFANT = "date_of_birth_of_infant"
   const val NAME_OF_THE_CHILD = "name_of_the_child"
   const val SEX_OF_CHILD = "sex_of_child"
   const val CHILD_LENGTH_CM = "child_length_at_birth_in_cm"
@@ -36,7 +41,9 @@ private object QuestionCode {
   const val TERM_OF_DELIVERY = "term_of_delivery"
   const val MOBILE_NUMBER = "mobile_number"
   const val ADDRESS = "enter_the_beneficiary_address"
-  const val REGISTRATION_DATE = "registrtion_date"
+  // Registration date is NOT declared here: the published schemas use two different spellings, so it
+  // is read via `answers.registrationDateAnswer()` / REGISTRATION_DATE_QUESTION_CODES instead of a
+  // single literal.
 }
 
 /** `sex_of_child` value_codes → `pii.sex`/`childDetails.sex` enum. Assumption flagged: the backend
@@ -113,7 +120,7 @@ class ChildRegistrationSubmissionMapper @Inject constructor(
     }
 
     val registrationDate =
-      answers.valueOf(QuestionCode.REGISTRATION_DATE) ?: fallbackRegistrationDate.toString()
+      answers.registrationDateAnswer() ?: fallbackRegistrationDate.toString()
     val childName = parseChildName(answers.valueOf(QuestionCode.NAME_OF_THE_CHILD))
     val mappedSex = mapSex(answers.valueOf(QuestionCode.SEX_OF_CHILD))
     val motherBeneficiaryId =

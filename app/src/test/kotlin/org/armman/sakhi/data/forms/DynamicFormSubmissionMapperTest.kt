@@ -132,6 +132,25 @@ class DynamicFormSubmissionMapperTest {
   }
 
   @Test
+  fun `the corrected registration date spelling still reaches the case DTO`() = runTest {
+    // MOTHER_REGISTRATION v3 renamed `registrtion_date` to `registration_date`; reading only the old
+    // literal would silently fall back to today's date instead of the answered one.
+    sessionStore.saveSession(session)
+    val answers = answeredForm().let { base ->
+      base.copy(
+        singleValues = base.singleValues - REGISTRATION_DATE_QUESTION_CODE +
+          (REGISTRATION_DATE_QUESTION_CODE_CORRECTED to "2026-07-20"),
+      )
+    }
+
+    val dto = mapper.toCreateBeneficiaryRequest("local-case-1", answers, LocalDate.of(2026, 7, 25))
+      .getOrThrow()
+
+    assertEquals("2026-07-20", dto.case.registrationDate)
+    assertEquals("2026-07-20", dto.consent.date)
+  }
+
+  @Test
   fun `consent not given blocks submission`() = runTest {
     sessionStore.saveSession(session)
 

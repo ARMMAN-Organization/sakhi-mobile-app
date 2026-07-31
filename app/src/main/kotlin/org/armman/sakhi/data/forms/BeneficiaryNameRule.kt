@@ -21,9 +21,14 @@ object BeneficiaryNameRule {
   const val MIDDLE_NAME = "middle_name"
   const val LAST_NAME = "last_name"
 
+  /** Child Registration's name is a single combined field (`name_of_the_child`) rather than the
+   * split first/middle/last used by the Mother/enrollment forms, so it needs listing explicitly to
+   * get the same "no special characters in a name" enforcement (PR #31 review). */
+  const val NAME_OF_THE_CHILD = "name_of_the_child"
+
   /** The name questions this rule governs. Every other TEXT field (address, RCH number, …) is
    * deliberately left alone — they legitimately contain digits and punctuation. */
-  val QUESTION_CODES = setOf(FIRST_NAME, MIDDLE_NAME, LAST_NAME)
+  val QUESTION_CODES = setOf(FIRST_NAME, MIDDLE_NAME, LAST_NAME, NAME_OF_THE_CHILD)
 
   fun appliesTo(questionCode: String): Boolean = questionCode in QUESTION_CODES
 

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -77,8 +78,9 @@ private const val CONSENT_SECTION = "Consent"
  * Screen hosting the CR-020 dynamic Children Register form — standalone twin of
  * `DynamicMotherRegistrationScreen`, wired as the "Child" enrollment path from the entry selector.
  * Fields are grouped into tabs by the schema's `section` key; a client-side **Summary** tab is
- * appended for review + submit. A client-side eligibility/consent error (age windows, future DOB,
- * refused consent) renders inline above the action bar and blocks Submit. On a successful submit
+ * appended for review + submit. A client-side eligibility error (age windows, future DOB) renders
+ * inline above the action bar and blocks Submit; refused consent instead aborts the registration
+ * outright (toast + back to Home, see [onConsentRefused]). On a successful submit
  * the sheet swaps to the shared [EnrollmentCompleteContent] success state.
  */
 @Composable
@@ -86,6 +88,9 @@ fun DynamicChildRegistrationScreen(
   onBack: () -> Unit,
   /** Leaves the enrollment sub-graph (→ Home) once the Sakhi is done with the success screen. */
   onSubmitted: () -> Unit,
+  /** Leaves the enrollment sub-graph (→ Home) when the beneficiary refuses consent — the
+   * registration is abandoned, so nothing is saved and the form is not left on screen. */
+  onConsentRefused: () -> Unit,
   modifier: Modifier = Modifier,
   viewModel: DynamicChildRegistrationViewModel = hiltViewModel(),
 ) {
@@ -110,6 +115,17 @@ fun DynamicChildRegistrationScreen(
         ChildSubmitFailureKind.GENERIC -> failed.backendMessage ?: submitFailedMessage
       }
       snackbarHostState.showSnackbar(message = message, duration = SnackbarDuration.Long)
+    }
+  }
+
+  // "Did we receive consent? → No" aborts the registration on the spot: a toast explains why, then
+  // the Sakhi is returned Home. A Toast (not the snackbar above) because the host is destroyed by
+  // the navigation that follows in the same frame — a snackbar would never be seen.
+  val consentRefusedMessage = stringResource(R.string.enrollment_consent_refused_toast)
+  LaunchedEffect(Unit) {
+    viewModel.consentRefused.collect {
+      Toast.makeText(context, consentRefusedMessage, Toast.LENGTH_LONG).show()
+      onConsentRefused()
     }
   }
 
@@ -233,6 +249,9 @@ private fun FormContent(
           viewModel = viewModel,
           crossFieldMessages = crossFieldMessages,
           isConsentSection = currentSchemaSection == CONSENT_SECTION,
+          // Identifies which section the reused list is showing, so it can reset to the first
+          // question on a tab switch (see ChildFormFieldList).
+          sectionKey = currentSchemaSection,
         )
       }
     }
@@ -247,7 +266,8 @@ private fun FormContent(
       )
     }
 
-    // Inline client-side eligibility/consent error (blocks Submit), rendered above the action bar.
+    // Inline client-side age-eligibility error (blocks Submit), rendered above the action bar.
+    // Consent refusal is NOT one of these — it exits the flow instead (see [onConsentRefused]).
     state.validationError?.let { error ->
       StatusBanner(
         message = stringResource(validationErrorRes(error)),
@@ -273,7 +293,6 @@ private fun validationErrorRes(error: ChildValidationError): Int = when (error) 
   ChildValidationError.DOB_FUTURE -> R.string.child_reg_dob_future
   ChildValidationError.INELIGIBLE_DIRECT -> R.string.child_reg_ineligible_direct
   ChildValidationError.INELIGIBLE_MOTHER -> R.string.child_reg_ineligible_mother
-  ChildValidationError.CONSENT_REFUSED -> R.string.child_reg_consent_refused
 }
 
 @Composable
@@ -284,8 +303,21 @@ private fun ChildFormFieldList(
   /** Violated cross-field rule messages keyed by `question_code`; see [CrossFieldErrorAttribution]. */
   crossFieldMessages: Map<String, String>,
   isConsentSection: Boolean,
+  /** Title of the section currently rendered; drives the scroll reset below. */
+  sectionKey: String?,
 ) {
   val context = LocalContext.current
+  val listState = rememberLazyListState()
+
+  // Every section reuses this composable instance (only [fields] changes), so [listState] — and the
+  // previous section's scroll offset with it — survives a tab switch and lands the Sakhi mid-form.
+  // Reset to the first question whenever the section changes. Keyed on [sectionKey] rather than
+  // [fields] so conditionally revealed fields (visibleWhen) appearing mid-section don't yank the
+  // list back to the top. Unconditional here: unlike the mother flow this screen has no post-submit
+  // error scroll to yield to — if that is ever ported over, guard this with
+  // [FormSectionScroll.shouldResetToTop] as DynamicMotherRegistrationScreen does.
+  LaunchedEffect(sectionKey) { listState.scrollToItem(0) }
+
   // Live capture into app-private storage, one target file per question_code (retake replaces).
   val photoUriFor = remember { mutableMapOf<String, Uri>() }
   var captureTargetCode by remember { mutableStateOf<String?>(null) }
@@ -306,7 +338,16 @@ private fun ChildFormFieldList(
     if (isConsentSection) fields.indexOfFirst { it.inputType == FormFieldInputType.RADIO } else -1
 
   LazyColumn(
-    contentPadding = PaddingValues(Dimens.ScreenPadding),
+    state = listState,
+    // Extra bottom slack, not symmetric padding: `bringIntoView` can only scroll as far as the
+    // content allows, so without room past the last field a focused field near the end of a section
+    // stays pinned against the viewport edge (or clipped) however hard it asks to be revealed.
+    contentPadding = PaddingValues(
+      start = Dimens.ScreenPadding,
+      end = Dimens.ScreenPadding,
+      top = Dimens.ScreenPadding,
+      bottom = Dimens.FormListBottomSlack,
+    ),
     verticalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
     modifier = Modifier.fillMaxSize(),
   ) {
@@ -329,27 +370,47 @@ private fun ChildFormFieldList(
             color = NeutralG400,
           )
         }
-        DynamicFormField(
-          field = field,
-          answers = state.answers,
-          registrationDate = viewModel.registrationDate,
-          errorText = crossFieldMessages[field.questionCode],
-          mediaCompleted = field.questionCode in state.mediaCompleted,
-          capturedImageUri = state.capturedImages[field.questionCode],
-          loadOptions = { viewModel.optionsFor(field) },
-          onSingleAnswer = { value -> viewModel.setAnswer(field.questionCode, value) },
-          onMultiAnswer = { values -> viewModel.setMultiAnswer(field.questionCode, values) },
-          onPlayMedia = { viewModel.markMediaComplete(field.questionCode) },
-          onCaptureImage = {
-            val uri = photoUriFor.getOrPut(field.questionCode) {
-              val photoFile = File(File(context.filesDir, "child-registration"), "${field.questionCode}.jpg")
-                .apply { parentFile?.mkdirs() }
-              FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", photoFile)
-            }
-            captureTargetCode = field.questionCode
-            takePictureLauncher.launch(uri)
-          },
-        )
+        // `mother_beneficiary_id` on the registered-mother path renders as the mother picker
+        // instead of the schema's `number` box: the Sakhi selects a name, the answer stored is the
+        // beneficiary UUID. See MotherLinkField for why this can't be a schema-driven `select`.
+        if (viewModel.isMotherLinkField(field)) {
+          MotherLinkField(
+            label = field.label,
+            selectedLabel = viewModel.selectedMotherLabel(),
+            mothers = state.motherOptions,
+            isLoading = state.isLoadingMothers,
+            loadFailed = state.motherLoadFailed,
+            onSelect = viewModel::selectMother,
+            onRetry = viewModel::loadMothers,
+          )
+        } else {
+          DynamicFormField(
+            field = field,
+            answers = state.answers,
+            registrationDate = viewModel.registrationDate,
+            errorText = crossFieldMessages[field.questionCode],
+            mediaCompleted = field.questionCode in state.mediaCompleted,
+            capturedImageUri = state.capturedImages[field.questionCode],
+            loadOptions = { viewModel.optionsFor(field) },
+            onSingleAnswer = { value -> viewModel.setAnswer(field.questionCode, value) },
+            onMultiAnswer = { values -> viewModel.setMultiAnswer(field.questionCode, values) },
+            onPlayMedia = { viewModel.markMediaComplete(field.questionCode) },
+            onCaptureImage = {
+              val uri = photoUriFor.getOrPut(field.questionCode) {
+                val photoFile = File(File(context.filesDir, "child-registration"), "${field.questionCode}.jpg")
+                  .apply { parentFile?.mkdirs() }
+                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", photoFile)
+              }
+              captureTargetCode = field.questionCode
+              takePictureLauncher.launch(uri)
+            },
+          )
+          // Tells the Sakhi this value was copied from the linked mother rather than typed by her,
+          // and therefore worth a glance. Disappears for this field as soon as she edits it.
+          if (viewModel.isPrefilledFromMother(field.questionCode)) {
+            MotherPrefillHint()
+          }
+        }
       }
     }
   }

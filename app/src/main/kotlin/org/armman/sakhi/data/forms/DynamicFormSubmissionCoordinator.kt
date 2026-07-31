@@ -44,12 +44,20 @@ sealed class DynamicFormSubmissionException(message: String) : Exception(message
     override val userMessage: String get() = SubmitErrorCopy.GENERIC
   }
 
+  /**
+   * [violations] carries the backend schema validator's messages (`form-validation.ts`), which a
+   * `422` from this endpoint returns under `fieldErrors.violations` as an ARRAY — e.g.
+   * `"Missing required field: <question_code>"`. They name a `question_code` rather than a DTO path,
+   * so they aren't field-attributable and surface as a page-level banner. See [ApiError.violations].
+   */
   data class FormSubmissionFailed(
     val httpCode: Int,
     val body: String?,
     val apiMessage: String? = null,
+    val violations: List<String> = emptyList(),
   ) : DynamicFormSubmissionException("POST /forms/$FORM_CODE/submissions failed: HTTP $httpCode — $body") {
-    override val userMessage: String get() = SubmitErrorCopy.forApiError(apiMessage, emptyMap())
+    override val userMessage: String
+      get() = SubmitErrorCopy.forApiError(apiMessage, emptyMap(), violations)
   }
 }
 
@@ -125,10 +133,12 @@ class DynamicFormSubmissionCoordinator @Inject constructor(
     val submissionResponse = formSubmissionApi.createSubmission(FORM_CODE, submissionRequest)
     if (!submissionResponse.isSuccessful) {
       val rawSubmissionBody = submissionResponse.errorBody()?.string()
+      val apiError = ApiErrorParser.parse(rawSubmissionBody)
       throw DynamicFormSubmissionException.FormSubmissionFailed(
         httpCode = submissionResponse.code(),
         body = rawSubmissionBody,
-        apiMessage = ApiErrorParser.parse(rawSubmissionBody).message?.takeIf { it != rawSubmissionBody },
+        apiMessage = apiError.message?.takeIf { it != rawSubmissionBody },
+        violations = apiError.violations,
       )
     }
   }

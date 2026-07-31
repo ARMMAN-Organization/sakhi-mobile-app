@@ -58,10 +58,12 @@ class BeneficiaryNameRuleTest {
   }
 
   @Test
-  fun `applies only to the three name questions`() {
+  fun `applies to the name questions including the combined child name`() {
     assertTrue(BeneficiaryNameRule.appliesTo("first_name"))
     assertTrue(BeneficiaryNameRule.appliesTo("middle_name"))
     assertTrue(BeneficiaryNameRule.appliesTo("last_name"))
+    // Child Registration's single combined name field (PR #31 review).
+    assertTrue(BeneficiaryNameRule.appliesTo("name_of_the_child"))
     assertFalse(BeneficiaryNameRule.appliesTo("enter_the_beneficiary_address"))
     assertFalse(BeneficiaryNameRule.appliesTo("input_rch_number"))
   }

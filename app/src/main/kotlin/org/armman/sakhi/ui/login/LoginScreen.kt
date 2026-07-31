@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
@@ -96,10 +95,13 @@ fun LoginScreen(
 
   Surface(color = White, modifier = Modifier.fillMaxSize()) {
     Box(
+      // `safeDrawingPadding()` covers system bars + display cutout + IME, and consumes those insets
+      // for everything below it. A nested `.imePadding()` would therefore be a no-op — do not
+      // re-add one (guarded by WindowInsetsConfigTest). The `verticalScroll` below is what makes
+      // the shrunken content reachable once the keyboard takes the bottom inset.
       modifier = Modifier
         .fillMaxSize()
-        .safeDrawingPadding()
-        .imePadding(),
+        .safeDrawingPadding(),
     ) {
       Column(
         horizontalAlignment = Alignment.CenterHorizontally,

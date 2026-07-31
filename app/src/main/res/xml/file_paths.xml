@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Camera capture targets live in app-private storage only (no gallery). -->
+<!-- Camera capture targets live in app-private storage only (no gallery).
+
+     EVERY directory passed to File(context.filesDir, "<dir>") before
+     FileProvider.getUriForFile() MUST have a matching <files-path> entry here, or
+     getUriForFile throws IllegalArgumentException ("Failed to find configured root
+     that contains ...") and crashes the app the moment the camera is launched.
+     When adding a new form flow with an image field, add its directory below. -->
 <paths>
   <files-path
     name="enrollment_captures"
@@ -10,4 +16,8 @@
   <files-path
     name="dynamic_form_captures"
     path="dynamic-form/" />
+  <!-- CR-020 Children Register — see DynamicChildRegistrationScreen.onCaptureImage. -->
+  <files-path
+    name="child_registration_captures"
+    path="child-registration/" />
 </paths>

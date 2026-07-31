@@ -3,18 +3,23 @@ package org.armman.sakhi.ui.childregistration
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.armman.sakhi.data.childregistration.ChildFormDraftRepository
 import org.armman.sakhi.data.childregistration.ChildFormSubmitResult
 import org.armman.sakhi.data.childregistration.ChildNonRenderableQuestionCodes
+import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormComputedFieldEvaluator
 import org.armman.sakhi.data.forms.FormCrossFieldRule
 import org.armman.sakhi.data.forms.FormCrossFieldValidator
+import org.armman.sakhi.data.forms.FormDateRuleset
 import org.armman.sakhi.data.forms.FormFieldInputType
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
@@ -24,8 +29,12 @@ import org.armman.sakhi.data.forms.FormVisibilityEvaluator
 import org.armman.sakhi.data.forms.FormsRepository
 import org.armman.sakhi.data.forms.GeographyFieldOptionsResolver
 import org.armman.sakhi.data.forms.GeographyQuestionCodes
+import org.armman.sakhi.data.forms.RegistrationDatePrefill
 import org.armman.sakhi.data.forms.newLocalSubmissionUuid
 import org.armman.sakhi.data.lookup.LookupRepository
+import org.armman.sakhi.data.motherlink.LinkedMother
+import org.armman.sakhi.data.motherlink.MotherLinkRepository
+import org.armman.sakhi.data.motherlink.MotherPrefill
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -34,21 +43,34 @@ import javax.inject.Inject
 /** The dynamic form CR-020 covers. */
 private const val FORM_CODE = "CHILD_REGISTRATION"
 
-/** `who_are_you_registering_in_the_program` radio + its two paths, and the conditional
- * `mother_beneficiary_id` field they gate (CR-020). */
-private const val WHO_ARE_YOU_REGISTERING = "who_are_you_registering_in_the_program"
-private const val PATH_REGISTERED_MOTHER = "child_of_a_registered_pregnant_woman"
-private const val PATH_DIRECT = "child_directly_mother_not_registered_in_the_program"
+/** `who_are_you_registering_in_the_program` radio + its two paths, and the infant DOB the
+ * eligibility windows are measured from. Aliased from [ChildRegistrationQuestionCodes] — the shared
+ * declaration [FormDateRuleset] also reads, so the picker's bounds and the gate below can never be
+ * keyed off different strings. */
+private const val WHO_ARE_YOU_REGISTERING = ChildRegistrationQuestionCodes.WHO_ARE_YOU_REGISTERING
+private const val PATH_REGISTERED_MOTHER = ChildRegistrationQuestionCodes.PATH_REGISTERED_MOTHER
+private const val PATH_DIRECT = ChildRegistrationQuestionCodes.PATH_DIRECT
+private const val DATE_OF_BIRTH_OF_INFANT = ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT
+
+/** The conditional field the path radio gates (CR-020). */
 private const val MOTHER_BENEFICIARY_ID = "mother_beneficiary_id"
 
-/** Infant DOB + consent question codes used for client-side eligibility/consent gating. */
-private const val DATE_OF_BIRTH_OF_INFANT = "date_of_birth_of_infant"
+/** Consent question codes. Answering "no" aborts the registration immediately (toast + back to
+ * Home) via [DynamicChildRegistrationViewModel.consentRefused] — it is not an inline error. */
 private const val DID_WE_RECEIVE_CONSENT = "did_we_receive_consent"
 private const val CONSENT_NO = "no"
 
-/** Eligibility windows (age in DAYS from infant DOB to registration date, inclusive upper bound). */
-private const val MAX_AGE_DAYS_DIRECT = 365L
-private const val MAX_AGE_DAYS_REGISTERED_MOTHER = 183L
+/**
+ * Eligibility windows (age in DAYS from infant DOB to registration date, inclusive upper bound),
+ * per SRS FR-S-2.3.
+ *
+ * Aliased from [FormDateRuleset], which uses the SAME values to bound the date picker. Detection
+ * (here) and prevention (there) must agree: a ceiling raised in one place only would either let the
+ * Sakhi pick a date the gate then silently refuses, or gate a date the picker offered as valid.
+ */
+private const val MAX_AGE_DAYS_DIRECT = FormDateRuleset.CHILD_AGE_CEILING_DAYS_INDEPENDENT
+private const val MAX_AGE_DAYS_REGISTERED_MOTHER =
+  FormDateRuleset.CHILD_AGE_CEILING_DAYS_MOTHER_LINKED
 
 /** Tab label for any visible field whose schema `section` is missing — a catch-all so a field
  * never silently disappears (child-local copy, mirrors the mother flow's FALLBACK_SECTION). */
@@ -81,9 +103,6 @@ enum class ChildValidationError {
 
   /** Registered-mother path: infant older than 6 months (183 days). */
   INELIGIBLE_MOTHER,
-
-  /** `did_we_receive_consent` answered "no" — registration cannot continue. */
-  CONSENT_REFUSED,
 }
 
 /** One label/value line in the Summary tab's review (child-local copy). */
@@ -106,6 +125,20 @@ data class ChildFormUiState(
   val capturedImages: Map<String, String> = emptyMap(),
   /** Client-side validation error to render inline; null when the form is currently valid. */
   val validationError: ChildValidationError? = null,
+  /** Registered mothers selectable in the picker (CR-031). Empty either because the Sakhi has none
+   * or because the fetch failed — [motherLoadFailed] distinguishes the two. */
+  val motherOptions: List<LinkedMother> = emptyList(),
+  /** True while the mother list is being fetched. */
+  val isLoadingMothers: Boolean = false,
+  /** True when nothing could be fetched **and** nothing was ever cached, so the Sakhi must come
+   * online once before she can link a mother. Distinct from an empty list, which legitimately means
+   * "no registered mothers yet". */
+  val motherLoadFailed: Boolean = false,
+  /** The linked mother's beneficiary UUID, or null on the direct path / before selection. */
+  val selectedMotherId: String? = null,
+  /** Question codes currently holding a value copied from the mother's record, so the UI can show
+   * the "From mother's record" hint. A code leaves this set the moment the Sakhi edits it. */
+  val motherPrefilledCodes: Set<String> = emptySet(),
 )
 
 /**
@@ -125,10 +158,24 @@ class DynamicChildRegistrationViewModel @Inject constructor(
   private val lookupRepository: LookupRepository,
   private val geographyFieldOptionsResolver: GeographyFieldOptionsResolver,
   private val draftRepository: ChildFormDraftRepository,
+  private val motherLinkRepository: MotherLinkRepository,
 ) : ViewModel() {
 
   private val _uiState = MutableStateFlow(ChildFormUiState())
   val uiState: StateFlow<ChildFormUiState> = _uiState.asStateFlow()
+
+  /**
+   * One-shot signal that the Sakhi answered "no" to `did_we_receive_consent`. The screen reacts by
+   * toasting and leaving enrollment — refusal is a hard stop, so there is nothing left to render
+   * and no reason to keep the half-entered form alive.
+   *
+   * An event rather than [ChildFormUiState] state, for the same reasons as the mother flow: state
+   * would re-fire the navigation on recomposition/config change, and a second refusal would emit an
+   * equal value and be swallowed. `extraBufferCapacity = 1` lets [tryEmit] succeed from the
+   * non-suspending [setAnswer].
+   */
+  private val _consentRefused = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+  val consentRefused: SharedFlow<Unit> = _consentRefused.asSharedFlow()
 
   val beneficiaryId: String = UUID.randomUUID().toString()
   private val localSubmissionUuid: String = newLocalSubmissionUuid()
@@ -154,14 +201,174 @@ class DynamicChildRegistrationViewModel @Inject constructor(
         return@launch
       }
       _uiState.update { it.copy(isLoading = false, version = version) }
+      prefillRegistrationDate()
+      prefillAutoSelectedGeography()
       recomputeDerivedFields()
     }
   }
 
-  fun setAnswer(questionCode: String, value: String?) {
-    _uiState.update { it.copy(answers = it.answers.withSingleValue(questionCode, value)) }
-    recomputeDerivedFields()
+  /**
+   * Pre-fills the registration date with today, per form spec row 13 ("Automatically popup todays
+   * date"), so the Sakhi never types it.
+   *
+   * Its absence here was the reported defect: CHILD_REGISTRATION v2 declares `registrtion_date` as
+   * `required: true`, so the field rendered empty and the "Infant Details" gate stayed blocked until
+   * the Sakhi picked today's date by hand. Shared with the mother flow via [RegistrationDatePrefill]
+   * rather than cloned — see that object's KDoc for the skip/fallback rules.
+   */
+  private fun prefillRegistrationDate() {
+    val fields = _uiState.value.version?.schemaJson.orEmpty()
+    _uiState.update {
+      it.copy(answers = RegistrationDatePrefill.apply(fields, it.answers, registrationDate))
+    }
   }
+
+  /**
+   * Pre-fills every geography field (and `project_name`) that resolves to exactly one backend unit
+   * with that unit's id, so the value is present in the submission even where the field renders
+   * read-only and the Sakhi never taps it.
+   *
+   * Mirror of the mother flow's `prefillAutoSelectedGeography` (CR-018). Its absence here was the
+   * CR-020 bug where Pada / PHC / Sub Centre rendered as empty dropdowns and the "Infant Details"
+   * button stayed permanently disabled: nothing ever wrote those answers, so the required-field
+   * gate could never be satisfied.
+   *
+   * Skips a field that already has an answer so a resumed draft's earlier pick isn't clobbered, and
+   * skips levels the backend ships with several units (those stay an interactive dropdown). Options
+   * come from [FormVersion.geography]/the profile only — no network — so this is safe inline on load.
+   */
+  private suspend fun prefillAutoSelectedGeography() {
+    val version = _uiState.value.version ?: return
+    val geography = version.geography.orEmpty()
+    var answers = _uiState.value.answers
+    version.schemaJson
+      .filter { it.questionCode in GeographyQuestionCodes.ALL }
+      .forEach { field ->
+        if (!answers.valueOf(field.questionCode).isNullOrBlank()) return@forEach
+        val only = geographyFieldOptionsResolver
+          .optionsFromVersionGeography(field.questionCode, geography)
+          .singleOrNull() ?: return@forEach
+        answers = answers.withSingleValue(field.questionCode, only.valueCode)
+      }
+    _uiState.update { it.copy(answers = answers) }
+  }
+
+  fun setAnswer(questionCode: String, value: String?) {
+    val previousPath = _uiState.value.answers.valueOf(WHO_ARE_YOU_REGISTERING)
+    _uiState.update {
+      it.copy(
+        answers = it.answers.withSingleValue(questionCode, value),
+        // The Sakhi has taken ownership of this field: drop the "From mother's record" hint and,
+        // just as importantly, exempt the value from being cleared by a later path switch.
+        motherPrefilledCodes = it.motherPrefilledCodes - questionCode,
+      )
+    }
+    if (questionCode == WHO_ARE_YOU_REGISTERING && value != previousPath) {
+      onRegistrationPathChanged(value)
+    }
+    recomputeDerivedFields()
+    // Refusing consent ends the registration outright (SRS / form spec: "If No → stop form"), so it
+    // is signalled here — the single place a "no" can enter the answers. The mother-record
+    // inheritance (MotherPrefill) only ever writes "yes", never "no".
+    if (questionCode == DID_WE_RECEIVE_CONSENT && value == CONSENT_NO) {
+      _consentRefused.tryEmit(Unit)
+    }
+  }
+
+  /**
+   * Reacts to the row-1 path radio changing.
+   *
+   * Leaving the registered-mother path discards the link and every *untouched* inherited value —
+   * they describe a mother this registration is no longer attached to. Values the Sakhi edited
+   * herself have already left `motherPrefilledCodes` and are kept, because re-typing an address just
+   * because she changed her mind about the path would be its own bug.
+   *
+   * Entering the path fetches the picker list lazily, so a direct-path registration makes no network
+   * call at all.
+   */
+  private fun onRegistrationPathChanged(newPath: String?) {
+    when (newPath) {
+      PATH_REGISTERED_MOTHER -> loadMothers()
+      else -> _uiState.update {
+        it.copy(
+          answers = MotherPrefill.clear(it.answers, it.motherPrefilledCodes),
+          motherPrefilledCodes = emptySet(),
+          selectedMotherId = null,
+          motherLoadFailed = false,
+        )
+      }
+    }
+  }
+
+  /** Fetches the selectable mothers. Re-entrant-safe; also the retry entry point for the screen's
+   * offline empty state. */
+  fun loadMothers() {
+    if (_uiState.value.isLoadingMothers) return
+    viewModelScope.launch {
+      _uiState.update { it.copy(isLoadingMothers = true, motherLoadFailed = false) }
+      val mothers = motherLinkRepository.getRegisteredMothers()
+      _uiState.update {
+        it.copy(
+          isLoadingMothers = false,
+          motherOptions = mothers.orEmpty(),
+          // null (never fetched, nothing cached) is a different state from an empty list, and the
+          // screen words them differently — "connect once" vs "register the mother first".
+          motherLoadFailed = mothers == null,
+        )
+      }
+    }
+  }
+
+  /**
+   * Links [mother] to this registration and copies her record onto the draft (CR-031).
+   *
+   * The consent lookup is a second call that is allowed to fail: offline, the geography/name/DOB
+   * prefill still lands and only consent inheritance is skipped. Re-selecting overwrites values the
+   * Sakhi edited since the previous selection — an explicit re-pick is authoritative.
+   */
+  fun selectMother(mother: LinkedMother) {
+    val version = _uiState.value.version ?: return
+    viewModelScope.launch {
+      val consent = motherLinkRepository.getMotherConsent(mother.id)
+      val result = MotherPrefill.apply(
+        answers = _uiState.value.answers,
+        mother = mother,
+        consent = consent,
+        geography = version.geography.orEmpty(),
+      )
+      _uiState.update {
+        it.copy(
+          answers = result.answers,
+          selectedMotherId = mother.id,
+          motherPrefilledCodes = result.prefilledCodes,
+        )
+      }
+      recomputeDerivedFields()
+    }
+  }
+
+  /**
+   * Display text for the mother-link field: the selected mother's name, never her UUID.
+   *
+   * Falls back to the raw id when the selection isn't in the current list — a resumed draft, or a
+   * mother closed since — so the Sakhi sees that *something* is linked and can re-pick, rather than
+   * an empty field that looks like an unanswered required question.
+   */
+  fun selectedMotherLabel(): String? {
+    val state = _uiState.value
+    val id = state.selectedMotherId ?: state.answers.valueOf(MOTHER_BENEFICIARY_ID) ?: return null
+    return state.motherOptions.firstOrNull { it.id == id }?.fullName?.takeIf { it.isNotBlank() } ?: id
+  }
+
+  /** Whether [questionCode] currently holds a value copied from the linked mother's record. */
+  fun isPrefilledFromMother(questionCode: String): Boolean =
+    questionCode in _uiState.value.motherPrefilledCodes
+
+  /** Whether the mother-link picker replaces the generic renderer for this field. True only for
+   * `mother_beneficiary_id` on the registered-mother path. */
+  fun isMotherLinkField(field: FormFieldSchema): Boolean =
+    field.questionCode == MOTHER_BENEFICIARY_ID &&
+      _uiState.value.answers.valueOf(WHO_ARE_YOU_REGISTERING) == PATH_REGISTERED_MOTHER
 
   fun setMultiAnswer(questionCode: String, values: List<String>) {
     _uiState.update { it.copy(answers = it.answers.withMultiValue(questionCode, values)) }
@@ -208,16 +415,15 @@ class DynamicChildRegistrationViewModel @Inject constructor(
     revalidate()
   }
 
-  /** Recomputes [ChildFormUiState.validationError] from the current answers (eligibility + consent
-   * gates). Kept on state so the screen can render it inline and [isReadyToSubmit] can gate on it. */
+  /** Recomputes [ChildFormUiState.validationError] from the current answers (age-eligibility
+   * gates). Kept on state so the screen can render it inline and [isReadyToSubmit] can gate on it.
+   * Consent is NOT one of these — a refusal exits the flow rather than showing an inline error. */
   private fun revalidate() {
     val answers = _uiState.value.answers
     _uiState.update { it.copy(validationError = computeValidationError(answers)) }
   }
 
   private fun computeValidationError(answers: FormAnswers): ChildValidationError? {
-    if (answers.valueOf(DID_WE_RECEIVE_CONSENT) == CONSENT_NO) return ChildValidationError.CONSENT_REFUSED
-
     val dobRaw = answers.valueOf(DATE_OF_BIRTH_OF_INFANT) ?: return null
     val dob = runCatching { LocalDate.parse(dobRaw) }.getOrNull() ?: return null
     val ageDays = ChronoUnit.DAYS.between(dob, registrationDate)
@@ -243,9 +449,35 @@ class DynamicChildRegistrationViewModel @Inject constructor(
     return version.schemaJson.filter { field ->
       FormVisibilityEvaluator.isVisible(field, state.answers) &&
         field.questionCode !in ChildNonRenderableQuestionCodes.ALL &&
-        !(field.questionCode == MOTHER_BENEFICIARY_ID && path == PATH_DIRECT)
+        !hiddenByDirectPathFallback(field, path)
     }
   }
+
+  /**
+   * App-side fallback that hides `mother_beneficiary_id` on the direct path (mother not registered →
+   * no id to link).
+   *
+   * **This rule belongs in the schema, not here.** The backend's validator
+   * (`form-validation.ts`) only skips a required field when the schema declares `visibleWhen` for
+   * it; a rule that exists solely in the app is invisible to the backend, which then rejects the
+   * submission with `422 — Missing required field: mother_beneficiary_id`. That is a live defect
+   * pending a schema change to add:
+   *
+   * ```
+   * "visibleWhen": { "field": "who_are_you_registering_in_the_program",
+   *                  "operator": "eq",
+   *                  "value": "child_of_a_registered_pregnant_woman" }
+   * ```
+   *
+   * Written to RETIRE ITSELF: once the schema carries that `visibleWhen`, the generic
+   * [FormVisibilityEvaluator] above already hides the field, this fallback stops applying, and both
+   * sides derive the rule from one declaration. No further app release is needed to pick the fix up
+   * — and this whole function can then be deleted.
+   */
+  private fun hiddenByDirectPathFallback(field: FormFieldSchema, path: String?): Boolean =
+    field.questionCode == MOTHER_BENEFICIARY_ID &&
+      field.visibleWhen == null &&
+      path == PATH_DIRECT
 
   /** This field's tab label — falls back to [FALLBACK_SECTION] if the schema didn't tag one. */
   fun sectionOf(field: FormFieldSchema): String = field.section ?: FALLBACK_SECTION
@@ -262,7 +494,16 @@ class DynamicChildRegistrationViewModel @Inject constructor(
   suspend fun optionsFor(field: FormFieldSchema): List<FormFieldOption> {
     field.options?.let { return it.sortedBy(FormFieldOption::sortOrder) }
     if (field.questionCode in GeographyQuestionCodes.ALL) {
-      return geographyFieldOptionsResolver.optionsFor(field.questionCode, _uiState.value.answers)
+      // Geography answers must be the backend's own geographyUnitIds, shipped in the active
+      // version's `geography` — never the static GeographyRepository cascade. Using the hardcoded
+      // cascade is what produced `pii.phcId does not refer to a known geography unit` (HTTP 422) on
+      // the mother flow (CR-018), and here it also returned NO options at all for Pada/PHC/Sub
+      // Centre (each requires an already-answered village), which left those required fields
+      // unfillable and the section's Next button permanently disabled.
+      return geographyFieldOptionsResolver.optionsFromVersionGeography(
+        field.questionCode,
+        _uiState.value.version?.geography.orEmpty(),
+      )
     }
     val categoryCode = field.lookupCategoryCode ?: return emptyList()
     return lookupRepository.getValues(categoryCode)
@@ -276,8 +517,16 @@ class DynamicChildRegistrationViewModel @Inject constructor(
     return FormCrossFieldValidator.violatedRules(version.validationJson, state.answers)
   }
 
-  /** Whether every required field in [fields] is answered and every `number` field with a
-   * `numericRange` satisfies it. Shared by [isReadyToSubmit] and [isSectionReady]. */
+  /**
+   * Whether every required field in [fields] is answered, every `number` field with a
+   * `numericRange` satisfies it, and every `date` field with a [FormDateRuleset] rule holds an
+   * acceptable value. Shared by [isReadyToSubmit] and [isSectionReady].
+   *
+   * The date check was missing here while the mother flow had it, so a rule-breaking date (e.g. a
+   * mother DOB outside 10-50) rendered an inline error under the field but still let Next/Submit
+   * through. A date field the ruleset has no rule for is unconstrained, so this is inert for the
+   * child form's other dates.
+   */
   private fun fieldsAnsweredAndInRange(fields: List<FormFieldSchema>): Boolean {
     val state = _uiState.value
     val allRequiredAnswered = fields.all { field ->
@@ -301,23 +550,27 @@ class DynamicChildRegistrationViewModel @Inject constructor(
         FormNumericRangeValidator.isWithinRange(field.numericRange, entered)
       }
 
-    return allRequiredAnswered && allRangesValid
+    val allDatesValid =
+      FormDateRuleset.allDatesValid(fields, state.answers, registrationDate)
+
+    return allRequiredAnswered && allRangesValid && allDatesValid
   }
 
   /** Per-tab gate for the "next tab" button: every visible required field in [section] answered and
    * in range. Cross-field/eligibility rules are only enforced at final submit via [isReadyToSubmit]. */
   fun isSectionReady(section: String): Boolean {
     if (_uiState.value.version == null) return false
-    // Refused consent blocks forward navigation on the tab that holds the consent question, so the
-    // Sakhi is stopped right there rather than only at final Submit.
-    val holdsConsent = fieldsInSection(section).any { it.questionCode == DID_WE_RECEIVE_CONSENT }
-    if (holdsConsent && _uiState.value.validationError == ChildValidationError.CONSENT_REFUSED) return false
+    // No consent gate here: a refusal now leaves the screen entirely (see [consentRefused]), so
+    // there is no state in which this would be evaluated with consent == "no".
     return fieldsAnsweredAndInRange(fieldsInSection(section))
   }
 
   /** Whether every currently-visible required field has an answer, every `number` field satisfies
-   * its range, no cross-field rule is violated, and there is no client-side eligibility/consent
-   * error ([ChildFormUiState.validationError]). */
+   * its range, no cross-field rule is violated, and there is no client-side eligibility error
+   * ([ChildFormUiState.validationError]). Consent is not re-checked — a refusal exits the flow
+   * before Submit is reachable, and
+   * [org.armman.sakhi.data.childregistration.ChildRegistrationSubmissionMapper] still refuses to
+   * build a payload without a "yes" as a last line of defence. */
   fun isReadyToSubmit(): Boolean {
     if (_uiState.value.version == null) return false
     return fieldsAnsweredAndInRange(visibleFields()) &&
@@ -399,6 +652,9 @@ class DynamicChildRegistrationViewModel @Inject constructor(
             is ChildFormSubmitResult.DuplicateConflict ->
               SubmissionState.Failed(ChildSubmitFailureKind.DUPLICATE, result.message)
             is ChildFormSubmitResult.Failed ->
+              // result.message is already the Sakhi-facing sentence — ChildFormSyncExecutor cleans it
+              // via userFacingMessage() (ChildRegistrationSubmissionException.userMessage), so the raw
+              // HTTP/JSON body never reaches here. No further sanitization at this layer.
               SubmissionState.Failed(ChildSubmitFailureKind.GENERIC, result.message)
           },
         )

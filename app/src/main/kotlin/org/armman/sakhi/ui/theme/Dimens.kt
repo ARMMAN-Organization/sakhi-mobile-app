@@ -7,6 +7,15 @@ object Dimens {
   val ScreenPadding = 24.dp
   val ItemSpacing = 16.dp
   val SmallSpacing = 8.dp
+
+  /**
+   * Bottom `contentPadding` for the dynamic form field lists — deliberately larger than
+   * [ScreenPadding]. It is scroll headroom, not visual spacing: `bringIntoView` can only scroll as
+   * far as the content extends, so a field near the end of a section needs empty space beneath it to
+   * be liftable clear of the keyboard. Sized to roughly one field's height so the last question can
+   * still reach the middle of the visible area.
+   */
+  val FormListBottomSlack = 120.dp
   val ButtonHeight = 48.dp
   val CardRadius = 16.dp
   val TileRadius = 12.dp

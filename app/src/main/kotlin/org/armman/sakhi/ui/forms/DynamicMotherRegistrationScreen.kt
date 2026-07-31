@@ -83,6 +83,9 @@ fun DynamicMotherRegistrationScreen(
    * invoked from the Complete screen's back, not automatically on submit, so the "Enrollment
    * Complete!" state is actually shown (mirrors the static flow's COMPLETE step). */
   onSubmitted: (beneficiaryId: String) -> Unit,
+  /** Leaves the enrollment sub-graph (→ Home) when the beneficiary refuses consent — the
+   * registration is abandoned, so nothing is saved and the form is not left on screen. */
+  onConsentRefused: () -> Unit,
   modifier: Modifier = Modifier,
   viewModel: DynamicMotherRegistrationViewModel = hiltViewModel(),
 ) {
@@ -101,6 +104,17 @@ fun DynamicMotherRegistrationScreen(
   LaunchedEffect(state.submissionState) {
     (state.submissionState as? SubmissionState.Failed)?.let { failed ->
       snackbarHostState.showSnackbar(message = failed.message, duration = SnackbarDuration.Long)
+    }
+  }
+
+  // "Did we receive consent? → No" aborts the registration on the spot: a toast explains why, then
+  // the Sakhi is returned Home. A Toast (not the snackbar below) because the host is destroyed by
+  // the navigation that follows in the same frame — a snackbar would never be seen.
+  val consentRefusedMessage = stringResource(R.string.enrollment_consent_refused_toast)
+  LaunchedEffect(Unit) {
+    viewModel.consentRefused.collect {
+      Toast.makeText(context, consentRefusedMessage, Toast.LENGTH_LONG).show()
+      onConsentRefused()
     }
   }
 
@@ -251,6 +265,9 @@ private fun FormContent(
           viewModel = viewModel,
           crossFieldMessages = crossFieldMessages,
           isConsentSection = currentSchemaSection == CONSENT_SECTION,
+          // Identifies which section the reused list is showing, so it can reset to the first
+          // question on a tab switch (see DynamicFormFieldList).
+          sectionKey = currentSchemaSection,
           // Only scroll within the list once it's the section the flagged field lives on — the tab
           // switch below moves there first, then this list (now holding the field) scrolls to it.
           scrollTarget = state.errorScroll?.takeIf { it.section == currentSchemaSection },
@@ -265,16 +282,6 @@ private fun FormContent(
     if (isSummaryTab && crossFieldMessages.isNotEmpty()) {
       StatusBanner(
         message = crossFieldMessages.values.joinToString(separator = "\n"),
-        variant = StatusBannerVariant.Error,
-        modifier = Modifier.padding(horizontal = Dimens.ScreenPadding, vertical = Dimens.SmallSpacing),
-      )
-    }
-
-    // Consent refused ("Did we receive consent? → No") is a hard stop: a blocking banner above the
-    // action bar, with Next/Submit disabled by the ViewModel gates so the Sakhi stays put.
-    if (viewModel.consentRefused()) {
-      StatusBanner(
-        message = stringResource(R.string.enrollment_consent_refused),
         variant = StatusBannerVariant.Error,
         modifier = Modifier.padding(horizontal = Dimens.ScreenPadding, vertical = Dimens.SmallSpacing),
       )
@@ -302,11 +309,24 @@ private fun DynamicFormFieldList(
   /** Violated cross-field rule messages keyed by `question_code`; see [CrossFieldErrorAttribution]. */
   crossFieldMessages: Map<String, String>,
   isConsentSection: Boolean,
+  /** Title of the section currently rendered; drives the scroll reset below. */
+  sectionKey: String?,
   scrollTarget: ErrorScrollTarget?,
   onScrolled: () -> Unit,
 ) {
   val context = LocalContext.current
   val listState = rememberLazyListState()
+
+  // Every section reuses this composable instance (only [fields] changes), so [listState] — and the
+  // previous section's scroll offset with it — survives a tab switch and lands the Sakhi mid-form.
+  // Reset to the first question whenever the section changes. Keyed on [sectionKey] rather than
+  // [fields] so conditionally revealed fields (visibleWhen) appearing mid-section don't yank the
+  // list back to the top. See [FormSectionScroll.shouldResetToTop] for the error-scroll guard.
+  LaunchedEffect(sectionKey) {
+    if (FormSectionScroll.shouldResetToTop(hasPendingErrorScroll = scrollTarget != null)) {
+      listState.scrollToItem(0)
+    }
+  }
 
   // Scroll to the flagged field once this list is the one holding it. Keyed on the one-shot token
   // AND [fields] so it also fires right after a tab switch swaps in this section's fields (the token
@@ -345,7 +365,15 @@ private fun DynamicFormFieldList(
 
   LazyColumn(
     state = listState,
-    contentPadding = PaddingValues(Dimens.ScreenPadding),
+    // Extra bottom slack, not symmetric padding: `bringIntoView` can only scroll as far as the
+    // content allows, so without room past the last field a focused field near the end of a section
+    // stays pinned against the viewport edge (or clipped) however hard it asks to be revealed.
+    contentPadding = PaddingValues(
+      start = Dimens.ScreenPadding,
+      end = Dimens.ScreenPadding,
+      top = Dimens.ScreenPadding,
+      bottom = Dimens.FormListBottomSlack,
+    ),
     verticalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
     modifier = Modifier.fillMaxSize(),
   ) {

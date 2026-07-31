@@ -15,4 +15,5 @@ captures/
 
 # Runtime API debug logs (ApiFileLoggingInterceptor)
 api-calls.jsonl
+api-calls-live.jsonl
 api-calls.log

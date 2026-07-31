@@ -10,9 +10,15 @@
     android:label="@string/app_name"
     android:supportsRtl="true"
     android:theme="@style/Theme.ArogyaSakhi">
+    <!-- windowSoftInputMode=adjustResize is REQUIRED, not cosmetic: without it the window pans
+         instead of resizing, the IME inset is never dispatched, and every `safeDrawingPadding()`
+         in the UI resolves its bottom inset to 0dp — so the keyboard covers the focused field on
+         every screen (see WindowInsetsConfigTest). Pairs with enableEdgeToEdge() in MainActivity;
+         both are needed, neither works alone. -->
     <activity
       android:name=".MainActivity"
-      android:exported="true">
+      android:exported="true"
+      android:windowSoftInputMode="adjustResize">
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />

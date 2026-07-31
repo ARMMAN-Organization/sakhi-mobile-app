@@ -59,11 +59,20 @@ object SubmitErrorCopy {
    * hands over when the response isn't the expected envelope). Anything else falls back to
    * [GENERIC].
    */
-  fun forApiError(message: String?, fieldErrors: Map<String, String>): String {
+  fun forApiError(
+    message: String?,
+    fieldErrors: Map<String, String>,
+    violations: List<String> = emptyList(),
+  ): String {
     val fromFields = fieldErrors.values
       .mapNotNull { humanize(it) }
       .distinct()
     if (fromFields.isNotEmpty()) return fromFields.joinToString("\n")
+    // Schema-validator violations (422 from the submissions endpoint) name a question_code, not a
+    // DTO path, so they can't be pinned to a field — but they are still far more useful than the
+    // envelope's generic "Submission failed validation." See ApiError.violations.
+    val fromViolations = violations.mapNotNull { humanize(it) }.distinct()
+    if (fromViolations.isNotEmpty()) return fromViolations.joinToString("\n")
     return humanize(message) ?: GENERIC
   }
 

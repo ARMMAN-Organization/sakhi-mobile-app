@@ -4,14 +4,29 @@ import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
 /**
- * Date rules for the mother-enrollment form, from the `Registration_PW_D` tab of the form spec
- * ("Revised App Form Final 20.3.26"):
+ * Date rules from the form spec ("Revised App Form Final 20.3.26").
  *
+ * From the `Registration_PW_D` (mother enrollment) tab:
  * - **LMP date** (row 7): "Cannot be future and on or after ANC registration date. Difference
  *   between registration and LMP should be >30 days and <240 days."
  * - **Registration date** (row 13): "Automatically popup todays date" — so never in the future.
  * - **Date of birth** (row 23): "Should accept only those dates whose age will be in range 10-50
  *   years. Error message to be shown if the age is out of the range."
+ *
+ * From the `Infant Registration form` (child registration) tab:
+ * - **Age or DOB of the mother** (row 20.0): same 10-50 year range, so [MOTHER_DOB_QUESTION_CODE]
+ *   shares the DOB branch rather than duplicating the rule — and therefore also shares the
+ *   already-translated `enrollment_error_age_range` message via [Violation.AGE_OUT_OF_RANGE].
+ * - **Date of birth of infant** (row 6.0): "Should not accept future date." The row's flat
+ *   `0-183 days` is SUPERSEDED — SRS FR-S-2.3 splits the window by registration path (0-183 days
+ *   when linked to an enrolled mother, 0-365 days when registered directly), and the backend's
+ *   `create-beneficiary.dto.ts` `CHILD_AGE_CEILING_DAYS` enforces exactly that split. This file
+ *   therefore bounds the picker per path; see [CHILD_AGE_CEILING_DAYS_MOTHER_LINKED].
+ *   **Bounds only — no [Violation] case**: `DynamicChildRegistrationViewModel` already detects an
+ *   out-of-window or future infant DOB with three path-specific localized messages
+ *   (`INELIGIBLE_MOTHER`/`INELIGIBLE_DIRECT`/`DOB_FUTURE`), so adding a violation here would render a
+ *   SECOND error for one problem. Division of labour: this file prevents the bad pick, the ViewModel
+ *   explains a bad value that is already in state (an older draft, a path switched after the fact).
  *
  * These live client-side because the backend cannot express them: [FormFieldSchema] carries only
  * `numericRange` (no date bounds), and [FormCrossFieldValidator]'s `LTE` rule parses its operands
@@ -26,9 +41,28 @@ import java.time.temporal.ChronoUnit
  */
 object FormDateRuleset {
 
-  /** Inclusive age range the beneficiary's DOB must produce (spec row 23). */
+  /** Inclusive age range a person's DOB must produce — the beneficiary's on the mother form
+   * (spec row 23) and the mother's on the child form (Infant Registration row 20.0). */
   const val MIN_AGE_YEARS = 10L
   const val MAX_AGE_YEARS = 50L
+
+  /**
+   * Inclusive upper bound, in days, on the infant's age at registration when the child is linked to
+   * an enrolled mother (SRS FR-S-2.3: "child must be registered between 0 and 6 months (0-183
+   * days)"). Named to match the backend's `CHILD_AGE_CEILING_DAYS.MOTHER_LINKED` so the two are
+   * greppable together — they must always agree, or the app lets through a submission the backend
+   * then rejects.
+   */
+  const val CHILD_AGE_CEILING_DAYS_MOTHER_LINKED = 183L
+
+  /**
+   * Inclusive upper bound, in days, on the infant's age when registered directly (SRS FR-S-2.3:
+   * "child can be registered between 0 and 12 months (0-365 days). Mother data is not linked").
+   * Backend counterpart: `CHILD_AGE_CEILING_DAYS.INDEPENDENT`.
+   *
+   * Also the fallback used before the path radio is answered — see [childAgeCeilingDays].
+   */
+  const val CHILD_AGE_CEILING_DAYS_INDEPENDENT = 365L
 
   /**
    * Spec row 7 states the registration-to-LMP difference must be strictly `>30` and `<240` days,
@@ -46,7 +80,8 @@ object FormDateRuleset {
    * the static enrollment steps.
    */
   enum class Violation {
-    /** DOB implies an age outside [MIN_AGE_YEARS]..[MAX_AGE_YEARS] (includes any future DOB). */
+    /** A DOB ([DOB_QUESTION_CODE] or [MOTHER_DOB_QUESTION_CODE]) implies an age outside
+     * [MIN_AGE_YEARS]..[MAX_AGE_YEARS] (includes any future DOB). */
     AGE_OUT_OF_RANGE,
 
     /** LMP is after the registration date. Reported separately from the window cases because
@@ -82,7 +117,7 @@ object FormDateRuleset {
   ): Bounds? {
     val reference = referenceDate(answers, registrationDate)
     return when (questionCode) {
-      DOB_QUESTION_CODE -> Bounds(
+      DOB_QUESTION_CODE, MOTHER_DOB_QUESTION_CODE -> Bounds(
         // A DOB on this boundary still floors to MAX_AGE_YEARS; one day earlier would floor to
         // MAX_AGE_YEARS + 1 and be out of range.
         min = reference.minusYears(MAX_AGE_YEARS + 1).plusDays(1),
@@ -94,11 +129,39 @@ object FormDateRuleset {
         max = reference.minusDays(LMP_MIN_DAYS_BEFORE_REGISTRATION),
       )
 
-      REGISTRATION_DATE_QUESTION_CODE -> Bounds(min = null, max = registrationDate)
+      // Matches BOTH published spellings — see REGISTRATION_DATE_QUESTION_CODES.
+      in REGISTRATION_DATE_QUESTION_CODES -> Bounds(min = null, max = registrationDate)
+
+      // Measured against registrationDate rather than `reference` on purpose: the ViewModel's
+      // eligibility gate counts days from the same registrationDate, and prevention must not be able
+      // to disagree with detection. CHILD_REGISTRATION v2 does declare a registration-date question,
+      // but it is prefilled with — and capped at — today, so the two values agree in practice; this
+      // keeps them agreeing even if a Sakhi back-dates it.
+      ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT -> Bounds(
+        min = registrationDate.minusDays(childAgeCeilingDays(answers)),
+        // "Should not accept future date" (spec row 6.0) — an infant aged 0 days is valid, so today
+        // is selectable.
+        max = registrationDate,
+      )
 
       else -> null
     }
   }
+
+  /**
+   * The eligibility ceiling that applies to the infant DOB, per SRS FR-S-2.3's two sub-rules.
+   *
+   * An unanswered — or unrecognised — path falls back to the WIDER window. The path radio sits on an
+   * earlier tab than the DOB, so in practice it is answered first; restricting the picker to 183 days
+   * before we know the path would block legitimate direct registrations with no way for the Sakhi to
+   * see why. The ViewModel's detection gate still refuses a value that is out of window for the path
+   * she eventually picks, so the wider fallback cannot let a bad submission through.
+   */
+  private fun childAgeCeilingDays(answers: FormAnswers): Long =
+    when (answers.valueOf(ChildRegistrationQuestionCodes.WHO_ARE_YOU_REGISTERING)) {
+      ChildRegistrationQuestionCodes.PATH_REGISTERED_MOTHER -> CHILD_AGE_CEILING_DAYS_MOTHER_LINKED
+      else -> CHILD_AGE_CEILING_DAYS_INDEPENDENT
+    }
 
   /**
    * The rule [questionCode]'s current answer breaks, or null if it's fine — the detection half of
@@ -117,7 +180,8 @@ object FormDateRuleset {
     val reference = referenceDate(answers, registrationDate)
 
     return when (questionCode) {
-      DOB_QUESTION_CODE -> {
+      DOB_QUESTION_CODE, MOTHER_DOB_QUESTION_CODE -> {
+        // Floored whole years, per the spec's "consider floor".
         val age = ChronoUnit.YEARS.between(value, reference)
         Violation.AGE_OUT_OF_RANGE.takeIf { age < MIN_AGE_YEARS || age > MAX_AGE_YEARS }
       }
@@ -132,9 +196,14 @@ object FormDateRuleset {
         }
       }
 
-      REGISTRATION_DATE_QUESTION_CODE ->
+      in REGISTRATION_DATE_QUESTION_CODES ->
         Violation.REGISTRATION_DATE_IN_FUTURE.takeIf { value.isAfter(registrationDate) }
 
+      // NOTE: DATE_OF_BIRTH_OF_INFANT is deliberately absent, even though `boundsFor` bounds it.
+      // Its eligibility windows are detected by DynamicChildRegistrationViewModel, which has the
+      // path-specific messages; reporting them here too would show the Sakhi two errors for one
+      // problem, and would make `allDatesValid` a second gate over the same rule. Do not add it
+      // without removing the ViewModel's gate first. See this object's KDoc.
       else -> null
     }
   }
@@ -161,7 +230,7 @@ object FormDateRuleset {
     (answeredRegistrationDate(answers) ?: registrationDate).coerceAtMost(registrationDate)
 
   private fun answeredRegistrationDate(answers: FormAnswers): LocalDate? =
-    parse(answers.valueOf(REGISTRATION_DATE_QUESTION_CODE))
+    parse(answers.registrationDateAnswer())
 
   private fun parse(raw: String?): LocalDate? =
     raw?.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() }

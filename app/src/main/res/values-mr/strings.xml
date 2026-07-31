@@ -188,6 +188,7 @@
   <string name="enrollment_consent_retake_photo">संमती फॉर्मचा फोटो पुन्हा काढा</string>
   <string name="enrollment_consent_photo_captured">फोटो घेतला आहे</string>
   <string name="enrollment_consent_refused">संमती मिळाली नाही — नोंदणी पुढे जाऊ शकत नाही.</string>
+  <string name="enrollment_consent_refused_toast">लाभार्थीच्या संमतीशिवाय आम्ही नोंदणी पुढे करू शकत नाही.</string>
   <string name="enrollment_next_personal_info">वैयक्तिक माहिती</string>
   <string name="enrollment_step_pending">हा विभाग लवकरच येत आहे</string>
   <string name="enrollment_complete_title">नोंदणी पूर्ण झाली!</string>
@@ -474,11 +475,23 @@
 
   <!-- Children Register (CR-020) -->
   <string name="child_reg_title">बाल नोंदणी</string>
-  <string name="child_reg_consent_refused">लाभार्थीच्या संमतीशिवाय नोंदणी पुढे करता येणार नाही.</string>
   <string name="child_reg_dob_future">जन्मतारीख भविष्यातील असू शकत नाही.</string>
   <string name="child_reg_ineligible_direct">हे बाळ १२ महिन्यांपेक्षा (३६५ दिवस) मोठे आहे, त्यामुळे थेट नोंदणी करता येणार नाही.</string>
   <string name="child_reg_ineligible_mother">नोंदणीकृत मातेच्या बाळाची नोंदणी जन्मानंतर ६ महिन्यांच्या (१८३ दिवस) आत करणे आवश्यक आहे.</string>
   <string name="child_reg_duplicate">जुळणारे बाळाचे रेकॉर्ड आधीच अस्तित्वात आहे. नवीन रेकॉर्ड म्हणून नोंदणी सुरू ठेवायची का?</string>
   <string name="child_reg_submit_failed">नोंदणी सबमिट करता आली नाही. कृपया फॉर्म तपासून पुन्हा प्रयत्न करा.</string>
+
+  <!-- Mother link &amp; prefill (CR-031) -->
+  <string name="child_reg_mother_link_placeholder">माता निवडा</string>
+  <string name="child_reg_mother_link_title">माता निवडा</string>
+  <string name="child_reg_mother_link_search_label">नावाने शोधा</string>
+  <string name="child_reg_mother_link_age_years">%1$d वर्षे</string>
+  <string name="child_reg_mother_link_no_delivery">प्रसूती नोंद नाही</string>
+  <string name="child_reg_mother_link_unnamed">नाव नोंदवलेले नाही</string>
+  <string name="child_reg_mother_link_none">अद्याप कोणतीही नोंदणीकृत माता नाही. आधी मातेची नोंदणी करा, किंवा या बाळाची थेट नोंदणी करा.</string>
+  <string name="child_reg_mother_link_no_match">त्या नावाची कोणतीही माता आढळली नाही.</string>
+  <string name="child_reg_mother_link_offline">तुमच्या नोंदणीकृत माता लोड करण्यासाठी एकदा इंटरनेटला जोडा. तुम्ही या बाळाची थेट नोंदणी करू शकता.</string>
+  <string name="child_reg_mother_link_retry">पुन्हा प्रयत्न करा</string>
+  <string name="child_reg_mother_prefill_hint">मातेच्या नोंदीतून</string>
   <string name="field_required_content_description">%1$s, आवश्यक</string>
 </resources>

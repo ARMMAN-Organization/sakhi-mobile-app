@@ -142,6 +142,13 @@ fun AppNavHost() {
             popUpTo(Routes.ENROLLMENT) { inclusive = true }
           }
         },
+        // Consent refused: same exit as a completed enrollment. Clearing the sub-graph matters more
+        // here — system back must not re-enter a form the beneficiary declined.
+        onConsentRefused = {
+          navController.navigate(Routes.HOME) {
+            popUpTo(Routes.ENROLLMENT) { inclusive = true }
+          }
+        },
       )
     }
     composable(Routes.CHILD_REGISTRATION) {
@@ -150,6 +157,13 @@ fun AppNavHost() {
         onSubmitted = {
           // Back to Home, clearing the whole Enrollment sub-graph so system back doesn't re-enter
           // it — same behaviour as the mother-registration path.
+          navController.navigate(Routes.HOME) {
+            popUpTo(Routes.ENROLLMENT) { inclusive = true }
+          }
+        },
+        // Consent refused: same exit as a completed registration. Clearing the sub-graph matters
+        // more here — system back must not re-enter a form the beneficiary declined.
+        onConsentRefused = {
           navController.navigate(Routes.HOME) {
             popUpTo(Routes.ENROLLMENT) { inclusive = true }
           }

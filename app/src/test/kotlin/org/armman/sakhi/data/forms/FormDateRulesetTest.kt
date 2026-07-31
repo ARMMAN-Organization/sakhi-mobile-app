@@ -6,11 +6,13 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
+import java.time.temporal.ChronoUnit
 
 /**
  * Rules under test come from the `Registration_PW_D` form-spec tab — DOB age 10-50 (row 23), LMP
  * more than 30 and less than 240 days before registration (row 7), registration date never in the
- * future (row 13).
+ * future (row 13) — plus the `Infant Registration form` tab's "Age or DOB of the mother" (row 20.0),
+ * which reuses the same 10-50 range.
  */
 class FormDateRulesetTest {
 
@@ -70,6 +72,271 @@ class FormDateRulesetTest {
     assertNull(violationForDob(requireNotNull(bounds.max)))
     assertNull(violationForDob(requireNotNull(bounds.min)))
     assertEquals(registrationDate.minusYears(FormDateRuleset.MIN_AGE_YEARS), bounds.max)
+  }
+
+  // --- Mother's DOB on the child form: same age 10..50 rule (Infant Registration row 20.0) ------
+
+  @Test
+  fun `MD-1 mother dob bounds span exactly the 10 to 50 age range`() {
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(MOTHER_DOB_QUESTION_CODE, FormAnswers(), registrationDate),
+    )
+
+    assertEquals(registrationDate.minusYears(FormDateRuleset.MIN_AGE_YEARS), bounds.max)
+    assertEquals(
+      registrationDate.minusYears(FormDateRuleset.MAX_AGE_YEARS + 1).plusDays(1),
+      bounds.min,
+    )
+    // Every date the picker offers must itself pass validation, or the picker would hand back a
+    // value the gate then rejects.
+    assertNull(violationForMotherDob(requireNotNull(bounds.max)))
+    assertNull(violationForMotherDob(requireNotNull(bounds.min)))
+  }
+
+  @Test
+  fun `MD-2 mother aged exactly 10 is accepted`() {
+    assertNull(violationForMotherDob(registrationDate.minusYears(FormDateRuleset.MIN_AGE_YEARS)))
+  }
+
+  @Test
+  fun `MD-3 mother aged exactly 50 is accepted`() {
+    assertNull(violationForMotherDob(registrationDate.minusYears(FormDateRuleset.MAX_AGE_YEARS)))
+  }
+
+  @Test
+  fun `MD-4 mother aged 9 is rejected`() {
+    // One day later than the youngest allowed DOB floors to 9.
+    val tooYoung = registrationDate.minusYears(FormDateRuleset.MIN_AGE_YEARS).plusDays(1)
+
+    assertEquals(
+      FormDateRuleset.Violation.AGE_OUT_OF_RANGE,
+      violationForMotherDob(tooYoung),
+    )
+  }
+
+  @Test
+  fun `MD-5 mother aged 51 is rejected`() {
+    val tooOld = registrationDate.minusYears(FormDateRuleset.MAX_AGE_YEARS + 1).minusDays(1)
+
+    assertEquals(
+      FormDateRuleset.Violation.AGE_OUT_OF_RANGE,
+      violationForMotherDob(tooOld),
+    )
+  }
+
+  @Test
+  fun `MD-6 future mother dob is rejected`() {
+    assertEquals(
+      FormDateRuleset.Violation.AGE_OUT_OF_RANGE,
+      violationForMotherDob(registrationDate.plusDays(1)),
+    )
+  }
+
+  @Test
+  fun `MD-7 blank and unparseable mother dob are not date violations`() {
+    // Blank is the required-field gate's job; an unparseable value isn't a *range* problem.
+    assertNull(
+      FormDateRuleset.violationFor(MOTHER_DOB_QUESTION_CODE, FormAnswers(), registrationDate),
+    )
+    assertNull(violationForRaw(MOTHER_DOB_QUESTION_CODE, ""))
+    assertNull(violationForRaw(MOTHER_DOB_QUESTION_CODE, "not-a-date"))
+    // The spec writes dates as dd-mm-yyyy, but answers are stored ISO; a dd-mm-yyyy string is
+    // unparseable, not out of range.
+    assertNull(violationForRaw(MOTHER_DOB_QUESTION_CODE, "28-07-2000"))
+  }
+
+  @Test
+  fun `MD-8 age is floored, not rounded, so a birthday not yet reached still counts as younger`() {
+    // Turns 10 one day after the registration date -> floors to 9, must be rejected. A rounding
+    // implementation would call this 10 and wrongly accept it.
+    val turnsTenTomorrow = registrationDate
+      .minusYears(FormDateRuleset.MIN_AGE_YEARS)
+      .plusDays(1)
+
+    assertEquals(
+      FormDateRuleset.Violation.AGE_OUT_OF_RANGE,
+      violationForMotherDob(turnsTenTomorrow),
+    )
+    // Guard the premise: one day earlier (birthday reached) is accepted.
+    assertNull(violationForMotherDob(turnsTenTomorrow.minusDays(1)))
+  }
+
+  @Test
+  fun `MD-9 mother dob and beneficiary dob are judged independently`() {
+    val bothAnswered = answers(
+      DOB_QUESTION_CODE to registrationDate.minusYears(25).toString(),
+      MOTHER_DOB_QUESTION_CODE to registrationDate.minusYears(60).toString(),
+    )
+
+    assertNull(FormDateRuleset.violationFor(DOB_QUESTION_CODE, bothAnswered, registrationDate))
+    assertEquals(
+      FormDateRuleset.Violation.AGE_OUT_OF_RANGE,
+      FormDateRuleset.violationFor(MOTHER_DOB_QUESTION_CODE, bothAnswered, registrationDate),
+    )
+  }
+
+  @Test
+  fun `MD-10 mother dob age is measured against the answered registration date`() {
+    // A backdated registration must not drift: this DOB floors to 50 against the answered
+    // registration date but to 51 against today, so it only passes if the answered date is used.
+    val answeredRegistration = registrationDate.minusYears(1)
+    val dob = answeredRegistration.minusYears(FormDateRuleset.MAX_AGE_YEARS)
+
+    val violation = FormDateRuleset.violationFor(
+      MOTHER_DOB_QUESTION_CODE,
+      answers(
+        REGISTRATION_DATE_QUESTION_CODE to answeredRegistration.toString(),
+        MOTHER_DOB_QUESTION_CODE to dob.toString(),
+      ),
+      registrationDate,
+    )
+
+    assertNull(violation)
+    // Guard the premise: without the answered registration date the same DOB floors to 51.
+    assertEquals(
+      FormDateRuleset.Violation.AGE_OUT_OF_RANGE,
+      violationForMotherDob(dob),
+    )
+  }
+
+  // --- Infant DOB: path-dependent 0-183 / 0-365 day window, never future ------------------------
+  //
+  // SRS FR-S-2.3 splits the window by registration path; the backend's create-beneficiary.dto.ts
+  // CHILD_AGE_CEILING_DAYS enforces the same split. The form spec CSV's flat "0-183 days" is
+  // superseded (see Appendix J of the SRS).
+  //
+  // This object BOUNDS the picker but deliberately reports NO violation for this field — detection
+  // lives in DynamicChildRegistrationViewModel, which has the path-specific messages. ID-6 and ID-7
+  // lock that contract so the two layers can't start double-reporting.
+
+  private val infantDob = ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT
+  private val pathQuestion = ChildRegistrationQuestionCodes.WHO_ARE_YOU_REGISTERING
+
+  private fun infantDobBounds(path: String? = null): FormDateRuleset.Bounds = requireNotNull(
+    FormDateRuleset.boundsFor(
+      infantDob,
+      if (path == null) FormAnswers() else answers(pathQuestion to path),
+      registrationDate,
+    ),
+  )
+
+  @Test
+  fun `ID-1 registered-mother path bounds the picker to 183 days`() {
+    val bounds = infantDobBounds(ChildRegistrationQuestionCodes.PATH_REGISTERED_MOTHER)
+
+    assertEquals(
+      registrationDate.minusDays(FormDateRuleset.CHILD_AGE_CEILING_DAYS_MOTHER_LINKED),
+      bounds.min,
+    )
+    assertEquals(registrationDate, bounds.max)
+  }
+
+  @Test
+  fun `ID-2 direct path bounds the picker to 365 days`() {
+    val bounds = infantDobBounds(ChildRegistrationQuestionCodes.PATH_DIRECT)
+
+    assertEquals(
+      registrationDate.minusDays(FormDateRuleset.CHILD_AGE_CEILING_DAYS_INDEPENDENT),
+      bounds.min,
+    )
+    assertEquals(registrationDate, bounds.max)
+  }
+
+  @Test
+  fun `ID-3 an unanswered path falls back to the wider window`() {
+    // Restricting to 183 before the path is known would block legitimate direct registrations with
+    // no visible reason. The ViewModel's gate still catches an out-of-window value afterwards.
+    assertEquals(
+      registrationDate.minusDays(FormDateRuleset.CHILD_AGE_CEILING_DAYS_INDEPENDENT),
+      infantDobBounds().min,
+    )
+  }
+
+  @Test
+  fun `ID-4 an unrecognised path value falls back to the wider window`() {
+    // A backend rename of the value_code must degrade to the permissive window, not to null bounds
+    // (which would leave the picker wide open) or a crash.
+    assertEquals(
+      registrationDate.minusDays(FormDateRuleset.CHILD_AGE_CEILING_DAYS_INDEPENDENT),
+      infantDobBounds("some_new_path_code_the_backend_added").min,
+    )
+  }
+
+  @Test
+  fun `ID-5 today is selectable and tomorrow is not, on both paths`() {
+    // "Should not accept future date" (spec row 6.0). An infant aged 0 days is valid.
+    listOf(
+      ChildRegistrationQuestionCodes.PATH_REGISTERED_MOTHER,
+      ChildRegistrationQuestionCodes.PATH_DIRECT,
+    ).forEach { path ->
+      assertEquals("max must be today for $path", registrationDate, infantDobBounds(path).max)
+    }
+  }
+
+  @Test
+  fun `ID-6 infant dob reports no violation - detection belongs to the ViewModel`() {
+    // Contract lock. If this starts failing because a Violation case was added, the ViewModel's
+    // INELIGIBLE_MOTHER / INELIGIBLE_DIRECT / DOB_FUTURE gate must be removed in the same change,
+    // or the Sakhi sees two errors for one problem.
+    listOf(
+      ChildRegistrationQuestionCodes.PATH_REGISTERED_MOTHER,
+      ChildRegistrationQuestionCodes.PATH_DIRECT,
+    ).forEach { path ->
+      listOf(
+        registrationDate.minusDays(30),  // in window on either path
+        registrationDate.minusDays(200), // out of window for the mother path
+        registrationDate.minusDays(400), // out of window for both
+        registrationDate.plusDays(1),    // future
+      ).forEach { date ->
+        assertNull(
+          "expected no ruleset violation for $date on $path",
+          FormDateRuleset.violationFor(
+            infantDob,
+            answers(pathQuestion to path, infantDob to date.toString()),
+            registrationDate,
+          ),
+        )
+      }
+    }
+  }
+
+  @Test
+  fun `ID-7 allDatesValid stays true for an out-of-window infant dob`() {
+    // Follows from ID-6, asserted separately because allDatesValid is what the submit gate calls:
+    // this object must not quietly become a second gate over the eligibility rule.
+    val fields = listOf(dateField(infantDob))
+    val outOfWindow = answers(
+      pathQuestion to ChildRegistrationQuestionCodes.PATH_REGISTERED_MOTHER,
+      infantDob to registrationDate.minusDays(400).toString(),
+    )
+
+    assertTrue(FormDateRuleset.allDatesValid(fields, outOfWindow, registrationDate))
+  }
+
+  @Test
+  fun `ID-8 the lower bound is inclusive - a DOB on it is exactly the ceiling age in days`() {
+    // Guards off-by-one: the oldest date the picker offers must be an age the ViewModel's
+    // `ageDays > ceiling` check accepts, not reject the value it just handed out.
+    val motherBound = infantDobBounds(ChildRegistrationQuestionCodes.PATH_REGISTERED_MOTHER).min
+    val directBound = infantDobBounds(ChildRegistrationQuestionCodes.PATH_DIRECT).min
+
+    assertEquals(
+      FormDateRuleset.CHILD_AGE_CEILING_DAYS_MOTHER_LINKED,
+      ChronoUnit.DAYS.between(requireNotNull(motherBound), registrationDate),
+    )
+    assertEquals(
+      FormDateRuleset.CHILD_AGE_CEILING_DAYS_INDEPENDENT,
+      ChronoUnit.DAYS.between(requireNotNull(directBound), registrationDate),
+    )
+  }
+
+  @Test
+  fun `ID-9 the client ceilings match the backend's CHILD_AGE_CEILING_DAYS`() {
+    // Mirrors arogyasakhi-service create-beneficiary.dto.ts: MOTHER_LINKED 183 / INDEPENDENT 365.
+    // Hardcoded on purpose — reading them from the constants would assert nothing. If ARMMAN changes
+    // the window, this test is the reminder that BOTH sides move together.
+    assertEquals(183L, FormDateRuleset.CHILD_AGE_CEILING_DAYS_MOTHER_LINKED)
+    assertEquals(365L, FormDateRuleset.CHILD_AGE_CEILING_DAYS_INDEPENDENT)
   }
 
   // --- LMP: 31..239 days before the registration date ------------------------------------------
@@ -169,6 +436,44 @@ class FormDateRulesetTest {
     assertNull(bounds.min)
   }
 
+  @Test
+  fun `the corrected registration date spelling is ruled identically`() {
+    // MOTHER_REGISTRATION v3 renamed the question to `registration_date`; every rule must follow the
+    // rename, not silently stop matching.
+    assertEquals(
+      FormDateRuleset.Violation.REGISTRATION_DATE_IN_FUTURE,
+      FormDateRuleset.violationFor(
+        REGISTRATION_DATE_QUESTION_CODE_CORRECTED,
+        answers(REGISTRATION_DATE_QUESTION_CODE_CORRECTED to registrationDate.plusDays(1).toString()),
+        registrationDate,
+      ),
+    )
+    assertEquals(
+      registrationDate,
+      FormDateRuleset
+        .boundsFor(REGISTRATION_DATE_QUESTION_CODE_CORRECTED, FormAnswers(), registrationDate)
+        ?.max,
+    )
+  }
+
+  @Test
+  fun `an answered corrected-spelling registration date is the LMP reference date`() {
+    val answeredRegistration = registrationDate.minusDays(10)
+
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(
+        LMP_DATE_QUESTION_CODE,
+        answers(REGISTRATION_DATE_QUESTION_CODE_CORRECTED to answeredRegistration.toString()),
+        registrationDate,
+      ),
+    )
+
+    assertEquals(
+      answeredRegistration.minusDays(FormDateRuleset.LMP_MIN_DAYS_BEFORE_REGISTRATION),
+      bounds.max,
+    )
+  }
+
   // --- Non-violations and unruled fields -------------------------------------------------------
 
   @Test
@@ -183,7 +488,10 @@ class FormDateRulesetTest {
 
   @Test
   fun `a date field with no rule is unconstrained`() {
-    val code = "date_of_birth_of_infant"
+    // Was `date_of_birth_of_infant` until that field gained path-aware bounds; any code with no
+    // entry in the ruleset does. `date_of_last_visit_12months` is a real one (Infant Registration
+    // row 8.0, DoB+365days) — computed, not picked, so it needs no bounds.
+    val code = "date_of_last_visit_12months"
 
     assertNull(FormDateRuleset.boundsFor(code, FormAnswers(), registrationDate))
     assertNull(violationForRaw(code, registrationDate.plusYears(5).toString()))
@@ -219,6 +527,9 @@ class FormDateRulesetTest {
   }
 
   private fun violationForDob(date: LocalDate) = violationForRaw(DOB_QUESTION_CODE, date.toString())
+
+  private fun violationForMotherDob(date: LocalDate) =
+    violationForRaw(MOTHER_DOB_QUESTION_CODE, date.toString())
 
   private fun violationForLmp(date: LocalDate) =
     violationForRaw(LMP_DATE_QUESTION_CODE, date.toString())

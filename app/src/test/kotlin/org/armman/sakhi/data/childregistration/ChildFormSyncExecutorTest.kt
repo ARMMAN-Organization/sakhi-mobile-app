@@ -18,6 +18,8 @@ import org.armman.sakhi.data.forms.SubmissionResponseData
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.armman.sakhi.data.lookup.LookupValue
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import retrofit2.Response
@@ -234,5 +236,30 @@ class ChildFormSyncExecutorTest {
 
     assertEquals(ChildFormSyncItemResult.DuplicateConflict::class, result!!::class)
     assertEquals(EnrollmentSyncStatus.DUPLICATE_CONFLICT, dao.getByLocalBeneficiaryId("local-1")?.syncStatus)
+  }
+
+  @Test
+  fun `runOne Failed carries a cleaned sentence, never the raw HTTP body — but keeps the raw body in the debug column`() = runTest {
+    // Regression (PR #31 review): runOne's Failed.message flows straight to the Sakhi's snackbar.
+    // It must be SubmitErrorCopy's cleaned sentence, not the exception's diagnostic
+    // "POST /beneficiaries failed: HTTP 400 — {json}" text. The raw body must still be retained in
+    // the draft's lastErrorMessage debug column.
+    seedPendingDraft()
+    enrollmentApi.response = Response.error(
+      400,
+      "{\"message\":\"lmpDate cannot be in the future\"}".toResponseBody("application/json".toMediaType()),
+    )
+
+    val result = executor.runOne("local-1")
+
+    val failed = result as ChildFormSyncItemResult.Failed
+    val shown = requireNotNull(failed.message)
+    assertFalse("UI message must not contain the raw HTTP prelude", shown.contains("POST /beneficiaries"))
+    assertFalse("UI message must not contain the raw JSON body", shown.contains("{"))
+    // The backend's own sentence, relabelled by SubmitErrorCopy (lmpDate -> "LMP date").
+    assertEquals("LMP date cannot be in the future", shown)
+    // Diagnostic body is still kept for debugging.
+    val entity = requireNotNull(dao.getByLocalBeneficiaryId("local-1"))
+    assertTrue(requireNotNull(entity.lastErrorMessage).contains("POST /beneficiaries failed: HTTP 400"))
   }
 }

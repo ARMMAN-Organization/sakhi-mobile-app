@@ -142,7 +142,7 @@ Status legend: ☐ not yet implemented · ☑ implemented & passing.
 
 | Key | English | Marathi |
 |---|---|---|
-| `child_reg_consent_refused` | Registration cannot continue without the beneficiary's consent. | लाभार्थीच्या संमतीशिवाय नोंदणी पुढे करता येणार नाही. |
+| `enrollment_consent_refused_toast` (shared with the mother flow; shown as a **toast** on the way back to Home, not an inline banner) | Without beneficiary consent, we cannot proceed with registration. | लाभार्थीच्या संमतीशिवाय आम्ही नोंदणी पुढे करू शकत नाही. |
 | `child_reg_dob_future` | Date of birth cannot be in the future. | जन्मतारीख भविष्यातील असू शकत नाही. |
 | `child_reg_ineligible_direct` | This child is older than 12 months (365 days) and cannot be registered directly. | हे बाळ १२ महिन्यांपेक्षा (३६५ दिवस) मोठे आहे, त्यामुळे थेट नोंदणी करता येणार नाही. |
 | `child_reg_ineligible_mother` | A child of a registered mother must be registered within 6 months (183 days) of birth. | नोंदणीकृत मातेच्या बाळाची नोंदणी जन्मानंतर ६ महिन्यांच्या (१८३ दिवस) आत करणे आवश्यक आहे. |

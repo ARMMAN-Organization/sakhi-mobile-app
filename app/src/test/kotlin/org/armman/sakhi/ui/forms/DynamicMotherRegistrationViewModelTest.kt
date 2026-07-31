@@ -4,7 +4,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -22,6 +25,7 @@ import org.armman.sakhi.data.forms.FormsRepository
 import org.armman.sakhi.data.forms.GeographyFieldOptionsResolver
 import org.armman.sakhi.data.forms.LMP_DATE_QUESTION_CODE
 import org.armman.sakhi.data.forms.REGISTRATION_DATE_QUESTION_CODE
+import org.armman.sakhi.data.forms.REGISTRATION_DATE_QUESTION_CODE_CORRECTED
 import org.armman.sakhi.data.forms.SubmitErrorCopy
 import org.armman.sakhi.data.geography.GeographyRepository
 import org.armman.sakhi.data.geography.GeographyUnit
@@ -921,6 +925,55 @@ class DynamicMotherRegistrationViewModelTest {
     assertTrue(vm.isReadyToSubmit())
   }
 
+  // --- Registration date auto-populates with today (spec row 13) ------------------------------
+
+  @Test
+  fun `registration date is prefilled with today under the typo spelling`() = runTest {
+    val vm = viewModel(
+      listOf(field(REGISTRATION_DATE_QUESTION_CODE, section = "Personal Info", inputType = "date")),
+    )
+
+    assertEquals(
+      vm.registrationDate.toString(),
+      vm.uiState.value.answers.valueOf(REGISTRATION_DATE_QUESTION_CODE),
+    )
+    // Prefilled with a valid value, so the tab is satisfied without the Sakhi touching the field.
+    assertTrue(vm.isSectionReady("Personal Info"))
+  }
+
+  @Test
+  fun `registration date is prefilled with today under the corrected v3 spelling`() = runTest {
+    val vm = viewModel(
+      listOf(
+        field(
+          REGISTRATION_DATE_QUESTION_CODE_CORRECTED,
+          section = "Personal Info",
+          inputType = "date",
+        ),
+      ),
+    )
+
+    assertEquals(
+      vm.registrationDate.toString(),
+      vm.uiState.value.answers.valueOf(REGISTRATION_DATE_QUESTION_CODE_CORRECTED),
+    )
+    // The typo code must NOT also be written — it isn't in this schema, so it would 422 the
+    // /submissions call as an unrecognised key.
+    assertNull(vm.uiState.value.answers.valueOf(REGISTRATION_DATE_QUESTION_CODE))
+    assertTrue(vm.isSectionReady("Personal Info"))
+  }
+
+  @Test
+  fun `registration date is still prefilled when the schema declares no such field`() = runTest {
+    val vm = viewModel(listOf(field("first_name", section = "Personal Info")))
+
+    // Falls back to the typo code so the date reaches the formData blob and the submission mapper.
+    assertEquals(
+      vm.registrationDate.toString(),
+      vm.uiState.value.answers.valueOf(REGISTRATION_DATE_QUESTION_CODE),
+    )
+  }
+
   @Test
   fun `a date field with no spec rule is not gated on dates`() = runTest {
     val vm = viewModel(
@@ -932,62 +985,116 @@ class DynamicMotherRegistrationViewModelTest {
     assertTrue(vm.isSectionReady("Personal Info"))
   }
 
-  // --- Consent refused hard stop -------------------------------------------------------------
+  // --- Consent refused exits enrollment ------------------------------------------------------
+  //
+  // Answering "no" to `did_we_receive_consent` no longer blocks the form in place — it aborts the
+  // registration: the ViewModel emits a one-shot event and the screen toasts + navigates Home.
+  // These tests therefore assert on the EVENT, and that the old inline gates are gone.
+
+  /**
+   * Collects [DynamicMotherRegistrationViewModel.consentRefused] for the duration of [block].
+   * Turbine isn't a dependency, so the flow is drained by a background collector.
+   *
+   * The collector MUST run on an [UnconfinedTestDispatcher]: it starts eagerly, so the subscription
+   * is live before [block] emits. On the class's [StandardTestDispatcher] the `launch` only *queues*
+   * the collector, and `consentRefused` has `replay = 0` — a `tryEmit` with no subscriber is
+   * silently dropped, so the event would be lost no matter how far the scheduler is advanced.
+   */
+  private fun TestScope.recordConsentRefusals(
+    vm: DynamicMotherRegistrationViewModel,
+    block: () -> Unit,
+  ): List<Unit> {
+    val events = mutableListOf<Unit>()
+    backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+      vm.consentRefused.collect { events += it }
+    }
+    block()
+    dispatcher.scheduler.advanceUntilIdle()
+    return events
+  }
+
+  private fun consentOnlyForm() =
+    listOf(field("did_we_receive_consent", section = "Consent", inputType = "radio"))
 
   @Test
-  fun `consent refused blocks the Consent tab and submission`() = runTest {
+  fun `answering consent no emits the consent-refused event`() = runTest {
+    val vm = viewModel(consentOnlyForm())
+
+    val events = recordConsentRefusals(vm) { vm.setAnswer("did_we_receive_consent", "no") }
+
+    assertEquals(1, events.size)
+  }
+
+  @Test
+  fun `answering consent yes emits nothing`() = runTest {
+    val vm = viewModel(consentOnlyForm())
+
+    val events = recordConsentRefusals(vm) { vm.setAnswer("did_we_receive_consent", "yes") }
+
+    assertTrue(events.isEmpty())
+  }
+
+  @Test
+  fun `unanswered consent emits nothing`() = runTest {
+    val vm = viewModel(consentOnlyForm())
+
+    val events = recordConsentRefusals(vm) { /* no answer at all */ }
+
+    assertTrue(events.isEmpty())
+  }
+
+  @Test
+  fun `clearing consent to null emits nothing`() = runTest {
+    val vm = viewModel(consentOnlyForm())
+
+    val events = recordConsentRefusals(vm) { vm.setAnswer("did_we_receive_consent", null) }
+
+    assertTrue(events.isEmpty())
+  }
+
+  @Test
+  fun `answering consent no twice emits twice`() = runTest {
+    // Guards the SharedFlow choice: a StateFlow/Boolean would swallow the second identical value,
+    // leaving a re-entered form stuck after a second refusal.
+    val vm = viewModel(consentOnlyForm())
+
+    // The unconfined collector consumes each emission synchronously, so the 1-slot buffer never
+    // overflows between the two refusals.
+    val events = recordConsentRefusals(vm) {
+      vm.setAnswer("did_we_receive_consent", "no")
+      vm.setAnswer("did_we_receive_consent", "yes")
+      vm.setAnswer("did_we_receive_consent", "no")
+    }
+
+    assertEquals(2, events.size)
+  }
+
+  @Test
+  fun `another field answered no does not emit`() = runTest {
     val vm = viewModel(
-      listOf(field("did_we_receive_consent", section = "Consent", inputType = "radio")),
+      listOf(
+        field("did_we_receive_consent", section = "Consent", inputType = "radio"),
+        field("some_other_radio", section = "Personal Info", inputType = "radio"),
+      ),
     )
+
+    val events = recordConsentRefusals(vm) { vm.setAnswer("some_other_radio", "no") }
+
+    assertTrue(events.isEmpty())
+  }
+
+  @Test
+  fun `consent no no longer blocks the Consent tab`() = runTest {
+    // The gate is gone by design — the screen has already navigated away by this point.
+    val vm = viewModel(consentOnlyForm())
 
     vm.setAnswer("did_we_receive_consent", "no")
 
-    assertTrue(vm.consentRefused())
-    assertFalse(vm.isSectionReady("Consent"))
-    assertFalse(vm.isReadyToSubmit())
-  }
-
-  @Test
-  fun `consent given unblocks the Consent tab and allows submission`() = runTest {
-    val vm = viewModel(
-      listOf(field("did_we_receive_consent", section = "Consent", inputType = "radio")),
-    )
-
-    vm.setAnswer("did_we_receive_consent", "yes")
-
-    assertFalse(vm.consentRefused())
     assertTrue(vm.isSectionReady("Consent"))
-    assertTrue(vm.isReadyToSubmit())
   }
 
   @Test
-  fun `re-answering consent no then yes clears the block`() = runTest {
-    val vm = viewModel(
-      listOf(field("did_we_receive_consent", section = "Consent", inputType = "radio")),
-    )
-
-    vm.setAnswer("did_we_receive_consent", "no")
-    assertFalse(vm.isSectionReady("Consent"))
-
-    vm.setAnswer("did_we_receive_consent", "yes")
-    assertFalse(vm.consentRefused())
-    assertTrue(vm.isSectionReady("Consent"))
-    assertTrue(vm.isReadyToSubmit())
-  }
-
-  @Test
-  fun `unanswered consent is not treated as a refusal`() = runTest {
-    val vm = viewModel(
-      listOf(field("did_we_receive_consent", section = "Consent", inputType = "radio")),
-    )
-
-    // No answer yet: not a refusal (no banner), but still blocked by the normal required-field gate.
-    assertFalse(vm.consentRefused())
-    assertFalse(vm.isSectionReady("Consent"))
-  }
-
-  @Test
-  fun `consent refused overrides an otherwise complete form`() = runTest {
+  fun `consent no no longer blocks submit readiness`() = runTest {
     val vm = viewModel(
       listOf(
         field("did_we_receive_consent", section = "Consent", inputType = "radio"),
@@ -998,22 +1105,14 @@ class DynamicMotherRegistrationViewModelTest {
     vm.setAnswer("mobile_number", "9876543210")
     vm.setAnswer("did_we_receive_consent", "no")
 
-    assertFalse(vm.isReadyToSubmit())
+    assertTrue(vm.isReadyToSubmit())
   }
 
   @Test
-  fun `submit is a no-op when consent is refused`() = runTest {
-    val draftRepository = FakeDraftRepository()
-    val vm = viewModel(
-      listOf(field("did_we_receive_consent", section = "Consent", inputType = "radio")),
-      draftRepository,
-    )
+  fun `unanswered consent still blocks the Consent tab as a required field`() = runTest {
+    val vm = viewModel(consentOnlyForm())
 
-    vm.setAnswer("did_we_receive_consent", "no")
-    vm.submit()
-    dispatcher.scheduler.advanceUntilIdle()
-
-    assertEquals(0, draftRepository.submitCallCount)
+    assertFalse(vm.isSectionReady("Consent"))
   }
 
   // ---------------------------------------------------------------------------------------------

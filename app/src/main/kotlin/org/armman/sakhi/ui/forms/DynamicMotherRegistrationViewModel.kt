@@ -3,8 +3,11 @@ package org.armman.sakhi.ui.forms
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -26,7 +29,7 @@ import org.armman.sakhi.data.forms.FormVisibilityEvaluator
 import org.armman.sakhi.data.forms.FormFieldInputType
 import org.armman.sakhi.data.forms.MobileNumberRule
 import org.armman.sakhi.data.forms.NonRenderableQuestionCodes
-import org.armman.sakhi.data.forms.REGISTRATION_DATE_QUESTION_CODE
+import org.armman.sakhi.data.forms.RegistrationDatePrefill
 import org.armman.sakhi.data.forms.SubmitErrorCopy
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.DynamicFormSubmitResult
@@ -43,8 +46,10 @@ import javax.inject.Inject
 private const val FORM_CODE = "MOTHER_REGISTRATION"
 
 /** Consent gate: the `did_we_receive_consent` radio answered "no" is a hard stop per the SRS /
- * form spec ("If No → stop form") — the backend also 422s on it. Kept as a local copy (matching the
- * child flow's own constants) so the two enrollment ViewModels stay decoupled. */
+ * form spec ("If No → stop form") — the backend also 422s on it. Answering "no" aborts the
+ * registration immediately (toast + back to Home) via [DynamicMotherRegistrationViewModel.consentRefused].
+ * Kept as a local copy (matching the child flow's own constants) so the two enrollment ViewModels
+ * stay decoupled. */
 private const val DID_WE_RECEIVE_CONSENT = "did_we_receive_consent"
 private const val CONSENT_NO = "no"
 
@@ -134,6 +139,19 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
   private val _uiState = MutableStateFlow(DynamicFormUiState())
   val uiState: StateFlow<DynamicFormUiState> = _uiState.asStateFlow()
 
+  /**
+   * One-shot signal that the Sakhi answered "no" to `did_we_receive_consent`. The screen reacts by
+   * toasting and leaving enrollment — refusal is a hard stop, so there is nothing left to render
+   * and no reason to keep the half-entered form alive.
+   *
+   * Deliberately a [MutableSharedFlow] and not part of [DynamicFormUiState]: this is an event, not
+   * state. A state flag would re-fire the navigation on every recomposition/config change, and a
+   * second refusal (after re-entering the form) would emit the same value and be swallowed.
+   * `extraBufferCapacity = 1` lets [tryEmit] succeed from the non-suspending [setAnswer].
+   */
+  private val _consentRefused = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+  val consentRefused: SharedFlow<Unit> = _consentRefused.asSharedFlow()
+
   val beneficiaryId: String = UUID.randomUUID().toString()
   private val localSubmissionUuid: String = newLocalSubmissionUuid()
   val registrationDate: LocalDate = LocalDate.now()
@@ -165,29 +183,18 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
   }
 
   /**
-   * Pre-fills `registrtion_date` with today, per form spec row 13 ("Automatically popup todays
-   * date").
+   * Pre-fills the registration date with today, per form spec row 13 ("Automatically popup todays
+   * date"), so the Sakhi never types it.
    *
-   * Until this ran, nothing ever wrote that answer: the field was absent from the live schema, so it
-   * never rendered, and [org.armman.sakhi.data.forms.DynamicFormSubmissionMapper] quietly fell back
-   * to its own `registrationDate` when building the beneficiary DTO. The date therefore reached
-   * `/beneficiaries` but was **missing from the `formData` blob** sent to `/submissions` (that
-   * payload is just the answers), which would start failing the moment the schema declares the field
-   * required.
-   *
-   * Writing it as a real answer fixes the payload gap now and means the field renders already filled
-   * with today — editable, capped at today by [FormDateRuleset] — as soon as the backend adds it to
-   * the schema, with no further app change.
-   *
-   * Skips a field that already has an answer so a resumed draft keeps the date it was started on
-   * rather than silently jumping to today.
+   * Delegates to [RegistrationDatePrefill] — shared with the child flow, and matching every published
+   * spelling of the code. The private version this replaced was keyed on the typo spelling alone and
+   * silently stopped prefilling when MOTHER_REGISTRATION v3 renamed the question to
+   * `registration_date`. See that object's KDoc for the skip/fallback rules.
    */
   private fun prefillRegistrationDate() {
-    if (!_uiState.value.answers.valueOf(REGISTRATION_DATE_QUESTION_CODE).isNullOrBlank()) return
+    val fields = _uiState.value.version?.schemaJson.orEmpty()
     _uiState.update {
-      it.copy(
-        answers = it.answers.withSingleValue(REGISTRATION_DATE_QUESTION_CODE, registrationDate.toString()),
-      )
+      it.copy(answers = RegistrationDatePrefill.apply(fields, it.answers, registrationDate))
     }
   }
 
@@ -224,6 +231,12 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
       )
     }
     recomputeDerivedFields()
+    // Refusing consent ends the registration outright (SRS / form spec: "If No → stop form"), so it
+    // is signalled here — the single place a "no" can enter the answers. Geography/computed
+    // prefills and the mother-record inheritance never write "no", only "yes".
+    if (questionCode == DID_WE_RECEIVE_CONSENT && value == CONSENT_NO) {
+      _consentRefused.tryEmit(Unit)
+    }
   }
 
   fun setMultiAnswer(questionCode: String, values: List<String>) {
@@ -330,13 +343,6 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
       .mapIndexed { index, value -> FormFieldOption(label = value.valueLabel, sortOrder = index, valueCode = value.valueCode) }
   }
 
-  /** Whether the Sakhi answered "no" to `did_we_receive_consent` — a hard stop: the enrollment
-   * cannot advance past the Consent tab or be submitted (see [isSectionReady]/[isReadyToSubmit]),
-   * and the screen shows a blocking banner. Consent unanswered (null) is NOT a refusal — that stays
-   * a normal required-field gate. */
-  fun consentRefused(): Boolean =
-    _uiState.value.answers.valueOf(DID_WE_RECEIVE_CONSENT) == CONSENT_NO
-
   /** Cross-field rules currently violated (empty = fine, or not yet evaluable — see
    * [FormCrossFieldValidator]). */
   fun crossFieldViolations(): List<FormCrossFieldRule> {
@@ -409,20 +415,19 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
    * [isReadyToSubmit], so an early tab isn't blocked by a rule whose other fields live later. */
   fun isSectionReady(section: String): Boolean {
     if (_uiState.value.version == null) return false
-    // Refused consent blocks forward navigation on the tab that holds the consent question, so the
-    // Sakhi is stopped right there rather than only at final Submit.
-    val holdsConsent = fieldsInSection(section).any { it.questionCode == DID_WE_RECEIVE_CONSENT }
-    if (holdsConsent && consentRefused()) return false
+    // No consent gate here: a refusal now leaves the screen entirely (see [consentRefused]), so
+    // there is no state in which this would be evaluated with consent == "no".
     return fieldsAnsweredAndInRange(fieldsInSection(section))
   }
 
   /** Whether every currently-visible required field has an answer, every `number` field with a
-   * `numericRange` satisfies it, no cross-field rule is violated, and consent was not refused. */
+   * `numericRange` satisfies it and no cross-field rule is violated. Consent is not re-checked here
+   * — a refusal exits the flow before Submit is reachable, and
+   * [org.armman.sakhi.data.forms.DynamicFormSubmissionMapper] still refuses to build a payload
+   * without a "yes" as a last line of defence. */
   fun isReadyToSubmit(): Boolean {
     if (_uiState.value.version == null) return false
-    return !consentRefused() &&
-      fieldsAnsweredAndInRange(visibleFields()) &&
-      crossFieldViolations().isEmpty()
+    return fieldsAnsweredAndInRange(visibleFields()) && crossFieldViolations().isEmpty()
   }
 
   /**

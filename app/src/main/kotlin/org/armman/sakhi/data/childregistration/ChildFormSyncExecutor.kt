@@ -3,6 +3,7 @@ package org.armman.sakhi.data.childregistration
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.enrollment.EnrollmentSyncOutcome
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
+import org.armman.sakhi.data.forms.SubmitErrorCopy
 import retrofit2.HttpException
 import java.io.IOException
 import java.time.Instant
@@ -184,17 +185,35 @@ class ChildFormSyncExecutor @Inject constructor(
               // Both the permanent-4xx and generic-error cases resolve to the same thing here: show
               // the Sakhi the error now. The distinction only matters to [run]'s WorkManager-retry
               // bookkeeping, not to what the Submit button does.
+              //
+              // markFailed() keeps the DIAGNOSTIC message (endpoint, HTTP code, verbatim body) in
+              // the draft's debug column; only the value handed back to the UI is cleaned.
               markFailed(draft, error.message)
-              ChildFormSyncItemResult.Failed(error.message)
+              ChildFormSyncItemResult.Failed(userFacingMessage(error))
             }
           }
         },
       )
     } catch (e: HttpException) {
       markFailed(draft, e.message())
-      ChildFormSyncItemResult.Failed(e.message())
+      ChildFormSyncItemResult.Failed(SubmitErrorCopy.humanize(e.message()) ?: SubmitErrorCopy.GENERIC)
     }
   }
+
+  /**
+   * The single sentence the Sakhi sees. A backend failure uses its own
+   * [ChildRegistrationSubmissionException.userMessage] — never [Throwable.message], which embeds the
+   * endpoint, HTTP code and verbatim response body (that raw text still goes to the draft's debug
+   * column via [markFailed]). Anything with no usable message falls back to [SubmitErrorCopy.GENERIC]
+   * rather than putting a stack-trace-ish string on screen.
+   *
+   * Mirrors `DynamicFormSyncExecutor.userFacingMessage`; the child clone shipped without it, which is
+   * why a 422 rendered as raw JSON in the UI.
+   */
+  private fun userFacingMessage(error: Throwable): String =
+    (error as? ChildRegistrationSubmissionException)?.userMessage
+      ?: SubmitErrorCopy.humanize(error.message)
+      ?: SubmitErrorCopy.GENERIC
 
   private suspend fun markFailed(draft: ChildFormDraftEntity, errorMessage: String?) {
     dao.upsert(

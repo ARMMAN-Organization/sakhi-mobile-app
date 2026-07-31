@@ -1,9 +1,11 @@
 package org.armman.sakhi.data.childregistration
 
+import org.armman.sakhi.data.enrollment.ApiErrorParser
 import org.armman.sakhi.data.enrollment.EnrollmentApi
 import org.armman.sakhi.data.forms.CreateSubmissionRequestDto
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormSubmissionApi
+import org.armman.sakhi.data.forms.SubmitErrorCopy
 import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -13,18 +15,55 @@ private const val FORM_CODE = "CHILD_REGISTRATION"
 /** Everything that can stop [ChildRegistrationSubmissionCoordinator.submit] mid-flight — mirror of
  * `DynamicFormSubmissionException`, declared separately so the child flow stays standalone. */
 sealed class ChildRegistrationSubmissionException(message: String) : Exception(message) {
+  /**
+   * The one sentence to show the Sakhi, or null to let the caller pick a fallback. Deliberately
+   * separate from [Exception.message], which stays diagnostic (endpoint, HTTP code, verbatim body)
+   * for logs and the draft's `lastErrorMessage` debug column.
+   *
+   * Its absence was a real bug: [ChildFormSyncExecutor] surfaced `Throwable.message` directly, so a
+   * failed submit put the whole envelope on screen —
+   * `POST /forms/CHILD_REGISTRATION/submissions failed: HTTP 422 — {"success":false,…,"traceId":…}`.
+   * The mother flow already fixed this via `DynamicFormSubmissionException.userMessage`; the child
+   * clone never picked it up. See [SubmitErrorCopy].
+   */
+  open val userMessage: String? get() = null
+
   data class MappingFailed(val mappingCause: Throwable) : ChildRegistrationSubmissionException(
     mappingCause.message ?: "Could not map the form's answers for submission",
   )
 
-  data class BeneficiaryCreationFailed(val httpCode: Int, val body: String?) :
-    ChildRegistrationSubmissionException("POST /beneficiaries failed: HTTP $httpCode — $body")
+  /** [errorCode]/[fieldErrors]/[apiMessage] are parsed from [body] via [ApiErrorParser]; [body] is
+   * retained verbatim for the draft's debug column. */
+  data class BeneficiaryCreationFailed(
+    val httpCode: Int,
+    val body: String?,
+    val errorCode: String? = null,
+    val fieldErrors: Map<String, String> = emptyMap(),
+    val apiMessage: String? = null,
+  ) : ChildRegistrationSubmissionException("POST /beneficiaries failed: HTTP $httpCode — $body") {
+    override val userMessage: String get() = SubmitErrorCopy.forApiError(apiMessage, fieldErrors)
+  }
 
   data object NoBeneficiaryIdReturned :
-    ChildRegistrationSubmissionException("Beneficiary created but no id was returned in the response")
+    ChildRegistrationSubmissionException("Beneficiary created but no id was returned in the response") {
+    override val userMessage: String get() = SubmitErrorCopy.GENERIC
+  }
 
-  data class FormSubmissionFailed(val httpCode: Int, val body: String?) :
-    ChildRegistrationSubmissionException("POST /forms/$FORM_CODE/submissions failed: HTTP $httpCode — $body")
+  /**
+   * [violations] carries the backend schema validator's messages (`form-validation.ts`), which a
+   * `422` from this endpoint returns under `fieldErrors.violations` as an ARRAY — e.g.
+   * `"Missing required field: mother_beneficiary_id"`. They name a `question_code`, not a DTO path,
+   * so they aren't field-attributable and surface as a page-level banner.
+   */
+  data class FormSubmissionFailed(
+    val httpCode: Int,
+    val body: String?,
+    val apiMessage: String? = null,
+    val violations: List<String> = emptyList(),
+  ) : ChildRegistrationSubmissionException("POST /forms/$FORM_CODE/submissions failed: HTTP $httpCode — $body") {
+    override val userMessage: String
+      get() = SubmitErrorCopy.forApiError(apiMessage, emptyMap(), violations)
+  }
 }
 
 /**
@@ -63,9 +102,14 @@ class ChildRegistrationSubmissionCoordinator @Inject constructor(
 
     val beneficiaryResponse = enrollmentApi.createBeneficiary(beneficiaryRequest)
     if (!beneficiaryResponse.isSuccessful) {
+      val body = beneficiaryResponse.errorBody()?.string()
+      val apiError = ApiErrorParser.parse(body)
       throw ChildRegistrationSubmissionException.BeneficiaryCreationFailed(
-        beneficiaryResponse.code(),
-        beneficiaryResponse.errorBody()?.string(),
+        httpCode = beneficiaryResponse.code(),
+        body = body,
+        errorCode = apiError.errorCode,
+        fieldErrors = apiError.fieldErrors,
+        apiMessage = apiError.message,
       )
     }
     val serverBeneficiaryId = beneficiaryResponse.body()?.data?.id
@@ -83,9 +127,13 @@ class ChildRegistrationSubmissionCoordinator @Inject constructor(
     )
     val submissionResponse = formSubmissionApi.createSubmission(FORM_CODE, submissionRequest)
     if (!submissionResponse.isSuccessful) {
+      val body = submissionResponse.errorBody()?.string()
+      val apiError = ApiErrorParser.parse(body)
       throw ChildRegistrationSubmissionException.FormSubmissionFailed(
-        submissionResponse.code(),
-        submissionResponse.errorBody()?.string(),
+        httpCode = submissionResponse.code(),
+        body = body,
+        apiMessage = apiError.message,
+        violations = apiError.violations,
       )
     }
   }

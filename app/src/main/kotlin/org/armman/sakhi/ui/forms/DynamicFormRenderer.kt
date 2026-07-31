@@ -1,15 +1,21 @@
 package org.armman.sakhi.ui.forms
 
 import androidx.annotation.StringRes
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -23,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusEvent
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -106,6 +113,9 @@ private val CONSENT_CHECKBOX_QUESTION_CODES = setOf(
  * `recomputeDerivedFields`'s stopgap every time any other answer changes — exactly the broken
  * pattern this whole read-only branch exists to avoid.
  */
+// `WindowInsets.isImeVisible` and `BringIntoViewRequester` are both still opt-in; used only for the
+// keep-focused-field-visible effect below.
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun DynamicFormField(
   field: FormFieldSchema,
@@ -140,7 +150,29 @@ fun DynamicFormField(
     field.questionCode !in GeographyQuestionCodes.ALL &&
     field.inputType in INLINE_ERROR_INPUT_TYPES
 
-  Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+  // Keep a focused field above the keyboard.
+  //
+  // A TextField already asks to be scrolled into view when it gains focus, but that request is
+  // measured against the viewport as it is at that instant — *before* the IME animates open and
+  // `safeDrawingPadding()` shrinks the form sheet under it. Nothing re-runs afterwards, so the
+  // field ends up clipped by the new, shorter viewport. Re-requesting once the IME is actually
+  // visible fixes it for every input type at once, which is why this lives on the shared wrapper
+  // rather than in the TEXT/NUMBER branches: focus events bubble up from whatever widget the
+  // branch rendered.
+  val bringIntoViewRequester = remember { BringIntoViewRequester() }
+  var hasFocus by remember { mutableStateOf(false) }
+  val imeVisible = WindowInsets.isImeVisible
+  LaunchedEffect(hasFocus, imeVisible) {
+    if (hasFocus && imeVisible) bringIntoViewRequester.bringIntoView()
+  }
+
+  Column(
+    modifier = modifier
+      .bringIntoViewRequester(bringIntoViewRequester)
+      // `hasFocus`, not `isFocused`: the focus sits on the child widget, not on this Column.
+      .onFocusEvent { hasFocus = it.hasFocus },
+    verticalArrangement = Arrangement.spacedBy(4.dp),
+  ) {
     DynamicFormFieldBody(
       field = field,
       answers = answers,

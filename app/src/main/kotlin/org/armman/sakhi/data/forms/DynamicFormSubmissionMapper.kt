@@ -54,7 +54,9 @@ private object QuestionCode {
   const val DATE_OF_BIRTH = "date_of_birth"
   const val ADDRESS = "enter_the_beneficiary_address"
   const val RCH_NUMBER = "input_rch_number"
-  const val REGISTRATION_DATE = "registrtion_date"
+  // Registration date is NOT declared here: the published schemas use two different spellings, so it
+  // is read via `answers.registrationDateAnswer()` / REGISTRATION_DATE_QUESTION_CODES instead of a
+  // single literal.
   const val DID_WE_RECEIVE_CONSENT = "did_we_receive_consent"
 }
 
@@ -131,7 +133,7 @@ class DynamicFormSubmissionMapper @Inject constructor(
       )
     }
 
-    val registrationDate = answers.valueOf(QuestionCode.REGISTRATION_DATE) ?: fallbackRegistrationDate.toString()
+    val registrationDate = answers.registrationDateAnswer() ?: fallbackRegistrationDate.toString()
 
     CreateBeneficiaryRequestDto(
       pii = BeneficiaryPiiDto(

@@ -28,6 +28,11 @@ object BeneficiaryFieldErrorMapper {
    * the active schema. */
   private val NAME_PATHS = setOf("pii.firstName", "pii.middleName", "pii.lastName")
 
+  /** Registration date has no single `question_code`: published schemas spell it two ways (see
+   * [REGISTRATION_DATE_QUESTION_CODES]), so its error is pinned to whichever spelling the active
+   * schema declares. */
+  private const val REGISTRATION_DATE_PATH = "case.registrationDate"
+
   /** Dotted DTO path → the `question_code` the forward mapper read it from. Geography paths use
    * [GeographyQuestionCodes]; the rest mirror `DynamicFormSubmissionMapper.QuestionCode`. */
   private val PATH_TO_QUESTION_CODE: Map<String, String> = mapOf(
@@ -52,7 +57,7 @@ object BeneficiaryFieldErrorMapper {
     "motherDetails.stillbirths" to "still_births",
     "motherDetails.abortions" to "abortions_pregnancy_losses_before_24_weeks",
     "motherDetails.deadChildren" to "dead_children",
-    "case.registrationDate" to "registrtion_date",
+    // case.registrationDate is resolved in `resolve` — see REGISTRATION_DATE_PATH.
   )
 
   /**
@@ -79,6 +84,7 @@ object BeneficiaryFieldErrorMapper {
     if (direct != null && direct in known) return direct
     // Split-name fields absent (older schema) — pin name errors to the combined-name field instead.
     if (path in NAME_PATHS && COMBINED_NAME_QUESTION_CODE in known) return COMBINED_NAME_QUESTION_CODE
+    if (path == REGISTRATION_DATE_PATH) return REGISTRATION_DATE_QUESTION_CODES.firstOrNull { it in known }
     return null
   }
 }

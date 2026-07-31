@@ -40,6 +40,26 @@ class BeneficiaryFieldErrorMapperTest {
   }
 
   @Test
+  fun `pins a registration date error to whichever spelling the active schema declares`() {
+    val errors = mapOf("case.registrationDate" to "Registration date cannot be in the future")
+
+    assertEquals(
+      "Registration date cannot be in the future",
+      BeneficiaryFieldErrorMapper
+        .toQuestionCodeErrors(errors, setOf(REGISTRATION_DATE_QUESTION_CODE))[REGISTRATION_DATE_QUESTION_CODE],
+    )
+    assertEquals(
+      "Registration date cannot be in the future",
+      BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+        errors,
+        setOf(REGISTRATION_DATE_QUESTION_CODE_CORRECTED),
+      )[REGISTRATION_DATE_QUESTION_CODE_CORRECTED],
+    )
+    // No registration-date field in the schema: dropped to the page-level banner, not guessed at.
+    assertTrue(BeneficiaryFieldErrorMapper.toQuestionCodeErrors(errors, setOf("first_name")).isEmpty())
+  }
+
+  @Test
   fun `maps mother-detail counts to their schema question codes`() {
     val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
       mapOf(

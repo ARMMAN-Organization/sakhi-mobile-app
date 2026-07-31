@@ -188,7 +188,12 @@
   <string name="enrollment_consent_play_video">Play welcome video</string>
   <string name="enrollment_consent_retake_photo">Retake photo of consent form</string>
   <string name="enrollment_consent_photo_captured">Photo captured</string>
+  <!-- Legacy static enrollment stepper (ConsentStep) only — the two live dynamic flows now toast
+       and exit instead of showing an inline banner. -->
   <string name="enrollment_consent_refused">Consent was not received — the enrollment cannot continue.</string>
+  <!-- Shown as a toast by BOTH live enrollment flows (mother + child) the moment
+       `did_we_receive_consent` is answered "no", just before the Sakhi is returned Home. -->
+  <string name="enrollment_consent_refused_toast">Without beneficiary consent, we cannot proceed with registration.</string>
   <string name="enrollment_next_personal_info">Personal Info</string>
   <string name="enrollment_step_pending">This section is coming soon</string>
   <string name="enrollment_complete_title">Enrollment Complete!</string>
@@ -490,11 +495,23 @@
 
   <!-- Children Register (CR-020) -->
   <string name="child_reg_title">Children Register</string>
-  <string name="child_reg_consent_refused">Registration cannot continue without the beneficiary\'s consent.</string>
   <string name="child_reg_dob_future">Date of birth cannot be in the future.</string>
   <string name="child_reg_ineligible_direct">This child is older than 12 months (365 days) and cannot be registered directly.</string>
   <string name="child_reg_ineligible_mother">A child of a registered mother must be registered within 6 months (183 days) of birth.</string>
   <string name="child_reg_duplicate">A matching child record already exists. Continue registering this as a new record?</string>
   <string name="child_reg_submit_failed">Registration could not be submitted. Please review the form and try again.</string>
+
+  <!-- Mother link &amp; prefill (CR-031) -->
+  <string name="child_reg_mother_link_placeholder">Select mother</string>
+  <string name="child_reg_mother_link_title">Select mother</string>
+  <string name="child_reg_mother_link_search_label">Search by name</string>
+  <string name="child_reg_mother_link_age_years">%1$d yrs</string>
+  <string name="child_reg_mother_link_no_delivery">Delivery not recorded</string>
+  <string name="child_reg_mother_link_unnamed">Name not recorded</string>
+  <string name="child_reg_mother_link_none">No registered mothers yet. Register the mother first, or register this child directly.</string>
+  <string name="child_reg_mother_link_no_match">No mother matches that name.</string>
+  <string name="child_reg_mother_link_offline">Connect to the internet once to load your registered mothers. You can still register this child directly.</string>
+  <string name="child_reg_mother_link_retry">Try again</string>
+  <string name="child_reg_mother_prefill_hint">From mother\'s record</string>
   <string name="field_required_content_description">%1$s, required</string>
 </resources>
