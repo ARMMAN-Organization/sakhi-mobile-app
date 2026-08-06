@@ -174,25 +174,31 @@ fun LoginScreen(
           onClick = viewModel::onLoginClicked,
           loading = state.isSubmitting,
         )
-        // Reserve space so the bottom banner never overlaps the button on small screens.
-        Spacer(Modifier.height(96.dp))
-      }
-
-      val bannerModifier = Modifier
-        .align(Alignment.BottomCenter)
-        .fillMaxWidth()
-        .padding(horizontal = Dimens.ScreenPadding, vertical = Dimens.ScreenPadding)
-      when {
-        state.loginError != null -> StatusBanner(
-          message = stringResource(state.loginError!!),
-          variant = StatusBannerVariant.Error,
-          modifier = bannerModifier,
-        )
-        logoutBannerVisible -> StatusBanner(
-          message = stringResource(R.string.login_logout_success),
-          variant = StatusBannerVariant.Success,
-          modifier = bannerModifier,
-        )
+        // Banner sits a fixed gap below the button, in the normal content flow, per Figma.
+        // It must NOT be aligned to the screen's bottom edge (e.g. Box + Alignment.BottomCenter):
+        // that anchors it to the physical bottom of the device rather than to the button, so on
+        // screens taller than the Figma frame it visually drifts away from the button toward the
+        // bottom of the screen.
+        val bannerModifier = Modifier.fillMaxWidth()
+        when {
+          state.loginError != null -> {
+            Spacer(Modifier.height(96.dp))
+            StatusBanner(
+              message = stringResource(state.loginError!!),
+              variant = StatusBannerVariant.Error,
+              modifier = bannerModifier,
+            )
+          }
+          logoutBannerVisible -> {
+            Spacer(Modifier.height(96.dp))
+            StatusBanner(
+              message = stringResource(R.string.login_logout_success),
+              variant = StatusBannerVariant.Success,
+              modifier = bannerModifier,
+            )
+          }
+        }
+        Spacer(Modifier.height(24.dp))
       }
     }
   }

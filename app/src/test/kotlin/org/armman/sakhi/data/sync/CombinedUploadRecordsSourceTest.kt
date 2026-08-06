@@ -109,6 +109,13 @@ class CombinedUploadRecordsSourceTest {
       registrationDate: LocalDate,
     ): DynamicFormSubmitResult = DynamicFormSubmitResult.Synced
 
+    override suspend fun confirmNewPregnancy(
+      localBeneficiaryId: String,
+      existingBeneficiaryId: String,
+    ): DynamicFormSubmitResult = DynamicFormSubmitResult.Synced
+
+    override suspend fun dismissNewPregnancyPrompt(localBeneficiaryId: String) = Unit
+
     override suspend fun getUploadRecords(): List<FormUploadRecord> = records.value
 
     override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = records

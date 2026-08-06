@@ -12,6 +12,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.armman.sakhi.data.forms.DOB_QUESTION_CODE
+import org.armman.sakhi.data.enrollment.DuplicateOutcome
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.DynamicFormSubmitResult
 import org.armman.sakhi.data.forms.FormAnswers
@@ -35,6 +36,7 @@ import org.armman.sakhi.data.lookup.LookupValue
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -75,6 +77,9 @@ class DynamicMotherRegistrationViewModelTest {
   ) : DynamicFormDraftRepository {
     var submitCallCount = 0
 
+    /** Overrides [submitResult] from the next call on, so one test can script a second attempt. */
+    var nextSubmitResult: DynamicFormSubmitResult? = null
+
     override suspend fun saveDraft(
       localBeneficiaryId: String,
       formCode: String,
@@ -93,7 +98,24 @@ class DynamicMotherRegistrationViewModelTest {
       registrationDate: LocalDate,
     ): DynamicFormSubmitResult {
       submitCallCount++
-      return submitResult
+      return nextSubmitResult ?: submitResult
+    }
+
+    /** Result of a confirmed new-pregnancy resubmission; defaults to success. */
+    var confirmResult: DynamicFormSubmitResult = DynamicFormSubmitResult.Synced
+    var confirmedExistingBeneficiaryIds = mutableListOf<String>()
+    var dismissedPromptIds = mutableListOf<String>()
+
+    override suspend fun confirmNewPregnancy(
+      localBeneficiaryId: String,
+      existingBeneficiaryId: String,
+    ): DynamicFormSubmitResult {
+      confirmedExistingBeneficiaryIds += existingBeneficiaryId
+      return confirmResult
+    }
+
+    override suspend fun dismissNewPregnancyPrompt(localBeneficiaryId: String) {
+      dismissedPromptIds += localBeneficiaryId
     }
 
     override suspend fun getUploadRecords(): List<FormUploadRecord> = emptyList()
@@ -561,18 +583,135 @@ class DynamicMotherRegistrationViewModelTest {
     assertEquals("Obstetric totals do not add up", (state as SubmissionState.Failed).message)
   }
 
+  // --- CR-033 duplicate detection (SRS FR-S-2.4 / FR-S-2.5) ------------------------------------
+
+  private fun promptedViewModel(
+    draftRepository: FakeDraftRepository,
+  ): DynamicMotherRegistrationViewModel {
+    val vm = viewModel(listOf(field("mobile_number", section = "Personal Info")), draftRepository)
+    vm.setAnswer("mobile_number", "9876543210")
+    vm.submit()
+    dispatcher.scheduler.advanceUntilIdle()
+    return vm
+  }
+
   @Test
-  fun `submit on duplicate conflict reports Failed with a default message when none is given`() = runTest {
-    val draftRepository = FakeDraftRepository(DynamicFormSubmitResult.DuplicateConflict(null))
+  fun `a hard duplicate blocks the submit with no prompt to override it`() = runTest {
+    // SRS FR-S-2.4 — "registration cannot proceed". The state is deliberately not Failed(message):
+    // the copy is a fixed resource string so it exists in Marathi too.
+    val draftRepository = FakeDraftRepository(
+      DynamicFormSubmitResult.DuplicateConflict(DuplicateOutcome.HardDuplicate),
+    )
+
+    val vm = promptedViewModel(draftRepository)
+
+    assertEquals(SubmissionState.DuplicateBlocked, vm.uiState.value.submissionState)
+    assertNull(vm.uiState.value.duplicatePrompt)
+  }
+
+  @Test
+  fun `a completed earlier pregnancy raises the confirmation prompt and leaves submit usable`() = runTest {
+    val draftRepository = FakeDraftRepository(
+      DynamicFormSubmitResult.DuplicateConflict(DuplicateOutcome.NewPregnancyPrompt("earlier-case")),
+    )
+
+    val vm = promptedViewModel(draftRepository)
+
+    assertEquals(
+      DuplicateOutcome.NewPregnancyPrompt("earlier-case"),
+      vm.uiState.value.duplicatePrompt,
+    )
+    // Idle, not Failed — nothing is wrong yet, a question is pending.
+    assertEquals(SubmissionState.Idle, vm.uiState.value.submissionState)
+  }
+
+  @Test
+  fun `confirming the prompt resubmits with the earlier case id and reports success`() = runTest {
+    val draftRepository = FakeDraftRepository(
+      DynamicFormSubmitResult.DuplicateConflict(DuplicateOutcome.NewPregnancyPrompt("earlier-case")),
+    )
+    val vm = promptedViewModel(draftRepository)
+
+    vm.onConfirmNewPregnancy()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(listOf("earlier-case"), draftRepository.confirmedExistingBeneficiaryIds)
+    assertEquals(SubmissionState.Success, vm.uiState.value.submissionState)
+    assertNull(vm.uiState.value.duplicatePrompt)
+  }
+
+  @Test
+  fun `confirming while offline still reports success — the acknowledgement is queued`() = runTest {
+    val draftRepository = FakeDraftRepository(
+      DynamicFormSubmitResult.DuplicateConflict(DuplicateOutcome.NewPregnancyPrompt("earlier-case")),
+    )
+    draftRepository.confirmResult = DynamicFormSubmitResult.QueuedOffline
+    val vm = promptedViewModel(draftRepository)
+
+    vm.onConfirmNewPregnancy()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(SubmissionState.Success, vm.uiState.value.submissionState)
+  }
+
+  @Test
+  fun `a confirmation the backend still rejects as a hard duplicate ends blocked, not successful`() = runTest {
+    val draftRepository = FakeDraftRepository(
+      DynamicFormSubmitResult.DuplicateConflict(DuplicateOutcome.NewPregnancyPrompt("earlier-case")),
+    )
+    draftRepository.confirmResult =
+      DynamicFormSubmitResult.DuplicateConflict(DuplicateOutcome.HardDuplicate)
+    val vm = promptedViewModel(draftRepository)
+
+    vm.onConfirmNewPregnancy()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(SubmissionState.DuplicateBlocked, vm.uiState.value.submissionState)
+  }
+
+  @Test
+  fun `declining the prompt keeps the form editable and clears the stored question`() = runTest {
+    val draftRepository = FakeDraftRepository(
+      DynamicFormSubmitResult.DuplicateConflict(DuplicateOutcome.NewPregnancyPrompt("earlier-case")),
+    )
+    val vm = promptedViewModel(draftRepository)
+
+    vm.onDismissDuplicatePrompt()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertNull(vm.uiState.value.duplicatePrompt)
+    assertEquals(SubmissionState.Idle, vm.uiState.value.submissionState)
+    // Otherwise Home would keep asking a question she already answered "no" to.
+    assertEquals(listOf(vm.beneficiaryId), draftRepository.dismissedPromptIds)
+    assertEquals("9876543210", vm.uiState.value.answers.singleValues["mobile_number"])
+  }
+
+  @Test
+  fun `confirming with no prompt on screen never acknowledges a duplicate`() = runTest {
+    val draftRepository = FakeDraftRepository(DynamicFormSubmitResult.Synced)
     val vm = viewModel(listOf(field("mobile_number", section = "Personal Info")), draftRepository)
     vm.setAnswer("mobile_number", "9876543210")
 
+    vm.onConfirmNewPregnancy()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertTrue(draftRepository.confirmedExistingBeneficiaryIds.isEmpty())
+  }
+
+  @Test
+  fun `a fresh submit clears a prompt left over from the previous attempt`() = runTest {
+    val draftRepository = FakeDraftRepository(
+      DynamicFormSubmitResult.DuplicateConflict(DuplicateOutcome.NewPregnancyPrompt("earlier-case")),
+    )
+    val vm = promptedViewModel(draftRepository)
+    assertNotNull(vm.uiState.value.duplicatePrompt)
+
+    draftRepository.nextSubmitResult = DynamicFormSubmitResult.Synced
     vm.submit()
     dispatcher.scheduler.advanceUntilIdle()
 
-    val state = vm.uiState.value.submissionState
-    assertTrue(state is SubmissionState.Failed)
-    assertEquals("A possible duplicate beneficiary already exists", (state as SubmissionState.Failed).message)
+    assertNull(vm.uiState.value.duplicatePrompt)
+    assertEquals(SubmissionState.Success, vm.uiState.value.submissionState)
   }
 
   @Test
@@ -800,7 +939,7 @@ class DynamicMotherRegistrationViewModelTest {
   fun `an inconsistent gravida blocks its tab and submission`() = runTest {
     val vm = obstetricViewModel()
 
-    // QA's case: Gravida 6 alongside zeros, which total 0.
+    // QA's case: Gravida 6 alongside zeros, which imply Gravida 1.
     vm.answerObstetrics(gravida = "6")
 
     // Blocked on the Health History tab itself, not only at Submit.
@@ -812,7 +951,8 @@ class DynamicMotherRegistrationViewModelTest {
   fun `a consistent obstetric history passes the gate`() = runTest {
     val vm = obstetricViewModel()
 
-    vm.answerObstetrics(gravida = "4", para = "3", living = "2", abortions = "1", stillBirths = "1")
+    // 2 living + 1 abortion + 1 still birth = 4 past outcomes, + the current pregnancy = 5.
+    vm.answerObstetrics(gravida = "5", para = "3", living = "2", abortions = "1", stillBirths = "1")
 
     assertTrue(vm.isSectionReady("Health History"))
     assertTrue(vm.isReadyToSubmit())
@@ -825,7 +965,7 @@ class DynamicMotherRegistrationViewModelTest {
     vm.answerObstetrics(gravida = "6", living = "1", abortions = "1")
     assertFalse(vm.isSectionReady("Health History"))
 
-    vm.setAnswer(FormObstetricRuleset.GRAVIDA, "2")
+    vm.setAnswer(FormObstetricRuleset.GRAVIDA, "3")
     assertTrue(vm.isSectionReady("Health History"))
   }
 

@@ -272,8 +272,8 @@ private fun DynamicFormFieldBody(
   }
 
   // Red `*` next to the label of every field the Sakhi must fill in. See [RequiredFieldMarker] for
-  // which fields qualify. Deliberately not applied to `placeholder`, which reuses `field.label` —
-  // an asterisk inside the greyed-out hint text would read as part of the expected input.
+  // which fields qualify. `placeholder` is intentionally blank (no ghost text duplicating the
+  // label inside the field) — see per-field call sites below.
   val required = RequiredFieldMarker.isShownFor(field)
 
   when (field.inputType) {
@@ -293,7 +293,7 @@ private fun DynamicFormFieldBody(
       }
       AppTextInputField(
         label = field.label,
-        placeholder = field.label,
+        placeholder = "",
         value = singleValue,
         onValueChange = { new ->
           onSingleAnswer(if (isName) BeneficiaryNameRule.sanitize(new) else new)
@@ -331,7 +331,7 @@ private fun DynamicFormFieldBody(
       val maxDigits = FormNumericInputRule.maxDigits(field)
       AppTextInputField(
         label = field.label,
-        placeholder = field.label,
+        placeholder = "",
         value = singleValue,
         onValueChange = { new ->
           val digits = new.filter { it.isDigit() }
@@ -361,7 +361,7 @@ private fun DynamicFormFieldBody(
         ?.let { stringResource(it.messageRes()) }
       AppDateField(
         label = field.label,
-        placeholder = field.label,
+        placeholder = "",
         value = singleValue.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
         onDateSelected = { date -> onSingleAnswer(date.toString()) },
         errorText = serverErrorText ?: localError,
@@ -376,7 +376,7 @@ private fun DynamicFormFieldBody(
       LaunchedEffect(field.questionCode, answers) { options = loadOptions() }
       AppDropdownField(
         label = field.label,
-        placeholder = field.label,
+        placeholder = "",
         options = options.map { it.label },
         selectedIndex = options.indexOfFirst { it.valueCode == singleValue }.takeIf { it >= 0 },
         onSelected = { index -> onSingleAnswer(options.getOrNull(index)?.valueCode) },
@@ -489,7 +489,7 @@ private fun GeographyField(
   } else {
     AppDropdownField(
       label = field.label,
-      placeholder = field.label,
+      placeholder = "",
       options = options.map { it.label },
       selectedIndex = options.indexOfFirst { it.valueCode == selectedValue }.takeIf { it >= 0 },
       onSelected = { index -> onSingleAnswer(options.getOrNull(index)?.valueCode) },

@@ -130,7 +130,6 @@ fun EnrollmentScreen(
           title = stringResource(R.string.enrollment_back_title),
           subtitle = today,
           onBack = { if (inStepper) showExitDialog = true else exitFlow() },
-          onAvatarClick = onProfile,
         )
         Surface(
           color = White,

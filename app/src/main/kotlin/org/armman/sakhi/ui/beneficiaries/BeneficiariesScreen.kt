@@ -73,7 +73,6 @@ fun BeneficiariesScreen(
         title = stringResource(R.string.beneficiaries_back_title),
         subtitle = today,
         onBack = onBack,
-        onAvatarClick = onProfile,
       )
       Surface(
         color = White,

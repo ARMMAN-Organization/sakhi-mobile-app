@@ -13,8 +13,14 @@ sealed interface ChildFormSubmitResult {
   /** Online: the backend confirmed both the beneficiary and the form submission were created. */
   data object Synced : ChildFormSubmitResult
 
-  /** Online: backend rejected as a possible duplicate (SRS FR-S-2.4/2.5). */
-  data class DuplicateConflict(val message: String?) : ChildFormSubmitResult
+  /**
+   * Online: backend rejected as a duplicate child (SRS FR-S-2.4) — blocked, not overridable.
+   *
+   * Carries no message on purpose. The FR-S-2.5 "new pregnancy" branch cannot occur on this flow
+   * (the backend only reaches it when an LMP is supplied, and a child enrolment never sends one), so
+   * there is nothing for the Sakhi to confirm — the screen shows a fixed, localised sentence.
+   */
+  data object DuplicateConflict : ChildFormSubmitResult
 
   /** Online: backend rejected for any other reason (validation, mapping, server error). */
   data class Failed(val message: String?) : ChildFormSubmitResult

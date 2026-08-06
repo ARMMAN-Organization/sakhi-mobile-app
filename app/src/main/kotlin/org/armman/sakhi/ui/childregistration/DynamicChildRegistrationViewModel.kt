@@ -650,7 +650,7 @@ class DynamicChildRegistrationViewModel @Inject constructor(
             is ChildFormSubmitResult.Synced, is ChildFormSubmitResult.QueuedOffline ->
               SubmissionState.Success
             is ChildFormSubmitResult.DuplicateConflict ->
-              SubmissionState.Failed(ChildSubmitFailureKind.DUPLICATE, result.message)
+              SubmissionState.Failed(ChildSubmitFailureKind.DUPLICATE, null)
             is ChildFormSubmitResult.Failed ->
               // result.message is already the Sakhi-facing sentence — ChildFormSyncExecutor cleans it
               // via userFacingMessage() (ChildRegistrationSubmissionException.userMessage), so the raw

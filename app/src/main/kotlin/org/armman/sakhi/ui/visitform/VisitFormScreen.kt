@@ -110,7 +110,6 @@ fun VisitFormScreen(
         title = stringResource(R.string.visit_form_back_title),
         subtitle = today,
         onBack = { showExitDialog = true },
-        onAvatarClick = onProfile,
       )
       Surface(
         color = White,

@@ -154,6 +154,9 @@
   <string name="beneficiary_profile_coming_soon">This screen is coming soon</string>
   <string name="beneficiary_profile_error_load">We couldn\'t load this beneficiary. Please try again.</string>
   <string name="beneficiary_profile_see_visits">See Visits</string>
+  <!-- CR-022f: shown when a beneficiary has no generated schedule — e.g. enrolled on an older
+       build. Distinct from a loading state, and never a silent blank section. -->
+  <string name="beneficiary_profile_no_visits">No visits scheduled yet</string>
   <string name="beneficiary_profile_visit_open">Open</string>
   <string name="beneficiary_profile_visit_complete">Completed</string>
   <string name="beneficiary_profile_visit_complete_short">Complete</string>
@@ -169,7 +172,7 @@
   <!-- Enrollment form (CR-015) -->
   <string name="enrollment_back_title">Home Page</string>
   <string name="enrollment_title">Enrollment Form</string>
-  <string name="enrollment_register_as">Register New Beneficiary as :</string>
+  <string name="enrollment_register_as">Register new beneficiary as :</string>
   <string name="enrollment_type_child">Child</string>
   <string name="enrollment_type_pregnant_woman">Pregnant Woman</string>
   <string name="enrollment_tab_consent">Consent</string>
@@ -209,33 +212,33 @@
   <string name="enrollment_pi_first_name">Beneficiary First Name</string>
   <string name="enrollment_pi_middle_name">Beneficiary Middle Name</string>
   <string name="enrollment_pi_last_name">Beneficiary Last Name</string>
-  <string name="enrollment_pi_name_placeholder">Type name here</string>
+  <string name="enrollment_pi_name_placeholder"></string>
   <string name="enrollment_pi_dob">Date of Birth</string>
-  <string name="enrollment_pi_dob_placeholder">Select date of birth</string>
+  <string name="enrollment_pi_dob_placeholder"></string>
   <string name="enrollment_pi_age">Age</string>
-  <string name="enrollment_pi_age_placeholder">Or type age in years</string>
+  <string name="enrollment_pi_age_placeholder"></string>
   <string name="enrollment_pi_education">Education</string>
-  <string name="enrollment_pi_education_placeholder">Select Education</string>
+  <string name="enrollment_pi_education_placeholder"></string>
   <string name="enrollment_pi_partner_education">Partner’s Education</string>
   <string name="enrollment_pi_partner_occupation">Partner’s Occupation</string>
-  <string name="enrollment_pi_select_placeholder">Select</string>
+  <string name="enrollment_pi_select_placeholder"></string>
   <string name="enrollment_pi_address">Address</string>
-  <string name="enrollment_pi_address_placeholder">Type House number, Gali number, landmark</string>
+  <string name="enrollment_pi_address_placeholder"></string>
   <string name="enrollment_pi_mobile">Beneficiary Mobile Number</string>
-  <string name="enrollment_pi_mobile_placeholder">Type beneficiary’s phone number here</string>
+  <string name="enrollment_pi_mobile_placeholder"></string>
   <string name="enrollment_phone_prefix">+91</string>
   <string name="enrollment_pi_phone_owner">Who owns the phone?</string>
   <string name="enrollment_pi_network">Availability of Mobile Network</string>
   <string name="enrollment_pi_years_in_village">Since when have you been staying in this village? (years)</string>
-  <string name="enrollment_pi_years_placeholder">Type number of years</string>
+  <string name="enrollment_pi_years_placeholder"></string>
   <string name="enrollment_pi_migration">Household migration pattern</string>
   <string name="enrollment_pi_income">Family income per month</string>
   <string name="enrollment_pi_religion">Religion</string>
   <string name="enrollment_pi_category">Category</string>
   <string name="enrollment_pi_household">Family members in household (incl. children under 5)</string>
-  <string name="enrollment_pi_household_placeholder">Type count (2–15)</string>
+  <string name="enrollment_pi_household_placeholder"></string>
   <string name="enrollment_pi_children_under5">Children under 5 years in household</string>
-  <string name="enrollment_pi_children_placeholder">Type count</string>
+  <string name="enrollment_pi_children_placeholder"></string>
   <string name="enrollment_pi_state">Name of the State</string>
   <string name="enrollment_pi_district">Name of District</string>
   <string name="enrollment_pi_block">Name of Block/Taluka</string>
@@ -247,7 +250,7 @@
   <string name="enrollment_pi_yes">Yes</string>
   <string name="enrollment_pi_no">No</string>
   <string name="enrollment_pi_lmp">Date of LMP</string>
-  <string name="enrollment_pi_lmp_placeholder">Enter LMP</string>
+  <string name="enrollment_pi_lmp_placeholder"></string>
   <string name="enrollment_pi_edd">EDD (auto-calculated)</string>
   <string name="enrollment_pi_ga">Gestational age (weeks)</string>
   <string name="enrollment_pi_banner">Complete all necessary fields</string>
@@ -298,17 +301,17 @@
   <string name="enrollment_hh_treatment_type">Treatment type</string>
   <string name="enrollment_hh_rch_status">Enrolled in RCH?</string>
   <string name="enrollment_hh_rch_number">RCH number</string>
-  <string name="enrollment_hh_rch_number_placeholder">Enter RCH number</string>
+  <string name="enrollment_hh_rch_number_placeholder"></string>
   <string name="enrollment_hh_anc_status">Has the woman received ANC check-ups during this pregnancy?</string>
   <string name="enrollment_hh_anc1_date">ANC-1 date</string>
-  <string name="enrollment_hh_anc1_date_placeholder">Select ANC-1 date</string>
+  <string name="enrollment_hh_anc1_date_placeholder"></string>
   <string name="enrollment_hh_anc_conditions">High-risk conditions identified at last ANC check-up</string>
   <string name="enrollment_hh_td">Td doses received</string>
   <string name="enrollment_hh_td_none">None received yet</string>
   <string name="enrollment_hh_td1">Td-1</string>
   <string name="enrollment_hh_td2">Td-2</string>
   <string name="enrollment_hh_td_booster">Td-Booster</string>
-  <string name="enrollment_hh_td_date_placeholder">Select date</string>
+  <string name="enrollment_hh_td_date_placeholder"></string>
 
   <string name="enrollment_hh_gravida">Gravida (total pregnancies incl. current)</string>
   <string name="enrollment_hh_para">Para (births after 24 weeks)</string>
@@ -316,10 +319,10 @@
   <string name="enrollment_hh_abortions">Abortions (losses before 24 weeks)</string>
   <string name="enrollment_hh_still_births">Still births</string>
   <string name="enrollment_hh_dead_children">Dead children</string>
-  <string name="enrollment_hh_count_placeholder">Enter a number</string>
+  <string name="enrollment_hh_count_placeholder"></string>
   <string name="enrollment_hh_height">Height (cm)</string>
   <string name="enrollment_hh_weight">Weight (kg)</string>
-  <string name="enrollment_hh_height_weight_placeholder">Optional</string>
+  <string name="enrollment_hh_height_weight_placeholder"></string>
 
   <string name="enrollment_hh_last_pregnancy_when">When was your last pregnancy?</string>
   <string name="enrollment_hh_delivery_complications">Complications during previous birth/delivery</string>
@@ -337,7 +340,7 @@
   <string name="enrollment_hh_family_conditions">Applicable family conditions</string>
   <string name="enrollment_hh_malnutrition">Any children in the household treated for malnutrition?</string>
   <string name="enrollment_hh_remarks">Remarks</string>
-  <string name="enrollment_hh_remarks_placeholder">Optional notes</string>
+  <string name="enrollment_hh_remarks_placeholder"></string>
 
   <string name="enrollment_hh_error_count">Enter a valid number in range</string>
   <string name="enrollment_hh_error_anc1_date">ANC-1 date cannot be in the future</string>
@@ -346,7 +349,7 @@
   <string name="enrollment_hh_error_para">Para cannot exceed Gravida</string>
   <string name="enrollment_hh_error_abortions">Abortions cannot exceed Gravida</string>
   <string name="enrollment_hh_error_dead">Cannot exceed living children</string>
-  <string name="enrollment_hh_error_gravida_total">Living Children + Stillbirths + Abortions must equal Gravida</string>
+  <string name="enrollment_hh_error_gravida_total">Living Children + Stillbirths + Abortions must equal Gravida minus 1 (the current pregnancy)</string>
   <string name="enrollment_hh_error_height">Enter a valid height up to 300 cm</string>
   <string name="enrollment_hh_error_weight">Enter a valid weight up to 400 kg</string>
   <string name="enrollment_summary_health_history">Health History</string>
@@ -498,11 +501,11 @@
   <string name="child_reg_dob_future">Date of birth cannot be in the future.</string>
   <string name="child_reg_ineligible_direct">This child is older than 12 months (365 days) and cannot be registered directly.</string>
   <string name="child_reg_ineligible_mother">A child of a registered mother must be registered within 6 months (183 days) of birth.</string>
-  <string name="child_reg_duplicate">A matching child record already exists. Continue registering this as a new record?</string>
+  <string name="child_reg_duplicate">A matching child record already exists, so this registration cannot be completed. Please check with your supervisor.</string>
   <string name="child_reg_submit_failed">Registration could not be submitted. Please review the form and try again.</string>
 
   <!-- Mother link &amp; prefill (CR-031) -->
-  <string name="child_reg_mother_link_placeholder">Select mother</string>
+  <string name="child_reg_mother_link_placeholder"></string>
   <string name="child_reg_mother_link_title">Select mother</string>
   <string name="child_reg_mother_link_search_label">Search by name</string>
   <string name="child_reg_mother_link_age_years">%1$d yrs</string>
@@ -514,4 +517,12 @@
   <string name="child_reg_mother_link_retry">Try again</string>
   <string name="child_reg_mother_prefill_hint">From mother\'s record</string>
   <string name="field_required_content_description">%1$s, required</string>
+  <!-- CR-033 duplicate detection & new pregnancy (SRS FR-S-2.4 / FR-S-2.5) -->
+  <string name="enrollment_duplicate_blocked">This beneficiary is already registered and her current journey is still open, so this registration cannot be completed. Please check with your supervisor.</string>
+  <string name="enrollment_duplicate_new_pregnancy_title">Earlier record found</string>
+  <string name="enrollment_duplicate_new_pregnancy_message">We already have a record for this beneficiary, and her earlier pregnancy is complete. Is this a new pregnancy? Confirming creates a new record and keeps the earlier one unchanged.</string>
+  <string name="enrollment_duplicate_new_pregnancy_confirm">Yes, new pregnancy</string>
+  <string name="enrollment_duplicate_new_pregnancy_cancel">No, go back</string>
+  <string name="home_duplicate_review_title">Earlier record found</string>
+  <string name="home_duplicate_review_message">One registration from %1$s could not be uploaded: we already have a record for this beneficiary, and her earlier pregnancy is complete. Is this a new pregnancy?</string>
 </resources>

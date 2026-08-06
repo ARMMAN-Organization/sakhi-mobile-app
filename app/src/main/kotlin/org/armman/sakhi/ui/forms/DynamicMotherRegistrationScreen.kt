@@ -45,6 +45,7 @@ import org.armman.sakhi.data.forms.FormFieldSchema
 import org.armman.sakhi.data.forms.FormObstetricRuleset
 import org.armman.sakhi.ui.components.AppTabRow
 import org.armman.sakhi.ui.components.BackHeader
+import org.armman.sakhi.ui.components.ConfirmationDialog
 import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.components.StatusBanner
 import org.armman.sakhi.ui.components.StatusBannerVariant
@@ -83,6 +84,10 @@ fun DynamicMotherRegistrationScreen(
    * invoked from the Complete screen's back, not automatically on submit, so the "Enrollment
    * Complete!" state is actually shown (mirrors the static flow's COMPLETE step). */
   onSubmitted: (beneficiaryId: String) -> Unit,
+  /** The success screen's "Start Visit Form" CTA — opens the woman just enrolled, whose visits live
+   * on her profile. Distinct from [onSubmitted] on purpose: leaving the success screen goes Home,
+   * tapping the CTA goes to her. Both clear the enrollment sub-graph. */
+  onStartVisitForm: (beneficiaryId: String) -> Unit,
   /** Leaves the enrollment sub-graph (→ Home) when the beneficiary refuses consent — the
    * registration is abandoned, so nothing is saved and the form is not left on screen. */
   onConsentRefused: () -> Unit,
@@ -95,16 +100,37 @@ fun DynamicMotherRegistrationScreen(
   }
   var selectedTabIndex by remember { mutableStateOf(0) }
   val context = LocalContext.current
-  val comingSoonMessage = stringResource(R.string.enrollment_coming_soon)
   val isSuccess = state.submissionState is SubmissionState.Success
   val snackbarHostState = remember { SnackbarHostState() }
 
   // Submission errors (e.g. "token expired", validation/conflict messages) surface as a transient
   // snackbar rather than persistent red text — keyed on the state so each new failure re-shows.
+  // A hard duplicate (SRS FR-S-2.4) is a fixed sentence from resources, not backend text, so it is
+  // localised like the rest of the form's copy.
+  val duplicateBlockedMessage = stringResource(R.string.enrollment_duplicate_blocked)
   LaunchedEffect(state.submissionState) {
-    (state.submissionState as? SubmissionState.Failed)?.let { failed ->
-      snackbarHostState.showSnackbar(message = failed.message, duration = SnackbarDuration.Long)
+    when (val submission = state.submissionState) {
+      is SubmissionState.Failed ->
+        snackbarHostState.showSnackbar(message = submission.message, duration = SnackbarDuration.Long)
+
+      SubmissionState.DuplicateBlocked ->
+        snackbarHostState.showSnackbar(message = duplicateBlockedMessage, duration = SnackbarDuration.Long)
+
+      else -> Unit
     }
+  }
+
+  // SRS FR-S-2.5 — a completed earlier pregnancy exists; confirming enrolls this pregnancy as a new
+  // case linked to that one, and never overwrites it.
+  if (state.duplicatePrompt != null) {
+    ConfirmationDialog(
+      title = stringResource(R.string.enrollment_duplicate_new_pregnancy_title),
+      message = stringResource(R.string.enrollment_duplicate_new_pregnancy_message),
+      confirmLabel = stringResource(R.string.enrollment_duplicate_new_pregnancy_confirm),
+      cancelLabel = stringResource(R.string.enrollment_duplicate_new_pregnancy_cancel),
+      onConfirm = viewModel::onConfirmNewPregnancy,
+      onCancel = viewModel::onDismissDuplicatePrompt,
+    )
   }
 
   // "Did we receive consent? → No" aborts the registration on the spot: a toast explains why, then
@@ -139,11 +165,11 @@ fun DynamicMotherRegistrationScreen(
         Column(modifier = Modifier.fillMaxSize()) {
           when {
             isSuccess -> EnrollmentCompleteContent(
-              onStartVisitForm = {
-                // Same behaviour as the static flow: the Visit Form can't be opened yet (no
-                // visit is scheduled at enrollment time), so this is a "coming soon" stub.
-                Toast.makeText(context, comingSoonMessage, Toast.LENGTH_SHORT).show()
-              },
+              // She has no scheduled visit yet, so there is no visit form to open directly; her
+              // profile is where her visits appear once scheduled, and it is the only screen that
+              // resolves a freshly enrolled (unsynced) UUID id. Replaces the old "coming soon"
+              // stub — the toast was a dead end on the last screen of a completed enrollment.
+              onStartVisitForm = { onStartVisitForm(viewModel.beneficiaryId) },
             )
 
             state.isLoading && state.version == null -> Box(

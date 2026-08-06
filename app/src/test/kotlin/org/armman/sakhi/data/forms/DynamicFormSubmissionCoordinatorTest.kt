@@ -85,14 +85,15 @@ class DynamicFormSubmissionCoordinatorTest {
     coordinator = DynamicFormSubmissionCoordinator(enrollmentApi, formSubmissionApi, mapper)
   }
 
-  /** Answers matching a real gravida invariant (liveBirths + stillbirths + abortions = gravida)
+  /** Answers matching a real gravida invariant
+   * (liveBirths + stillbirths + abortions = gravida - 1, the -1 being the current pregnancy)
    * so the happy path doesn't trip the backend's own `superRefine` — see
    * `create-beneficiary.dto.ts`'s `motherDetailsSchema`. */
   private fun consistentAnswers() = FormAnswers(
     singleValues = mapOf(
       "did_we_receive_consent" to "yes",
       "lmp_date" to "2026-05-01",
-      "gravida_total_number_of_pregnancies" to "2",
+      "gravida_total_number_of_pregnancies" to "3",
       "para_number_of_births_after_24_weeks" to "1",
       "living_children" to "1",
       "abortions_pregnancy_losses_before_24_weeks" to "1",

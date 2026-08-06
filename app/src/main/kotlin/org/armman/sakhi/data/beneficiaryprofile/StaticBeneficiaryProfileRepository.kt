@@ -9,7 +9,7 @@ import javax.inject.Singleton
 
 /**
  * Static stand-in for the beneficiary-detail API. Keyed by the same ids as
- * [org.armman.sakhi.data.beneficiary.StaticBeneficiaryRepository] so every
+ * the ids the removed `StaticBeneficiaryRepository` used, so every
  * "See Profile" tap resolves. Unknown ids throw so the UI shows its error state.
  * Delete once the real endpoint exists — only DI references this class.
  */

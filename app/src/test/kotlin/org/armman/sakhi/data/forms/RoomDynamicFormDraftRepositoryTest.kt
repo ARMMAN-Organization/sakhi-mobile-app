@@ -10,10 +10,24 @@ import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.connectivity.FakeConnectivityChecker
 import org.armman.sakhi.data.enrollment.CreateBeneficiaryResponseData
 import org.armman.sakhi.data.enrollment.CreateBeneficiaryResponseDto
+import org.armman.sakhi.data.enrollment.DuplicateOutcome
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.lookup.FakeLookupRepository
+import org.armman.sakhi.data.schedule.AncScheduleGenerator
+import org.armman.sakhi.data.schedule.CcvScheduleGenerator
+import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
+import org.armman.sakhi.data.schedule.HardcodedRuleSource
+import org.armman.sakhi.data.schedule.IncScheduleGenerator
+import org.armman.sakhi.data.schedule.MotherEnrolmentScheduleTrigger
+import org.armman.sakhi.data.schedule.NnScheduleGenerator
+import org.armman.sakhi.data.schedule.PpScheduleGenerator
+import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
+import org.armman.sakhi.data.schedule.VisitCodeType
+import org.armman.sakhi.data.schedule.VisitScheduleCoordinator
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -30,6 +44,7 @@ class RoomDynamicFormDraftRepositoryTest {
   private lateinit var enrollmentApi: FakeEnrollmentApi
   private lateinit var formSubmissionApi: FakeFormSubmissionApi
   private lateinit var syncExecutor: DynamicFormSyncExecutor
+  private lateinit var scheduleDao: FakeVisitScheduleDao
   private lateinit var repository: RoomDynamicFormDraftRepository
   private lateinit var lookupRepository: FakeLookupRepository
 
@@ -59,15 +74,40 @@ class RoomDynamicFormDraftRepositoryTest {
     val coordinator = DynamicFormSubmissionCoordinator(enrollmentApi, formSubmissionApi, mapper)
     // Reuses the same dao/secureStore as the repository so runOne() sees the row submitDraft just
     // wrote — matching how the real Hilt graph wires a single instance of each.
-    syncExecutor = DynamicFormSyncExecutor(dao, secureStore, coordinator)
-    repository = RoomDynamicFormDraftRepository(dao, secureStore, connectivityChecker, syncExecutor)
+    // CR-022: submitDraft also generates the ANC schedule, and a successful sync links it to the
+    // server beneficiary id. Wired with real collaborators over a fake DAO so both side-effects are
+    // exercised here rather than stubbed away — this is the only place the enrolment flow and the
+    // scheduling engine meet.
+    scheduleDao = FakeVisitScheduleDao()
+    val scheduleRepository = RoomVisitScheduleRepository(scheduleDao)
+    syncExecutor = DynamicFormSyncExecutor(dao, secureStore, coordinator, scheduleRepository)
+    val rules = HardcodedRuleSource()
+    val scheduleTrigger = MotherEnrolmentScheduleTrigger(
+      coordinator = VisitScheduleCoordinator(
+        repository = scheduleRepository,
+        ancGenerator = AncScheduleGenerator(rules),
+        ppGenerator = PpScheduleGenerator(rules),
+        nnGenerator = NnScheduleGenerator(rules),
+        incGenerator = IncScheduleGenerator(rules),
+        ccvGenerator = CcvScheduleGenerator(rules),
+      ),
+      ruleSource = rules,
+    )
+    repository = RoomDynamicFormDraftRepository(
+      dao,
+      secureStore,
+      connectivityChecker,
+      syncExecutor,
+      scheduleTrigger,
+    )
   }
 
   private val answers = FormAnswers(
     singleValues = mapOf(
       "did_we_receive_consent" to "yes",
       "lmp_date" to "2026-05-01",
-      "gravida_total_number_of_pregnancies" to "1",
+      // 1 living child + 0 still births + 0 abortions = 1 past outcome, + the current pregnancy.
+      "gravida_total_number_of_pregnancies" to "2",
       "para_number_of_births_after_24_weeks" to "0",
       "living_children" to "1",
       "abortions_pregnancy_losses_before_24_weeks" to "0",
@@ -369,5 +409,293 @@ class RoomDynamicFormDraftRepositoryTest {
     // that the type itself has no remoteBeneficiaryId/lastErrorMessage field to leak.
     assertEquals("local-1", record.localBeneficiaryId)
     assertEquals(EnrollmentSyncStatus.PENDING, record.syncStatus)
+  }
+
+  // ---- CR-022: ANC schedule generation on submit -----------------------------------------------
+
+  /**
+   * TR-1. This is the join between the enrolment flow and the scheduling engine — the engine can be
+   * perfect and the Sakhi still sees nothing if this call is missing.
+   */
+  @Test
+  fun `submitDraft generates the ANC schedule from the LMP answer`() = runTest {
+    repository.submitDraft(
+      localBeneficiaryId = "local-1",
+      formCode = "MOTHER_REGISTRATION",
+      formVersionId = "version-1",
+      localSubmissionUuid = "submission-1",
+      answers = answers,
+      registrationDate = LocalDate.of(2026, 5, 20),
+    )
+
+    val schedule = scheduleDao.getForBeneficiary("local-1")
+    assertTrue("A submitted enrolment must produce a schedule", schedule.isNotEmpty())
+    assertTrue(schedule.all { it.visitType == VisitCodeType.ANC })
+    // ANC1 falls on the registration date itself (FR-S-3.2).
+    assertEquals(LocalDate.of(2026, 5, 20), schedule.first().scheduledDate)
+  }
+
+  /** TR-4 — the SRS requires generation to work with no connectivity at all. */
+  @Test
+  fun `submitDraft generates the schedule even when offline`() = runTest {
+    connectivityChecker.online = false
+
+    repository.submitDraft(
+      localBeneficiaryId = "local-1",
+      formCode = "MOTHER_REGISTRATION",
+      formVersionId = "version-1",
+      localSubmissionUuid = "submission-1",
+      answers = answers,
+      registrationDate = LocalDate.of(2026, 5, 20),
+    )
+
+    assertTrue(scheduleDao.getForBeneficiary("local-1").isNotEmpty())
+  }
+
+  /** A partial save is not an enrolment, so it must not produce a schedule. */
+  @Test
+  fun `saveDraft does not generate a schedule`() = runTest {
+    repository.saveDraft(
+      localBeneficiaryId = "local-1",
+      formCode = "MOTHER_REGISTRATION",
+      formVersionId = "version-1",
+      localSubmissionUuid = "submission-1",
+      answers = answers,
+      registrationDate = LocalDate.of(2026, 5, 20),
+    )
+
+    assertTrue(scheduleDao.getForBeneficiary("local-1").isEmpty())
+  }
+
+  /** TR-5 — a double-tapped Submit must not produce two schedules. */
+  @Test
+  fun `submitting twice does not duplicate the schedule`() = runTest {
+    repeat(2) {
+      repository.submitDraft(
+        localBeneficiaryId = "local-1",
+        formCode = "MOTHER_REGISTRATION",
+        formVersionId = "version-1",
+        localSubmissionUuid = "submission-1",
+        answers = answers,
+        registrationDate = LocalDate.of(2026, 5, 20),
+      )
+    }
+
+    // LMP 2026-05-01 → EDD 2027-02-05; registered 2026-05-20, so ((261 / 30) + 1) = 9 visits.
+    assertEquals(9, scheduleDao.getForBeneficiary("local-1").size)
+  }
+
+  /**
+   * The bug this catches: the schedule sync path was fully built but permanently inert.
+   *
+   * `getUnsynced()` deliberately skips any row whose `serverBeneficiaryId` is null — a schedule
+   * cannot be uploaded before its beneficiary exists server-side. But nothing ever populated that
+   * column: the submission coordinator obtained the server id, used it for the form submission and
+   * then discarded it. So every generated schedule stayed invisible to the sync queue and silently
+   * never uploaded, with no error anywhere to show for it.
+   */
+  @Test
+  fun `a successful sync makes the generated schedule eligible for upload`() = runTest {
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    repository.submitDraft(
+      localBeneficiaryId = "local-1",
+      formCode = "MOTHER_REGISTRATION",
+      formVersionId = "version-1",
+      localSubmissionUuid = "submission-1",
+      answers = answers,
+      registrationDate = LocalDate.of(2026, 5, 20),
+    )
+
+    val stored = scheduleDao.getForBeneficiary("local-1")
+    assertTrue("The schedule must exist", stored.isNotEmpty())
+    assertTrue(
+      "Every row must carry the server beneficiary id, or it can never upload",
+      stored.all { it.serverBeneficiaryId == "server-beneficiary-1" },
+    )
+  }
+
+  @Test
+  fun `a schedule stays ineligible for upload while its beneficiary is unsynced`() = runTest {
+    connectivityChecker.online = false
+
+    repository.submitDraft(
+      localBeneficiaryId = "local-1",
+      formCode = "MOTHER_REGISTRATION",
+      formVersionId = "version-1",
+      localSubmissionUuid = "submission-1",
+      answers = answers,
+      registrationDate = LocalDate.of(2026, 5, 20),
+    )
+
+    val stored = scheduleDao.getForBeneficiary("local-1")
+    assertTrue("Generated offline", stored.isNotEmpty())
+    assertTrue(
+      "Deferred, not failed — it uploads once the beneficiary syncs",
+      stored.all { it.serverBeneficiaryId == null },
+    )
+  }
+
+  /**
+   * The guard that stops this generic path minting an ANC series for anything that happens to
+   * carry an `lmp_date`. Without it a re-registration, or any future form routed through the
+   * dynamic-form repository, would each produce one.
+   */
+  @Test
+  fun `a non-mother form does not generate an ANC schedule`() = runTest {
+    repository.submitDraft(
+      localBeneficiaryId = "local-1",
+      formCode = "CHILD_REGISTRATION",
+      formVersionId = "version-1",
+      localSubmissionUuid = "submission-1",
+      answers = answers,
+      registrationDate = LocalDate.of(2026, 5, 20),
+    )
+
+    assertTrue(scheduleDao.getForBeneficiary("local-1").isEmpty())
+  }
+
+  /**
+   * A registration the scheduler cannot use still has to save. Losing an enrolment is far worse
+   * than missing a schedule, which can be generated later.
+   *
+   * Run offline deliberately. Online, a missing `lmp_date` also fails the *submission* — the
+   * beneficiary DTO requires it — so the result would be `Failed` for a reason that has nothing to
+   * do with scheduling, and the test would prove nothing about the trigger. Offline the upload is
+   * skipped entirely, isolating the one thing under test: the schedule trigger swallowing its own
+   * failure rather than taking the draft down with it.
+   */
+  @Test
+  fun `an LMP the scheduler cannot use still saves the draft and generates no schedule`() =
+    runTest {
+      connectivityChecker.online = false
+      val withoutLmp = answers.copy(singleValues = answers.singleValues - "lmp_date")
+
+      val result = repository.submitDraft(
+        localBeneficiaryId = "local-1",
+        formCode = "MOTHER_REGISTRATION",
+        formVersionId = "version-1",
+        localSubmissionUuid = "submission-1",
+        answers = withoutLmp,
+        registrationDate = LocalDate.of(2026, 5, 20),
+      )
+
+      assertEquals(DynamicFormSubmitResult.QueuedOffline, result)
+      assertNotNull("The draft must still be saved", dao.getByLocalBeneficiaryId("local-1"))
+      assertTrue(scheduleDao.getForBeneficiary("local-1").isEmpty())
+    }
+
+  // --- CR-033 duplicate detection (SRS FR-S-2.4 / FR-S-2.5) ------------------------------------
+
+  private val reEnrolmentConflictBody = """
+    {"success":false,"message":"A previous record exists for this beneficiary. Is this a new pregnancy?",
+     "errorCode":"CONFLICT","traceId":"t-1",
+     "fieldErrors":{"reason":"RE_ENROLLMENT","existingBeneficiaryId":"earlier-case-uuid",
+     "resolution":"Resubmit with acknowledgeDuplicate: true to enroll a new pregnancy."}}
+  """.trimIndent()
+
+  private fun conflictResponse(body: String) =
+    Response.error<CreateBeneficiaryResponseDto>(409, body.toResponseBody("application/json".toMediaType()))
+
+  private fun storedPayload() = dynamicFormDraftGson.fromJson(
+    requireNotNull(secureStore.getString(dynamicFormDraftPayloadKey("local-1"))),
+    DynamicFormDraftPayload::class.java,
+  )
+
+  @Test
+  fun `submitDraft surfaces a re-enrolment 409 as a new pregnancy prompt`() = runTest {
+    connectivityChecker.online = true
+    enrollmentApi.response = conflictResponse(reEnrolmentConflictBody)
+
+    val result = submit()
+
+    assertEquals(
+      DynamicFormSubmitResult.DuplicateConflict(DuplicateOutcome.NewPregnancyPrompt("earlier-case-uuid")),
+      result,
+    )
+  }
+
+  @Test
+  fun `confirmNewPregnancy resubmits with the acknowledgement and syncs`() = runTest {
+    connectivityChecker.online = true
+    // First attempt is rejected as a possible duplicate, the retry succeeds.
+    enrollmentApi.responseQueue.addLast(conflictResponse(reEnrolmentConflictBody))
+    enrollmentApi.responseQueue.addLast(successfulBeneficiaryResponse())
+    formSubmissionApi.response = successfulSubmissionResponse()
+    submit()
+
+    val result = repository.confirmNewPregnancy("local-1", "earlier-case-uuid")
+
+    assertEquals(DynamicFormSubmitResult.Synced, result)
+    val retry = requireNotNull(enrollmentApi.lastRequest)
+    assertEquals(true, retry.acknowledgeDuplicate)
+    assertEquals("earlier-case-uuid", retry.case.previousBeneficiaryId)
+    assertEquals(EnrollmentSyncStatus.SYNCED, dao.getByLocalBeneficiaryId("local-1")?.syncStatus)
+    // Answered, so Home must stop offering the prompt.
+    assertNull(storedPayload().pendingNewPregnancyBeneficiaryId)
+  }
+
+  @Test
+  fun `confirmNewPregnancy offline queues the draft with the acknowledgement kept for the next upload`() = runTest {
+    connectivityChecker.online = true
+    enrollmentApi.response = conflictResponse(reEnrolmentConflictBody)
+    submit()
+    val callsBefore = enrollmentApi.callCount
+    connectivityChecker.online = false
+
+    val result = repository.confirmNewPregnancy("local-1", "earlier-case-uuid")
+
+    assertEquals(DynamicFormSubmitResult.QueuedOffline, result)
+    assertEquals(callsBefore, enrollmentApi.callCount)
+    // PENDING (not DUPLICATE_CONFLICT), or the manual Data Upload would skip it forever.
+    assertEquals(EnrollmentSyncStatus.PENDING, dao.getByLocalBeneficiaryId("local-1")?.syncStatus)
+    assertEquals("earlier-case-uuid", storedPayload().duplicateAcknowledgement?.existingBeneficiaryId)
+  }
+
+  @Test
+  fun `confirmNewPregnancy on an unknown draft fails instead of reporting a success that never happened`() = runTest {
+    val result = repository.confirmNewPregnancy("does-not-exist", "earlier-case-uuid")
+
+    assertTrue(result is DynamicFormSubmitResult.Failed)
+    assertEquals(0, enrollmentApi.callCount)
+  }
+
+  @Test
+  fun `dismissNewPregnancyPrompt clears the question but keeps the draft and its answers`() = runTest {
+    connectivityChecker.online = true
+    enrollmentApi.response = conflictResponse(reEnrolmentConflictBody)
+    submit()
+    assertEquals("earlier-case-uuid", storedPayload().pendingNewPregnancyBeneficiaryId)
+
+    repository.dismissNewPregnancyPrompt("local-1")
+
+    assertNull(storedPayload().pendingNewPregnancyBeneficiaryId)
+    assertNull(storedPayload().duplicateAcknowledgement)
+    assertEquals(EnrollmentSyncStatus.DUPLICATE_CONFLICT, dao.getByLocalBeneficiaryId("local-1")?.syncStatus)
+    assertNotNull(storedPayload().answers.singleValues["first_name"])
+  }
+
+  @Test
+  fun `an unanswered prompt is exposed on the upload record so Home can ask about it`() = runTest {
+    connectivityChecker.online = true
+    enrollmentApi.response = conflictResponse(reEnrolmentConflictBody)
+    submit()
+
+    val record = repository.getUploadRecords().single { it.localBeneficiaryId == "local-1" }
+
+    assertEquals("earlier-case-uuid", record.pendingNewPregnancyBeneficiaryId)
+  }
+
+  @Test
+  fun `a hard duplicate exposes no prompt on the upload record`() = runTest {
+    connectivityChecker.online = true
+    enrollmentApi.response = conflictResponse("{\"message\":\"A possible duplicate beneficiary already exists.\"}")
+    submit()
+
+    val record = repository.getUploadRecords().single { it.localBeneficiaryId == "local-1" }
+
+    assertEquals(EnrollmentSyncStatus.DUPLICATE_CONFLICT, record.syncStatus)
+    assertNull(record.pendingNewPregnancyBeneficiaryId)
   }
 }

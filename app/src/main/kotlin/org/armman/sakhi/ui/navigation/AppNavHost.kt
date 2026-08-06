@@ -142,6 +142,15 @@ fun AppNavHost() {
             popUpTo(Routes.ENROLLMENT) { inclusive = true }
           }
         },
+        // "Start Visit Form" on the success screen → the woman just enrolled. Her visits are on her
+        // profile (there is no per-beneficiary visit destination), and the profile resolves local
+        // draft ids. The sub-graph is cleared the same way, so back from the profile lands Home
+        // rather than re-entering a submitted form.
+        onStartVisitForm = { beneficiaryId ->
+          navController.navigate(Routes.beneficiaryProfile(beneficiaryId)) {
+            popUpTo(Routes.ENROLLMENT) { inclusive = true }
+          }
+        },
         // Consent refused: same exit as a completed enrollment. Clearing the sub-graph matters more
         // here — system back must not re-enter a form the beneficiary declined.
         onConsentRefused = {

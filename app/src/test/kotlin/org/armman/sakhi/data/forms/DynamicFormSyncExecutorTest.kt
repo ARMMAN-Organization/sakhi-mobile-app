@@ -8,10 +8,15 @@ import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.enrollment.CreateBeneficiaryResponseData
 import org.armman.sakhi.data.enrollment.CreateBeneficiaryResponseDto
+import org.armman.sakhi.data.enrollment.DuplicateAcknowledgement
+import org.armman.sakhi.data.enrollment.DuplicateOutcome
 import org.armman.sakhi.data.enrollment.EnrollmentSyncOutcome
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
+import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
+import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -22,6 +27,7 @@ import java.time.Instant
 class DynamicFormSyncExecutorTest {
 
   private lateinit var dao: FakeDynamicFormDraftDao
+  private lateinit var scheduleDao: FakeVisitScheduleDao
   private lateinit var secureStore: FakeSecureKeyValueStore
   private lateinit var enrollmentApi: FakeEnrollmentApi
   private lateinit var formSubmissionApi: FakeFormSubmissionApi
@@ -49,14 +55,21 @@ class DynamicFormSyncExecutorTest {
     sessionStore.saveSession(session)
     val mapper = DynamicFormSubmissionMapper(sessionStore, FakeLookupRepository())
     val coordinator = DynamicFormSubmissionCoordinator(enrollmentApi, formSubmissionApi, mapper)
-    executor = DynamicFormSyncExecutor(dao, secureStore, coordinator)
+    scheduleDao = FakeVisitScheduleDao()
+    executor = DynamicFormSyncExecutor(
+      dao,
+      secureStore,
+      coordinator,
+      RoomVisitScheduleRepository(scheduleDao),
+    )
   }
 
   private fun validAnswers() = FormAnswers(
     singleValues = mapOf(
       "did_we_receive_consent" to "yes",
       "lmp_date" to "2026-05-01",
-      "gravida_total_number_of_pregnancies" to "1",
+      // 1 living child + 0 still births + 0 abortions = 1 past outcome, + the current pregnancy.
+      "gravida_total_number_of_pregnancies" to "2",
       "para_number_of_births_after_24_weeks" to "0",
       "living_children" to "1",
       "abortions_pregnancy_losses_before_24_weeks" to "0",
@@ -337,5 +350,108 @@ class DynamicFormSyncExecutorTest {
     assertEquals("version-1", formSubmissionApi.lastRequest?.formVersionId)
     assertEquals("server-beneficiary-1", formSubmissionApi.lastRequest?.beneficiaryId)
     assertEquals("submission-uuid-1", formSubmissionApi.lastRequest?.localSubmissionUuid)
+  }
+
+  // --- CR-033 duplicate detection (SRS FR-S-2.4 / FR-S-2.5) ------------------------------------
+
+  private val reEnrolmentConflictBody = """
+    {"success":false,"message":"A previous record exists for this beneficiary. Is this a new pregnancy?",
+     "errorCode":"CONFLICT","traceId":"t-1",
+     "fieldErrors":{"reason":"RE_ENROLLMENT","existingBeneficiaryId":"earlier-case-uuid",
+     "resolution":"Resubmit with acknowledgeDuplicate: true to enroll a new pregnancy."}}
+  """.trimIndent()
+
+  private fun conflictResponse(body: String) =
+    Response.error<CreateBeneficiaryResponseDto>(409, body.toResponseBody("application/json".toMediaType()))
+
+  private fun storedPayload(localBeneficiaryId: String = "local-1") =
+    dynamicFormDraftGson.fromJson(
+      requireNotNull(secureStore.getString(dynamicFormDraftPayloadKey(localBeneficiaryId))),
+      DynamicFormDraftPayload::class.java,
+    )
+
+  @Test
+  fun `runOne on a re-enrolment 409 returns a new pregnancy prompt carrying the earlier case id`() = runTest {
+    seedPendingDraft()
+    enrollmentApi.response = conflictResponse(reEnrolmentConflictBody)
+
+    val result = executor.runOne("local-1")
+
+    assertEquals(
+      DynamicFormSyncItemResult.DuplicateConflict(
+        DuplicateOutcome.NewPregnancyPrompt("earlier-case-uuid"),
+      ),
+      result,
+    )
+  }
+
+  @Test
+  fun `a re-enrolment prompt is remembered on the draft so it can be answered from Home`() = runTest {
+    // The 409 can land during a background upload with nobody on the form. Without persisting the
+    // prompt the draft would sit in DUPLICATE_CONFLICT forever — visible, unanswerable, unuploadable.
+    seedPendingDraft()
+    enrollmentApi.response = conflictResponse(reEnrolmentConflictBody)
+
+    executor.run()
+
+    assertEquals("earlier-case-uuid", storedPayload().pendingNewPregnancyBeneficiaryId)
+    assertEquals(
+      EnrollmentSyncStatus.DUPLICATE_CONFLICT,
+      requireNotNull(dao.getByLocalBeneficiaryId("local-1")).syncStatus,
+    )
+  }
+
+  @Test
+  fun `a hard duplicate 409 is blocked and stores no prompt`() = runTest {
+    seedPendingDraft()
+    enrollmentApi.response = conflictResponse(
+      "{\"message\":\"A possible duplicate beneficiary already exists (beneficiaryId: abc).\"}",
+    )
+
+    val result = executor.runOne("local-1")
+
+    assertEquals(
+      DynamicFormSyncItemResult.DuplicateConflict(DuplicateOutcome.HardDuplicate),
+      result,
+    )
+    assertNull(storedPayload().pendingNewPregnancyBeneficiaryId)
+  }
+
+  @Test
+  fun `a first attempt sends neither acknowledgeDuplicate nor a previous case link`() = runTest {
+    seedPendingDraft()
+    enrollmentApi.response = successfulBeneficiaryResponse()
+
+    executor.runOne("local-1")
+
+    val request = requireNotNull(enrollmentApi.lastRequest)
+    assertNull(request.acknowledgeDuplicate)
+    assertNull(request.case.previousBeneficiaryId)
+  }
+
+  @Test
+  fun `a draft carrying an acknowledgement uploads with acknowledgeDuplicate and the earlier case link`() = runTest {
+    seedPendingDraft()
+    secureStore.putString(
+      dynamicFormDraftPayloadKey("local-1"),
+      dynamicFormDraftGson.toJson(
+        storedPayload().copy(duplicateAcknowledgement = DuplicateAcknowledgement("earlier-case-uuid")),
+      ),
+    )
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    // Both calls have to succeed for the draft to reach SYNCED — `POST /beneficiaries` then
+    // `POST /forms/.../submissions`. Stubbing only the first left the submission failing, so the
+    // draft ended FAILED even though the acknowledgement assertions below passed.
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    executor.run()
+
+    val request = requireNotNull(enrollmentApi.lastRequest)
+    assertEquals(true, request.acknowledgeDuplicate)
+    assertEquals("earlier-case-uuid", request.case.previousBeneficiaryId)
+    assertEquals(
+      EnrollmentSyncStatus.SYNCED,
+      requireNotNull(dao.getByLocalBeneficiaryId("local-1")).syncStatus,
+    )
   }
 }

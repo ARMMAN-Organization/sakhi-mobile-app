@@ -1,9 +1,11 @@
 package org.armman.sakhi.data.forms
 
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
+import org.armman.sakhi.data.enrollment.DuplicateOutcome
 import org.armman.sakhi.data.enrollment.EnrollmentMappingException
 import org.armman.sakhi.data.enrollment.EnrollmentSyncOutcome
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
+import org.armman.sakhi.data.schedule.VisitScheduleRepository
 import retrofit2.HttpException
 import java.io.IOException
 import java.time.Instant
@@ -30,7 +32,11 @@ private const val LOOKUP_UNAVAILABLE_USER_MESSAGE =
  */
 sealed interface DynamicFormSyncItemResult {
   data object Synced : DynamicFormSyncItemResult
-  data class DuplicateConflict(val message: String?) : DynamicFormSyncItemResult
+
+  /** A `409` from `POST /beneficiaries`. [outcome] says whether this is a hard duplicate (blocked)
+   * or an FR-S-2.5 new-pregnancy prompt the Sakhi can confirm — no user-facing copy here, the UI
+   * owns that so it exists in Marathi too. */
+  data class DuplicateConflict(val outcome: DuplicateOutcome) : DynamicFormSyncItemResult
 
   /** [fieldErrors] carries a `400 VALIDATION_ERROR`'s per-field messages keyed by dotted DTO path
    * (empty for every other failure), threaded up to the ViewModel where it's mapped to
@@ -54,6 +60,7 @@ class DynamicFormSyncExecutor @Inject constructor(
   private val dao: DynamicFormDraftDao,
   private val secureStore: SecureKeyValueStore,
   private val coordinator: DynamicFormSubmissionCoordinator,
+  private val visitScheduleRepository: VisitScheduleRepository,
 ) {
 
   /** Processes every PENDING draft — used by the background [DynamicFormSyncWorker]. Unchanged
@@ -88,9 +95,10 @@ class DynamicFormSyncExecutor @Inject constructor(
           localSubmissionUuid = draft.localSubmissionUuid,
           answers = payload.answers,
           fallbackRegistrationDate = parseRegistrationDate(payload.registrationDateIso),
+          duplicateAcknowledgement = payload.duplicateAcknowledgement,
         )
         result.fold(
-          onSuccess = {
+          onSuccess = { serverBeneficiaryId ->
             dao.upsert(
               draft.copy(
                 syncStatus = EnrollmentSyncStatus.SYNCED,
@@ -98,12 +106,15 @@ class DynamicFormSyncExecutor @Inject constructor(
                 lastErrorMessage = null,
               ),
             )
+            linkScheduleToServerBeneficiary(draft.localBeneficiaryId, serverBeneficiaryId)
           },
           onFailure = { error ->
             when {
               error is DynamicFormSubmissionException.BeneficiaryCreationFailed && error.httpCode == HTTP_CONFLICT -> {
-                // SRS FR-S-2.4/2.5 — possible duplicate. Held for the Sakhi to confirm/discard
-                // (task #17), never auto-retried.
+                // SRS FR-S-2.4/2.5 — possible duplicate. Held for the Sakhi to confirm/discard,
+                // never auto-retried. An FR-S-2.5 prompt is remembered on the draft so she can still
+                // answer it from Home; this run is a background upload with nobody on the form.
+                rememberPendingPrompt(draft.localBeneficiaryId, payload, error.duplicateOutcome)
                 dao.upsert(
                   draft.copy(
                     syncStatus = EnrollmentSyncStatus.DUPLICATE_CONFLICT,
@@ -173,9 +184,10 @@ class DynamicFormSyncExecutor @Inject constructor(
         localSubmissionUuid = draft.localSubmissionUuid,
         answers = payload.answers,
         fallbackRegistrationDate = parseRegistrationDate(payload.registrationDateIso),
+        duplicateAcknowledgement = payload.duplicateAcknowledgement,
       )
       result.fold(
-        onSuccess = {
+        onSuccess = { serverBeneficiaryId ->
           dao.upsert(
             draft.copy(
               syncStatus = EnrollmentSyncStatus.SYNCED,
@@ -183,6 +195,7 @@ class DynamicFormSyncExecutor @Inject constructor(
               lastErrorMessage = null,
             ),
           )
+          linkScheduleToServerBeneficiary(draft.localBeneficiaryId, serverBeneficiaryId)
           DynamicFormSyncItemResult.Synced
         },
         onFailure = { error ->
@@ -196,7 +209,12 @@ class DynamicFormSyncExecutor @Inject constructor(
                   lastErrorMessage = error.message,
                 ),
               )
-              DynamicFormSyncItemResult.DuplicateConflict(error.userMessage)
+              // Parsed by the coordinator from the 409 envelope; HardDuplicate is the safe default
+              // if the marker was missing or unrecognised (see DuplicateOutcomeParser).
+              rememberPendingPrompt(draft.localBeneficiaryId, payload, error.duplicateOutcome)
+              DynamicFormSyncItemResult.DuplicateConflict(
+                error.duplicateOutcome ?: DuplicateOutcome.HardDuplicate,
+              )
             }
 
             error is IOException || error.cause is IOException -> {
@@ -262,6 +280,26 @@ class DynamicFormSyncExecutor @Inject constructor(
     )
   }
 
+  /**
+   * Records an unanswered FR-S-2.5 new-pregnancy prompt on the draft's encrypted payload, so it can
+   * still be answered from Home after a background upload hit the conflict.
+   *
+   * A hard duplicate stores nothing — there is no question to answer — and any previously stored
+   * prompt is cleared, so a stale one can't be answered against a rejection it no longer matches.
+   */
+  private fun rememberPendingPrompt(
+    localBeneficiaryId: String,
+    payload: DynamicFormDraftPayload,
+    outcome: DuplicateOutcome?,
+  ) {
+    val pendingId = (outcome as? DuplicateOutcome.NewPregnancyPrompt)?.existingBeneficiaryId
+    if (payload.pendingNewPregnancyBeneficiaryId == pendingId) return
+    secureStore.putString(
+      dynamicFormDraftPayloadKey(localBeneficiaryId),
+      dynamicFormDraftGson.toJson(payload.copy(pendingNewPregnancyBeneficiaryId = pendingId)),
+    )
+  }
+
   private fun loadPayload(localBeneficiaryId: String): DynamicFormDraftPayload? {
     val json = secureStore.getString(dynamicFormDraftPayloadKey(localBeneficiaryId)) ?: return null
     return runCatching { dynamicFormDraftGson.fromJson(json, DynamicFormDraftPayload::class.java) }.getOrNull()
@@ -275,4 +313,25 @@ class DynamicFormSyncExecutor @Inject constructor(
     is DynamicFormSubmissionException.FormSubmissionFailed -> httpCode
     else -> null
   }
+
+  /**
+   * Makes this beneficiary's locally generated visit schedules eligible for upload (CR-022).
+   *
+   * A schedule cannot be sent before its beneficiary exists server-side — the bulk endpoint keys on
+   * the server beneficiary id — so `VisitScheduleRepository.getUnsynced()` skips any row whose
+   * `serverBeneficiaryId` is still null. This is the only moment that id is known, so without this
+   * call every schedule stays permanently invisible to the sync queue and silently never uploads.
+   *
+   * Failure here must not fail the enrolment sync: the registration itself has already succeeded on
+   * the server, and the link can be re-established on a later pass.
+   */
+  private suspend fun linkScheduleToServerBeneficiary(
+    localBeneficiaryId: String,
+    serverBeneficiaryId: String,
+  ) {
+    runCatching {
+      visitScheduleRepository.attachServerBeneficiaryId(localBeneficiaryId, serverBeneficiaryId)
+    }
+  }
+
 }

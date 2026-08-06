@@ -6,6 +6,13 @@ import androidx.compose.ui.unit.dp
 object Dimens {
   val ScreenPadding = 24.dp
   val ItemSpacing = 16.dp
+
+  /**
+   * Vertical gap between consecutive questions in the Enrollment stepper's field-heavy screens
+   * (Personal Info, Health History) — deliberately larger than [ItemSpacing] so each question
+   * (label + field + inline error) reads as a distinct block rather than a cramped stack.
+   */
+  val FormFieldSpacing = 32.dp
   val SmallSpacing = 8.dp
 
   /**
@@ -22,6 +29,14 @@ object Dimens {
   val TilePadding = 20.dp
   val SheetRadius = 40.dp
   val PillButtonPaddingH = 16.dp
+
+  /**
+   * Data Upload pill on the Home dashboard — deliberately smaller than [ButtonHeight]/
+   * [ButtonHeightTablet] (the "See Visit Tracker" CTA) per the Home dashboard design, since it's a
+   * secondary status action rather than the screen's primary CTA.
+   */
+  val DataUploadPillHeight = 40.dp
+  val DataUploadPillHeightTablet = 44.dp
 
   // Tablet button proportions (taller pill, wider inner padding).
   val ButtonHeightTablet = 48.dp

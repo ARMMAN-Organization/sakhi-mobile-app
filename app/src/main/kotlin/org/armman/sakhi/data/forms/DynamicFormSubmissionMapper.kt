@@ -5,6 +5,7 @@ import org.armman.sakhi.data.enrollment.BeneficiaryCaseDto
 import org.armman.sakhi.data.enrollment.BeneficiaryPiiDto
 import org.armman.sakhi.data.enrollment.ConsentDto
 import org.armman.sakhi.data.enrollment.CreateBeneficiaryRequestDto
+import org.armman.sakhi.data.enrollment.DuplicateAcknowledgement
 import org.armman.sakhi.data.enrollment.EnrollmentMappingException
 import org.armman.sakhi.data.enrollment.MotherDetailsDto
 import org.armman.sakhi.data.lookup.LookupRepository
@@ -93,10 +94,20 @@ class DynamicFormSubmissionMapper @Inject constructor(
   private val lookupRepository: LookupRepository,
 ) {
 
+  /**
+   * Builds the `POST /beneficiaries` body for this draft.
+   *
+   * [duplicateAcknowledgement] is non-null only on a resubmission the Sakhi explicitly confirmed
+   * after an FR-S-2.5 "is this a new pregnancy?" prompt. It sets both `acknowledgeDuplicate` (so the
+   * backend skips its duplicate check for this one call) and `case.previousBeneficiaryId` (so the new
+   * pregnancy is linked to the completed one instead of standing alone). On a first attempt it is
+   * null and neither field is sent — the backend must be free to detect the duplicate.
+   */
   suspend fun toCreateBeneficiaryRequest(
     localCaseUuid: String,
     answers: FormAnswers,
     fallbackRegistrationDate: LocalDate,
+    duplicateAcknowledgement: DuplicateAcknowledgement? = null,
   ): Result<CreateBeneficiaryRequestDto> = runCatching {
     val session = sessionStore.readSession() ?: throw EnrollmentMappingException.NoActiveSession
     val projectId = session.projectId ?: throw EnrollmentMappingException.MissingProjectId
@@ -166,7 +177,9 @@ class DynamicFormSubmissionMapper @Inject constructor(
         sakhiId = session.subjectId,
         caseType = "MOTHER",
         registrationDate = registrationDate,
-        previousBeneficiaryId = null,
+        // Links this pregnancy to the completed earlier one when the Sakhi confirmed a new
+        // pregnancy (FR-S-2.5). Null on a normal enrolment — there is nothing to link to.
+        previousBeneficiaryId = duplicateAcknowledgement?.existingBeneficiaryId,
         motherBeneficiaryId = null,
         beneficiaryTypeLookupId = beneficiaryTypeLookupId,
         caseTypeLookupId = caseTypeLookupId,
@@ -186,18 +199,20 @@ class DynamicFormSubmissionMapper @Inject constructor(
       // Mother-only (CR-018 covers this form; child enrollment is a separate, not-yet-built phase).
       childDetails = null,
       consent = ConsentDto(status = "GIVEN", date = registrationDate),
-      acknowledgeDuplicate = null,
+      // Sent as `true` only for a Sakhi-confirmed new pregnancy; omitted otherwise so the backend
+      // always runs its own duplicate detection on a first attempt.
+      acknowledgeDuplicate = duplicateAcknowledgement?.let { true },
     )
   }
 
   /**
    * The live CR-018 schema's `validationJson` (see `api-calls.jsonl`) declares `para <= gravida`,
    * `abortions <= gravida`, and `deadChildren <= livingChildren` as cross-field rules, but does
-   * NOT declare the `/beneficiaries` API's own `liveBirths + stillbirths + abortions == gravida`
+   * NOT declare the `/beneficiaries` API's own `liveBirths + stillbirths + abortions == gravida - 1`
    * check — [FormCrossFieldValidator] fully supports a `SUM_EQUALS` rule, it's just never sent by
    * the backend for this form version. Without this, a Sakhi can freely submit numbers that don't
    * add up and only find out at the very end via a raw backend 400
-   * (`motherDetails.gravida: liveBirths + stillbirths + abortions must equal gravida`). Mirrors
+   * (`motherDetails.gravida: liveBirths + stillbirths + abortions must equal gravida - 1`). Mirrors
    * [org.armman.sakhi.ui.enrollment.EnrollmentViewModel]'s equivalent static-flow check
    * ([org.armman.sakhi.data.enrollment.EnrollmentApiMapper.validateMotherCrossFieldRules]) so both
    * submission paths fail the same way, this early rather than round-tripping to the server first.
@@ -207,9 +222,9 @@ class DynamicFormSubmissionMapper @Inject constructor(
     val living = answers.valueOf(QuestionCode.LIVING_CHILDREN)?.toIntOrNull() ?: return
     val stillbirths = answers.valueOf(QuestionCode.STILL_BIRTHS)?.toIntOrNull() ?: return
     val abortions = answers.valueOf(QuestionCode.ABORTIONS)?.toIntOrNull() ?: return
-    if (living + stillbirths + abortions != gravida) {
+    if (living + stillbirths + abortions != gravida - FormObstetricRuleset.CURRENT_PREGNANCY) {
       throw EnrollmentMappingException.CrossFieldValidation(
-        "liveBirths + stillbirths + abortions must equal gravida",
+        "liveBirths + stillbirths + abortions must equal gravida - 1",
       )
     }
   }

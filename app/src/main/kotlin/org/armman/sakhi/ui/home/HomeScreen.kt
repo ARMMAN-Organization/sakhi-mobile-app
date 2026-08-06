@@ -24,12 +24,15 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.armman.sakhi.R
 import org.armman.sakhi.ui.components.AppLogo
+import org.armman.sakhi.ui.components.ConfirmationDialog
 import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG400
 import org.armman.sakhi.ui.theme.White
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -50,6 +53,7 @@ fun HomeScreen(
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
   val uploadModalState by viewModel.uploadModalState.collectAsStateWithLifecycle()
   val pendingUploadCount by viewModel.pendingUploadCount.collectAsStateWithLifecycle()
+  val duplicateReview by viewModel.duplicateReview.collectAsStateWithLifecycle()
 
   Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -82,7 +86,31 @@ fun HomeScreen(
       onDismiss = viewModel::onDismissUploadModal,
     )
   }
+
+  // SRS FR-S-2.5 — a draft rejected as a possible duplicate during an upload, where the earlier
+  // pregnancy is already complete. Asked here because the rejection happens after the Sakhi has left
+  // the enrollment form; confirming enrolls it as a new case linked to the earlier one.
+  duplicateReview?.let { review ->
+    ConfirmationDialog(
+      title = stringResource(R.string.home_duplicate_review_title),
+      message = stringResource(
+        R.string.home_duplicate_review_message,
+        formatSubmissionDate(review.submittedAtEpochMillis),
+      ),
+      confirmLabel = stringResource(R.string.enrollment_duplicate_new_pregnancy_confirm),
+      cancelLabel = stringResource(R.string.enrollment_duplicate_new_pregnancy_cancel),
+      onConfirm = { viewModel.onConfirmNewPregnancy(review) },
+      onCancel = { viewModel.onDismissDuplicateReview(review) },
+    )
+  }
 }
+
+/** Identifies the rejected draft by the day it was filled — the only non-PII handle the upload
+ * records carry (see [org.armman.sakhi.data.forms.FormUploadRecord]). */
+private fun formatSubmissionDate(epochMillis: Long): String =
+  Instant.ofEpochMilli(epochMillis)
+    .atZone(ZoneId.systemDefault())
+    .format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))
 
 /** Lavender header: welcome title + today's date, profile avatar on the right. */
 @Composable

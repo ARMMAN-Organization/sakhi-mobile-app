@@ -17,4 +17,13 @@ data class FormUploadRecord(
   val formCode: String,
   val syncStatus: EnrollmentSyncStatus,
   val createdAtEpochMillis: Long,
+  /**
+   * Non-null when this draft was rejected as a possible duplicate AND the backend said the earlier
+   * pregnancy is complete (SRS FR-S-2.5) — the value is that earlier case's server id, and its
+   * presence is what lets Home ask "is this a new pregnancy?" for a draft rejected during an upload.
+   *
+   * Not PII: a server-assigned case id, the same kind of identifier as [localBeneficiaryId]. Null on
+   * every other status, and on the Children Register queue, where this branch cannot occur.
+   */
+  val pendingNewPregnancyBeneficiaryId: String? = null,
 )

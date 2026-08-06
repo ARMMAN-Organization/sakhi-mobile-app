@@ -110,7 +110,8 @@ class RoomEnrollmentRepositoryTest {
       td1Date = null,
       td2Date = null,
       tdBoosterDate = null,
-      gravida = 1,
+      // 1 living child + 0 still births + 0 abortions = 1 past outcome, + the current pregnancy.
+      gravida = 2,
       para = 0,
       livingChildren = 1,
       abortions = 0,

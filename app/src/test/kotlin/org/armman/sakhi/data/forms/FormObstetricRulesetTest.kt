@@ -34,11 +34,11 @@ class FormObstetricRulesetTest {
   private val allFields =
     listOf(GRAVIDA, PARA, LIVING_CHILDREN, ABORTIONS, STILL_BIRTHS, DEAD_CHILDREN).map(::numberField)
 
-  // --- Gravida total: living children + still births + abortions == gravida ---------------------
+  // --- Gravida total: living children + still births + abortions == gravida - 1 -----------------
 
   @Test
   fun `the reported case is flagged on gravida`() {
-    // QA's screenshot: Gravida 6 with every other figure 0, which totals 0.
+    // QA's screenshot: Gravida 6 with every other figure 0, which implies Gravida 1.
     val entered = answers(
       GRAVIDA to "6",
       PARA to "0",
@@ -49,14 +49,15 @@ class FormObstetricRulesetTest {
     )
 
     assertEquals(Violation.GRAVIDA_TOTAL, FormObstetricRuleset.violationFor(GRAVIDA, entered))
-    assertEquals(0, FormObstetricRuleset.expectedGravida(entered))
+    assertEquals(1, FormObstetricRuleset.expectedGravida(entered))
     assertFalse(FormObstetricRuleset.allValid(allFields, entered))
   }
 
   @Test
   fun `a consistent history passes`() {
+    // 2 living + 1 still birth + 1 abortion = 4 past outcomes, plus the current pregnancy = 5.
     val entered = answers(
-      GRAVIDA to "4",
+      GRAVIDA to "5",
       PARA to "3",
       LIVING_CHILDREN to "2",
       ABORTIONS to "1",
@@ -65,16 +66,16 @@ class FormObstetricRulesetTest {
     )
 
     assertTrue(FormObstetricRuleset.allValid(allFields, entered))
-    assertEquals(4, FormObstetricRuleset.expectedGravida(entered))
+    assertEquals(5, FormObstetricRuleset.expectedGravida(entered))
   }
 
   @Test
   fun `a first pregnancy with everything else zero is valid`() {
-    // Gravida counts the current pregnancy in the spec but not in the API's sum rule, so a first
-    // pregnancy is recorded as Gravida 0 here. Flagged in FormObstetricRuleset's doc as the open
-    // spec conflict; this test pins today's enforced behaviour.
+    // Gravida counts the current pregnancy, the outcome figures do not, so a first pregnancy is
+    // Gravida 1 with every other figure 0 — the ordinary case, and the one that was impossible to
+    // enter while this rule read `== Gravida`.
     val entered = answers(
-      GRAVIDA to "0",
+      GRAVIDA to "1",
       PARA to "0",
       LIVING_CHILDREN to "0",
       ABORTIONS to "0",
@@ -87,11 +88,11 @@ class FormObstetricRulesetTest {
 
   @Test
   fun `agrees with the submission mapper on the gravida total`() {
-    // Same arithmetic the mapper applies: living + stillbirths + abortions != gravida.
+    // Same arithmetic the mapper applies: living + stillbirths + abortions != gravida - 1.
     listOf(
-      Triple("2", "1", "1") to 4,
-      Triple("0", "0", "0") to 0,
-      Triple("5", "2", "3") to 10,
+      Triple("2", "1", "1") to 5,
+      Triple("0", "0", "0") to 1,
+      Triple("5", "2", "3") to 11,
     ).forEach { (parts, expectedGravida) ->
       val (living, still, abortions) = parts
       val consistent = answers(
@@ -182,7 +183,7 @@ class FormObstetricRulesetTest {
     // Spec row 47 classes "L < P" as high RISK, not a validation failure — flagging it would block
     // registering exactly the pregnancy the risk logic exists to escalate.
     val entered = answers(
-      GRAVIDA to "2",
+      GRAVIDA to "3",
       PARA to "2",
       LIVING_CHILDREN to "0",
       STILL_BIRTHS to "2",
@@ -197,7 +198,7 @@ class FormObstetricRulesetTest {
   fun `two or more abortions is not an error`() {
     // Spec row 48 classes ">= 2" as high risk, again not a validation failure.
     val entered = answers(
-      GRAVIDA to "3",
+      GRAVIDA to "4",
       PARA to "1",
       LIVING_CHILDREN to "1",
       STILL_BIRTHS to "0",

@@ -15,6 +15,10 @@ class StaticVisitFormRepository @Inject constructor(
   private val beneficiaryProfileRepository: BeneficiaryProfileRepository,
 ) : VisitFormRepository {
 
+  /** Only the seeded ids have a canned context; a Sakhi's own enrolment carries a UUID. */
+  override suspend fun canStartVisit(beneficiaryId: String): Boolean =
+    RECORDS.containsKey(beneficiaryId)
+
   override suspend fun getVisitContext(beneficiaryId: String, visitId: String): VisitContext {
     delay(NETWORK_LATENCY_MS) // Simulate a round trip so the loading state is visible.
     val base = RECORDS[beneficiaryId]

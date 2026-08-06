@@ -1,6 +1,9 @@
 package org.armman.sakhi.data.forms
 
 import org.armman.sakhi.data.enrollment.ApiErrorParser
+import org.armman.sakhi.data.enrollment.DuplicateAcknowledgement
+import org.armman.sakhi.data.enrollment.DuplicateOutcome
+import org.armman.sakhi.data.enrollment.DuplicateOutcomeParser
 import org.armman.sakhi.data.enrollment.EnrollmentApi
 import java.time.LocalDate
 import java.util.UUID
@@ -8,6 +11,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val FORM_CODE = "MOTHER_REGISTRATION"
+
+/** `POST /beneficiaries` duplicate-detection rejection (SRS FR-S-2.4/2.5). */
+private const val HTTP_CONFLICT = 409
 
 sealed class DynamicFormSubmissionException(message: String) : Exception(message) {
   /**
@@ -35,6 +41,12 @@ sealed class DynamicFormSubmissionException(message: String) : Exception(message
     val errorCode: String? = null,
     val fieldErrors: Map<String, String> = emptyMap(),
     val apiMessage: String? = null,
+    /**
+     * Non-null only for a `409`: which of the two duplicate situations this is (SRS FR-S-2.4/2.5).
+     * Callers branch on it instead of re-parsing the body, and never render [userMessage] for a
+     * `409` — that copy comes from string resources so it exists in Marathi too.
+     */
+    val duplicateOutcome: DuplicateOutcome? = null,
   ) : DynamicFormSubmissionException("POST /beneficiaries failed: HTTP $httpCode — $body") {
     override val userMessage: String get() = SubmitErrorCopy.forApiError(apiMessage, fieldErrors)
   }
@@ -90,15 +102,29 @@ class DynamicFormSubmissionCoordinator @Inject constructor(
   private val mapper: DynamicFormSubmissionMapper,
 ) {
 
+  /**
+   * [duplicateAcknowledgement] is forwarded straight to the mapper: non-null only when the Sakhi has
+   * confirmed an FR-S-2.5 new-pregnancy prompt for this draft. See
+   * [org.armman.sakhi.data.forms.DynamicFormDraftPayload.duplicateAcknowledgement].
+   */
   suspend fun submit(
     formVersionId: String,
     localCaseUuid: String,
     localSubmissionUuid: String,
     answers: FormAnswers,
     fallbackRegistrationDate: LocalDate,
-  ): Result<Unit> = runCatching {
-    val beneficiaryRequest = mapper.toCreateBeneficiaryRequest(localCaseUuid, answers, fallbackRegistrationDate)
-      .getOrElse { throw DynamicFormSubmissionException.MappingFailed(it) }
+    duplicateAcknowledgement: DuplicateAcknowledgement? = null,
+    // Returns the server-assigned beneficiary id on success. CR-022 needs it: a locally generated
+    // visit schedule cannot be uploaded until its beneficiary exists server-side, and this is the
+    // only place that id is ever known. It used to be discarded, which left every schedule
+    // permanently ineligible for upload.
+  ): Result<String> = runCatching {
+    val beneficiaryRequest = mapper.toCreateBeneficiaryRequest(
+      localCaseUuid = localCaseUuid,
+      answers = answers,
+      fallbackRegistrationDate = fallbackRegistrationDate,
+      duplicateAcknowledgement = duplicateAcknowledgement,
+    ).getOrElse { throw DynamicFormSubmissionException.MappingFailed(it) }
 
     val beneficiaryResponse = enrollmentApi.createBeneficiary(beneficiaryRequest)
     if (!beneficiaryResponse.isSuccessful) {
@@ -113,6 +139,11 @@ class DynamicFormSubmissionCoordinator @Inject constructor(
         // expected envelope (plain-text 500s, HTML gateway pages). That's not a sentence worth
         // showing, so treat "message == body" as "no usable message" and let the UI fall back.
         apiMessage = apiError.message?.takeIf { it != rawBody },
+        duplicateOutcome = if (beneficiaryResponse.code() == HTTP_CONFLICT) {
+          DuplicateOutcomeParser.parse(apiError)
+        } else {
+          null
+        },
       )
     }
     val serverBeneficiaryId = beneficiaryResponse.body()?.data?.id
@@ -141,6 +172,7 @@ class DynamicFormSubmissionCoordinator @Inject constructor(
         violations = apiError.violations,
       )
     }
+    serverBeneficiaryId
   }
 }
 

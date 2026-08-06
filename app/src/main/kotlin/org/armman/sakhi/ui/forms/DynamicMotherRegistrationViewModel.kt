@@ -37,6 +37,7 @@ import org.armman.sakhi.data.forms.FormsRepository
 import org.armman.sakhi.data.forms.GeographyFieldOptionsResolver
 import org.armman.sakhi.data.forms.GeographyQuestionCodes
 import org.armman.sakhi.data.forms.newLocalSubmissionUuid
+import org.armman.sakhi.data.enrollment.DuplicateOutcome
 import org.armman.sakhi.data.lookup.LookupRepository
 import java.time.LocalDate
 import java.util.UUID
@@ -76,6 +77,14 @@ sealed interface SubmissionState {
   data object Saving : SubmissionState
   data object Success : SubmissionState
   data class Failed(val message: String) : SubmissionState
+
+  /**
+   * The backend rejected this enrolment as a duplicate of an open case (SRS FR-S-2.4: "registration
+   * cannot proceed"). A distinct state rather than a [Failed] with a message, because the copy is a
+   * fixed sentence the screen reads from string resources — so it exists in Marathi, unlike anything
+   * quoted back from the backend.
+   */
+  data object DuplicateBlocked : SubmissionState
 }
 
 /**
@@ -115,6 +124,13 @@ data class DynamicFormUiState(
   /** Non-null right after a field-attributable submit failure — the screen consumes it once to
    * jump to the first flagged field, then calls [DynamicMotherRegistrationViewModel.onErrorScrollHandled]. */
   val errorScroll: ErrorScrollTarget? = null,
+  /**
+   * Non-null when the backend found a *completed* earlier pregnancy for this woman and is asking
+   * whether this is a new one (SRS FR-S-2.5). The screen shows a confirmation dialog; confirming
+   * calls [DynamicMotherRegistrationViewModel.onConfirmNewPregnancy], dismissing calls
+   * [DynamicMotherRegistrationViewModel.onDismissDuplicatePrompt] and leaves the form untouched.
+   */
+  val duplicatePrompt: DuplicateOutcome.NewPregnancyPrompt? = null,
 )
 
 /**
@@ -493,7 +509,12 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
     // Clear any prior field errors up front so a fresh attempt starts clean (and a stale inline
     // error can't linger next to a field the Sakhi already fixed).
     _uiState.update {
-      it.copy(submissionState = SubmissionState.Saving, fieldErrors = emptyMap(), errorScroll = null)
+      it.copy(
+        submissionState = SubmissionState.Saving,
+        fieldErrors = emptyMap(),
+        errorScroll = null,
+        duplicatePrompt = null,
+      )
     }
     viewModelScope.launch {
       val result = draftRepository.submitDraft(
@@ -509,20 +530,77 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
           is DynamicFormSubmitResult.Synced, is DynamicFormSubmitResult.QueuedOffline ->
             current.copy(submissionState = SubmissionState.Success, fieldErrors = emptyMap(), errorScroll = null)
 
-          is DynamicFormSubmitResult.DuplicateConflict ->
-            current.copy(
-              submissionState = SubmissionState.Failed(
-                SubmitErrorCopy.humanize(result.message)
-                  ?: "A possible duplicate beneficiary already exists",
-              ),
-              fieldErrors = emptyMap(),
-              errorScroll = null,
-            )
+          is DynamicFormSubmitResult.DuplicateConflict -> applyDuplicateOutcome(current, result.outcome)
 
           is DynamicFormSubmitResult.Failed -> applyFieldErrors(current, result)
         }
       }
     }
+  }
+
+  /**
+   * The Sakhi confirmed that this really is a new pregnancy for a woman whose earlier pregnancy is
+   * complete (SRS FR-S-2.5). Resubmits with the acknowledgement and a link back to that earlier case.
+   *
+   * No-op unless a prompt is actually on screen, so a stray call can never acknowledge a duplicate
+   * the Sakhi was never asked about.
+   */
+  fun onConfirmNewPregnancy() {
+    val prompt = _uiState.value.duplicatePrompt ?: return
+    if (_uiState.value.submissionState is SubmissionState.Saving) return
+    _uiState.update {
+      it.copy(submissionState = SubmissionState.Saving, duplicatePrompt = null, fieldErrors = emptyMap())
+    }
+    viewModelScope.launch {
+      val result = draftRepository.confirmNewPregnancy(
+        localBeneficiaryId = beneficiaryId,
+        existingBeneficiaryId = prompt.existingBeneficiaryId,
+      )
+      _uiState.update { current ->
+        when (result) {
+          is DynamicFormSubmitResult.Synced, is DynamicFormSubmitResult.QueuedOffline ->
+            current.copy(submissionState = SubmissionState.Success, fieldErrors = emptyMap(), errorScroll = null)
+
+          is DynamicFormSubmitResult.DuplicateConflict -> applyDuplicateOutcome(current, result.outcome)
+
+          is DynamicFormSubmitResult.Failed -> applyFieldErrors(current, result)
+        }
+      }
+    }
+  }
+
+  /** The Sakhi answered "no" to the new-pregnancy prompt (or dismissed it). The draft is left exactly
+   * as it is — still saved locally, still un-uploaded — so she can correct a mistyped name or LMP and
+   * submit again. */
+  fun onDismissDuplicatePrompt() {
+    _uiState.update { it.copy(duplicatePrompt = null, submissionState = SubmissionState.Idle) }
+    // Also clear the copy persisted on the draft, or Home would keep asking the same question she
+    // just answered "no" to.
+    viewModelScope.launch { draftRepository.dismissNewPregnancyPrompt(beneficiaryId) }
+  }
+
+  /**
+   * A `409` splits two ways (SRS FR-S-2.4/2.5): a hard duplicate is a dead end the Sakhi cannot
+   * override, while a completed earlier pregnancy becomes a question she can answer. The prompt
+   * returns [SubmissionState] to Idle so Submit is usable again if she declines.
+   */
+  private fun applyDuplicateOutcome(
+    current: DynamicFormUiState,
+    outcome: DuplicateOutcome,
+  ): DynamicFormUiState = when (outcome) {
+    DuplicateOutcome.HardDuplicate -> current.copy(
+      submissionState = SubmissionState.DuplicateBlocked,
+      fieldErrors = emptyMap(),
+      errorScroll = null,
+      duplicatePrompt = null,
+    )
+
+    is DuplicateOutcome.NewPregnancyPrompt -> current.copy(
+      submissionState = SubmissionState.Idle,
+      fieldErrors = emptyMap(),
+      errorScroll = null,
+      duplicatePrompt = outcome,
+    )
   }
 
   /** Maps a [DynamicFormSubmitResult.Failed]'s DTO-path `fieldErrors` to `question_code`s and, when

@@ -1,5 +1,6 @@
 package org.armman.sakhi.ui.enrollment
 
+import org.armman.sakhi.data.forms.FormObstetricRuleset
 import java.time.LocalDate
 
 /** Field-level validation outcomes for the Health History step (Q35–65). */
@@ -29,10 +30,12 @@ enum class HealthFieldError {
   DEAD_EXCEEDS_LIVING,
 
   /**
-   * Gravida ≠ Living Children + Stillbirths + Abortions (Q45 cross-total).
-   * Matches the `/beneficiaries` API's own cross-field rule exactly — this
-   * used to be a different, incompatible formula (`Para + Abortions + 1`)
-   * that could pass here and still be rejected by the API at submit time.
+   * Living Children + Stillbirths + Abortions ≠ Gravida − 1 (Q45 cross-total).
+   * Matches the `/beneficiaries` API's own cross-field rule exactly. The `− 1`
+   * is the current pregnancy, which Gravida counts but the three outcome
+   * figures cannot. Keep this identical to the API: an earlier version gated on
+   * `== Gravida` while the API required `== Gravida − 1`, which made every
+   * enrollment with a prior pregnancy impossible (no value satisfied both).
    */
   GRAVIDA_TOTAL_MISMATCH,
 
@@ -182,13 +185,15 @@ data class HealthHistoryState(
     }
 
   /**
-   * Q45 cross-total: Gravida = Living Children + Stillbirths + Abortions
-   * (checked when all present). MUST stay identical to the `/beneficiaries`
-   * API's own check (`liveBirths + stillbirths + abortions == gravida` in
-   * `create-beneficiary.dto.ts` / `EnrollmentApiMapper.validateMotherCrossFieldRules`)
-   * — this field used to gate on `Para + Abortions + 1` instead, which is not
-   * the same formula and let invalid records reach submit before failing
-   * server-side with no field-level message. Do not reintroduce that drift.
+   * Q45 cross-total: Gravida = Living Children + Stillbirths + Abortions + 1,
+   * i.e. the three past-outcome figures add up to Gravida minus the current
+   * pregnancy (checked when all present). MUST stay identical to the
+   * `/beneficiaries` API's own check (`liveBirths + stillbirths + abortions ==
+   * gravida - 1` in `create-beneficiary.dto.ts` /
+   * `EnrollmentApiMapper.validateMotherCrossFieldRules`) and to
+   * `Registration_PW_D` row 45. Two earlier formulas drifted from the API —
+   * `Para + Abortions + 1`, and `== Gravida` (which contradicted the API's
+   * `− 1` and deadlocked enrollment entirely). Do not reintroduce either.
    */
   val gravidaTotalError: HealthFieldError?
     get() {
@@ -196,7 +201,11 @@ data class HealthHistoryState(
       val living = livingChildren.toIntOrNull() ?: return null
       val s = stillBirths.toIntOrNull() ?: return null
       val a = abortions.toIntOrNull() ?: return null
-      return if (living + s + a != g) HealthFieldError.GRAVIDA_TOTAL_MISMATCH else null
+      return if (living + s + a != g - FormObstetricRuleset.CURRENT_PREGNANCY) {
+        HealthFieldError.GRAVIDA_TOTAL_MISMATCH
+      } else {
+        null
+      }
     }
 
   /** Optional — blank is valid; only range-checked when entered (mirrors backend `0 < x <= 300`). */
@@ -353,7 +362,7 @@ data class HealthHistoryState(
         )
       }
       if (gravidaTotalError != null) {
-        add("Living children + Stillbirths + Abortions must add up to Gravida")
+        add("Living children + Stillbirths + Abortions must add up to Gravida minus the current pregnancy")
       }
       heightCmError?.let { add("Height must be a number between 0 and $MAX_HEIGHT_CM cm") }
       weightKgError?.let { add("Weight must be a number between 0 and $MAX_WEIGHT_KG kg") }

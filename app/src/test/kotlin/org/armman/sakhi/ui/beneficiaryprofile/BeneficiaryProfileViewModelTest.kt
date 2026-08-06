@@ -12,10 +12,13 @@ import org.armman.sakhi.data.beneficiary.BeneficiaryType
 import org.armman.sakhi.data.beneficiary.RiskLevel
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfile
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfileRepository
+import org.armman.sakhi.data.visitform.VisitContext
+import org.armman.sakhi.data.visitform.VisitFormRepository
 import org.armman.sakhi.data.beneficiaryprofile.VitalStat
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -39,12 +42,28 @@ class BeneficiaryProfileViewModelTest {
     }
   }
 
+  /**
+   * The Visit Form is still backed by seeded data that only recognises its own ids, so a Sakhi's
+   * own enrolment cannot open it (CR-022g). [knownBeneficiaries] models which ids it accepts.
+   */
+  private class FakeVisitFormRepository(
+    val knownBeneficiaries: Set<String> = setOf("mother", "child"),
+  ) : VisitFormRepository {
+    override suspend fun getVisitContext(beneficiaryId: String, visitId: String): VisitContext =
+      throw NoSuchElementException("Not used by these tests")
+
+    override suspend fun canStartVisit(beneficiaryId: String): Boolean =
+      beneficiaryId in knownBeneficiaries
+  }
+
   private lateinit var repository: FakeRepository
+  private lateinit var visitFormRepository: FakeVisitFormRepository
 
   @Before
   fun setUp() {
     Dispatchers.setMain(dispatcher)
     repository = FakeRepository()
+    visitFormRepository = FakeVisitFormRepository()
   }
 
   @After
@@ -54,9 +73,34 @@ class BeneficiaryProfileViewModelTest {
 
   private fun createViewModel(id: String?): BeneficiaryProfileViewModel {
     val args = if (id == null) emptyMap() else mapOf(BeneficiaryProfileViewModel.NAV_ARG_ID to id)
-    val viewModel = BeneficiaryProfileViewModel(repository, SavedStateHandle(args))
+    val viewModel =
+      BeneficiaryProfileViewModel(repository, visitFormRepository, SavedStateHandle(args))
     dispatcher.scheduler.advanceUntilIdle()
     return viewModel
+  }
+
+  /**
+   * CR-022g. Tapping Start Visit on a Sakhi's own enrolment used to land her on an error screen:
+   * the Visit Form only recognises seeded ids, and hers is a generated UUID. The screen now shows
+   * "coming soon" instead, which this flag drives.
+   */
+  @Test
+  fun `a beneficiary the visit form does not recognise cannot start a visit`() {
+    visitFormRepository = FakeVisitFormRepository(knownBeneficiaries = emptySet())
+
+    val viewModel = createViewModel("mother")
+
+    assertFalse(viewModel.uiState.value.canStartVisit)
+    // The profile itself must still load — only the button is affected.
+    assertNotNull(viewModel.uiState.value.profile)
+    assertFalse(viewModel.uiState.value.hasError)
+  }
+
+  @Test
+  fun `a beneficiary the visit form recognises can start a visit`() {
+    val viewModel = createViewModel("mother")
+
+    assertTrue(viewModel.uiState.value.canStartVisit)
   }
 
   @Test

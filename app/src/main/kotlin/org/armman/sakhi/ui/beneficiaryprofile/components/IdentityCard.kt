@@ -130,7 +130,13 @@ private fun HeaderRow(
         )
       }
       Text(
-        text = stringResource(R.string.beneficiary_profile_name_age, profile.name, profile.ageLabel),
+        // CR-022g: a locally enrolled beneficiary has no age yet (the mother form does not capture
+        // one), and the "%1$s | %2$s" template would leave a dangling separator after her name.
+        text = if (profile.ageLabel.isBlank()) {
+          profile.name
+        } else {
+          stringResource(R.string.beneficiary_profile_name_age, profile.name, profile.ageLabel)
+        },
         style = SerifTitleLarge,
         color = NeutralG400,
         maxLines = 1,
@@ -227,9 +233,17 @@ private fun StatStrip(profile: BeneficiaryProfile, modifier: Modifier = Modifier
   }
 }
 
-/** Weight value in a pink chip per the design frame. */
+/**
+ * Weight value in a pink chip per the design frame.
+ *
+ * An absent weight renders nothing at all. Left to itself the chip drew an empty pink box — a
+ * coloured shape with no content reads as a broken widget rather than as missing data, which is how
+ * it looked for locally enrolled mothers (the mother form captures no weight).
+ */
 @Composable
 private fun WeightChip(value: String) {
+  if (value.isBlank()) return
+
   Text(
     text = value,
     style = MaterialTheme.typography.titleMedium,

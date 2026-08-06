@@ -4,9 +4,11 @@ import kotlinx.coroutines.test.runTest
 import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
+import org.armman.sakhi.data.enrollment.DuplicateAcknowledgement
 import org.armman.sakhi.data.enrollment.EnrollmentMappingException
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -40,7 +42,8 @@ class DynamicFormSubmissionMapperTest {
     singleValues = mapOf(
       "did_we_receive_consent" to consent,
       "lmp_date" to "2026-05-01",
-      "gravida_total_number_of_pregnancies" to "2",
+      // 1 living child + 1 abortion + 0 still births = 2 past outcomes, + the current pregnancy.
+      "gravida_total_number_of_pregnancies" to "3",
       "para_number_of_births_after_24_weeks" to "0",
       "living_children" to "1",
       "abortions_pregnancy_losses_before_24_weeks" to "1",
@@ -98,7 +101,7 @@ class DynamicFormSubmissionMapperTest {
 
     val mother = requireNotNull(dto.motherDetails)
     assertEquals("2026-05-01", mother.lmpDate)
-    assertEquals(2, mother.gravida)
+    assertEquals(3, mother.gravida)
     assertEquals(0, mother.parity)
     assertEquals(1, mother.liveBirths)
     assertEquals(1, mother.abortions)
@@ -175,7 +178,7 @@ class DynamicFormSubmissionMapperTest {
     // "Missing required field" for every one of them. The submissions endpoint validates the
     // whole schema, so formData must carry them.
     assertEquals("2026-05-01", formData["lmp_date"])
-    assertEquals("2", formData["gravida_total_number_of_pregnancies"])
+    assertEquals("3", formData["gravida_total_number_of_pregnancies"])
     assertEquals("Test", formData["first_name"])
     assertEquals("Mother", formData["last_name"])
     assertEquals("1996-01-01", formData["date_of_birth"])
@@ -278,9 +281,9 @@ class DynamicFormSubmissionMapperTest {
   @Test
   fun `gravida cross-total mismatch blocks submission with a specific message`() = runTest {
     sessionStore.saveSession(session)
-    // livingChildren(1) + stillBirths(0) + abortions(1) = 2, but gravida is set to 3 — mismatch.
+    // livingChildren(1) + stillBirths(0) + abortions(1) = 2, but gravida 4 implies 3 — mismatch.
     val form = answeredForm().let {
-      it.copy(singleValues = it.singleValues + mapOf("gravida_total_number_of_pregnancies" to "3"))
+      it.copy(singleValues = it.singleValues + mapOf("gravida_total_number_of_pregnancies" to "4"))
     }
 
     val result = mapper.toCreateBeneficiaryRequest("local-case-1", form, LocalDate.of(2026, 7, 20))
@@ -288,8 +291,44 @@ class DynamicFormSubmissionMapperTest {
     val error = result.exceptionOrNull()
     assertTrue(error is EnrollmentMappingException.CrossFieldValidation)
     assertEquals(
-      "liveBirths + stillbirths + abortions must equal gravida",
+      "liveBirths + stillbirths + abortions must equal gravida - 1",
       (error as EnrollmentMappingException.CrossFieldValidation).rule,
     )
+  }
+
+  @Test
+  fun `no acknowledgement means neither duplicate field is sent, so the backend can detect duplicates`() = runTest {
+    // The mapper reads the Sakhi's identity and project from the session — without one it
+    // throws NoActiveSession before it ever looks at the answers.
+    sessionStore.saveSession(session)
+    val dto = mapper.toCreateBeneficiaryRequest(
+      "local-case-1",
+      answeredForm(),
+      LocalDate.of(2026, 7, 20),
+    ).getOrThrow()
+
+    assertNull(dto.acknowledgeDuplicate)
+    assertNull(dto.case.previousBeneficiaryId)
+  }
+
+  @Test
+  fun `a confirmed new pregnancy sends acknowledgeDuplicate and links the earlier case`() = runTest {
+    // SRS FR-S-2.5: the new pregnancy is a NEW case that points back at the completed one; nothing
+    // about the earlier pregnancy is overwritten.
+    // The mapper reads the Sakhi's identity and project from the session — without one it
+    // throws NoActiveSession before it ever looks at the answers.
+    sessionStore.saveSession(session)
+    val dto = mapper.toCreateBeneficiaryRequest(
+      localCaseUuid = "local-case-1",
+      answers = answeredForm(),
+      fallbackRegistrationDate = LocalDate.of(2026, 7, 20),
+      duplicateAcknowledgement = DuplicateAcknowledgement("earlier-case-uuid"),
+    ).getOrThrow()
+
+    assertEquals(true, dto.acknowledgeDuplicate)
+    assertEquals("earlier-case-uuid", dto.case.previousBeneficiaryId)
+    // The rest of the payload is unchanged by the acknowledgement.
+    assertEquals("local-case-1", dto.case.localCaseUuid)
+    assertEquals("MOTHER", dto.case.caseType)
   }
 }

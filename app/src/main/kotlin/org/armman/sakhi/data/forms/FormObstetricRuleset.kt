@@ -12,18 +12,23 @@ package org.armman.sakhi.data.forms
  *
  * | Rule | Also enforced at |
  * |------|------------------|
- * | `Living children + Still births + Abortions == Gravida` | `DynamicFormSubmissionMapper`, backend |
+ * | `Living children + Still births + Abortions == Gravida - 1` | `DynamicFormSubmissionMapper`, backend |
  * | `Para <= Gravida` | `EnrollmentApiMapper`, backend |
  * | `Abortions <= Gravida` | `EnrollmentApiMapper`, backend |
  * | `Dead children <= Living children` | `EnrollmentApiMapper`, backend |
  *
- * **Known spec conflict — needs an ARMMAN decision.** `Registration_PW_D` row 45 states
- * `Gravida = Live birth + Abortion + Still birth + 1` (counting the current pregnancy) and row 50
- * states `Dead children <= live birth`, where "live birth" is Para minus still births rather than
- * *living* children. Both differ from what the API accepts: the `+ 1` is absent, and living children
- * stands in for live births. The API contract wins here because it is what actually blocks a
- * submission; if ARMMAN confirms the spec, [GRAVIDA_TOTAL] and the dead-children rule change
- * together with the backend, and the constant below is the only arithmetic to revisit.
+ * **Row 45's `+ 1` is now enforced.** `Registration_PW_D` row 45 states
+ * `Gravida = Live birth + Abortion + Still birth + 1` (the `+ 1` being the current pregnancy) and
+ * the `/beneficiaries` API enforces exactly that (`liveBirths + stillbirths + abortions ==
+ * gravida - 1`), so [CURRENT_PREGNANCY] applies it here too. This rule previously read
+ * `== Gravida`, which contradicted the API and left no Gravida value that could pass both the UI
+ * and the server — enrollment was impossible for any woman with a prior pregnancy.
+ *
+ * **Still an open spec conflict.** Row 50 states `Dead children <= live birth`, where "live birth"
+ * is Para minus still births rather than *living* children. The API compares against living
+ * children, so that is what [DEAD_CHILDREN_EXCEED_LIVING] checks. The API contract wins because it
+ * is what actually blocks a submission; if ARMMAN confirms the spec, that rule changes together
+ * with the backend.
  *
  * A rule is skipped whenever any figure it needs is blank or unparseable: the Sakhi is part-way
  * through a set of related boxes, and an error that fires before she could possibly have finished
@@ -34,6 +39,13 @@ package org.armman.sakhi.data.forms
  * pregnancy the risk logic exists to escalate.
  */
 object FormObstetricRuleset {
+
+  /**
+   * The current pregnancy: counted in Gravida, but in none of the past-outcome figures. This is the
+   * `- 1` the `/beneficiaries` API applies to the Gravida cross-total, and `Registration_PW_D`
+   * row 45's `+ 1`.
+   */
+  const val CURRENT_PREGNANCY = 1
 
   const val GRAVIDA = "gravida_total_number_of_pregnancies"
   const val PARA = "para_number_of_births_after_24_weeks"
@@ -74,7 +86,9 @@ object FormObstetricRuleset {
     return when (questionCode) {
       GRAVIDA -> {
         if (gravida == null || living == null || stillBirths == null || abortions == null) return null
-        Violation.GRAVIDA_TOTAL.takeIf { living + stillBirths + abortions != gravida }
+        Violation.GRAVIDA_TOTAL.takeIf {
+          living + stillBirths + abortions != gravida - CURRENT_PREGNANCY
+        }
       }
 
       PARA -> {
@@ -97,15 +111,15 @@ object FormObstetricRuleset {
   }
 
   /**
-   * Gravida the other answers imply (`Living children + Still births + Abortions`), or null while
-   * any of them is missing. Shown alongside [Violation.GRAVIDA_TOTAL] so the message names the
-   * expected figure instead of leaving the Sakhi to work the arithmetic out.
+   * Gravida the other answers imply (`Living children + Still births + Abortions` plus the current
+   * pregnancy), or null while any of them is missing. Shown alongside [Violation.GRAVIDA_TOTAL] so
+   * the message names the expected figure instead of leaving the Sakhi to work the arithmetic out.
    */
   fun expectedGravida(answers: FormAnswers): Int? {
     val living = intAnswer(answers, LIVING_CHILDREN) ?: return null
     val stillBirths = intAnswer(answers, STILL_BIRTHS) ?: return null
     val abortions = intAnswer(answers, ABORTIONS) ?: return null
-    return living + stillBirths + abortions
+    return living + stillBirths + abortions + CURRENT_PREGNANCY
   }
 
   /** True when no field in [fields] breaks an obstetric rule — the next/submit gate. */

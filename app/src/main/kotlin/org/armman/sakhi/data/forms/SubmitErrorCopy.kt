@@ -1,5 +1,7 @@
 package org.armman.sakhi.data.forms
 
+import org.armman.sakhi.data.enrollment.DuplicateOutcomeParser
+
 /**
  * Turns a backend submit failure into one short sentence the Sakhi can act on.
  *
@@ -64,7 +66,13 @@ object SubmitErrorCopy {
     fieldErrors: Map<String, String>,
     violations: List<String> = emptyList(),
   ): String {
-    val fromFields = fieldErrors.values
+    // A duplicate `409` puts machine-readable detail under `fieldErrors` (reason/
+    // existingBeneficiaryId/resolution) rather than per-field validation copy. Rendering those
+    // showed the Sakhi "RE_ENROLLMENT" and "Resubmit with acknowledgeDuplicate: true…"; they are
+    // consumed by DuplicateOutcomeParser instead. See DuplicateOutcomeParser.DETAIL_KEYS.
+    val fromFields = fieldErrors
+      .filterKeys { it !in DuplicateOutcomeParser.DETAIL_KEYS }
+      .values
       .mapNotNull { humanize(it) }
       .distinct()
     if (fromFields.isNotEmpty()) return fromFields.joinToString("\n")

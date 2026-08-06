@@ -9,6 +9,14 @@ val BackgroundLavender = Color(0xFFF1EDF9)
 // Light lavender surface for selected chips and highlight badges.
 val PrimarySurface = Color(0xFFEDE7FB)
 val RiskHigh = Color(0xFFD32F2F)
+
+/**
+ * Softer, less saturated red for a required/invalid field's outline (e.g. AppTextField,
+ * AppDropdownField in FormFields.kt) — the full-strength [RiskHigh] read as too heavy/alarming for
+ * a 1dp field border across a whole form (2026-08 design feedback). Kept distinct from RiskHigh so
+ * risk badges/severity indicators elsewhere are untouched.
+ */
+val ErrorBorderSoft = Color(0xFFE57373)
 val RiskModerate = Color(0xFFF57C00)
 val RiskMild = Color(0xFFFBC02D)
 val RiskLow = Color(0xFF2E7D32)

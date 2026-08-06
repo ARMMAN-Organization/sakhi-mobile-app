@@ -3,6 +3,7 @@ package org.armman.sakhi.data.sync
 import org.armman.sakhi.data.childregistration.FakeChildFormSyncScheduler
 import org.armman.sakhi.data.enrollment.FakeEnrollmentSyncScheduler
 import org.armman.sakhi.data.forms.FakeDynamicFormSyncScheduler
+import org.armman.sakhi.data.schedule.FakeVisitScheduleSyncScheduler
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -16,7 +17,8 @@ class ManualSyncTriggerTest {
   private val dynamic = FakeDynamicFormSyncScheduler()
   private val child = FakeChildFormSyncScheduler()
   private val enrollment = FakeEnrollmentSyncScheduler()
-  private val trigger = ManualSyncTrigger(dynamic, child, enrollment)
+  private val visitSchedules = FakeVisitScheduleSyncScheduler()
+  private val trigger = ManualSyncTrigger(dynamic, child, enrollment, visitSchedules)
 
   @Test
   fun `syncAllQueues nudges every offline queue exactly once`() {
@@ -25,6 +27,19 @@ class ManualSyncTriggerTest {
     assertEquals(1, dynamic.syncNowCallCount)
     assertEquals(1, child.syncNowCallCount)
     assertEquals(1, enrollment.syncNowCallCount)
+    assertEquals(1, visitSchedules.syncNowCallCount)
+  }
+
+  /**
+   * CR-022's queue carries device-generated visit schedules rather than form drafts. It has no card
+   * in the upload modal, so nothing in the UI would reveal it being forgotten here — and a schedule
+   * that never uploads leaves the server unable to accept the visits performed against it.
+   */
+  @Test
+  fun `the visit schedule queue is drained too, despite having no card in the modal`() {
+    trigger.syncAllQueues()
+
+    assertEquals(1, visitSchedules.syncNowCallCount)
   }
 
   @Test
@@ -48,5 +63,6 @@ class ManualSyncTriggerTest {
     assertEquals(3, dynamic.syncNowCallCount)
     assertEquals(3, child.syncNowCallCount)
     assertEquals(3, enrollment.syncNowCallCount)
+    assertEquals(3, visitSchedules.syncNowCallCount)
   }
 }

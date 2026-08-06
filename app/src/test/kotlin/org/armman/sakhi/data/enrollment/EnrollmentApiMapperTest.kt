@@ -43,7 +43,8 @@ class EnrollmentApiMapperTest {
     abortions: Int = 0,
     livingChildren: Int = 1,
     stillBirths: Int = 0,
-    gravida: Int = 1,
+    // 1 living child + 0 still births + 0 abortions = 1 past outcome, plus the current pregnancy.
+    gravida: Int = 2,
     deadChildren: Int? = null,
   ): EnrollmentRecord {
     val lmp = LocalDate.of(2026, 5, 1)
@@ -169,7 +170,7 @@ class EnrollmentApiMapperTest {
 
     val mother = requireNotNull(dto.motherDetails)
     assertEquals("2026-05-01", mother.lmpDate)
-    assertEquals(1, mother.gravida)
+    assertEquals(2, mother.gravida)
     assertEquals(0, mother.parity) // naming reconciliation: mobile "para" -> backend "parity"
     assertEquals(1, mother.liveBirths) // naming reconciliation: mobile "livingChildren" -> "liveBirths"
     assertEquals(0, mother.stillbirths)
@@ -270,12 +271,12 @@ class EnrollmentApiMapperTest {
   }
 
   @Test
-  fun `liveBirths plus stillbirths plus abortions must equal gravida`() = runTest {
+  fun `liveBirths plus stillbirths plus abortions must equal gravida minus the current pregnancy`() = runTest {
     sessionStore.saveSession(session)
 
-    // 1 (liveBirths) + 0 (stillbirths) + 0 (abortions) = 1, but gravida is 2 — must fail.
+    // 1 (liveBirths) + 0 (stillbirths) + 0 (abortions) = 1, but gravida 3 implies 2 — must fail.
     val result = mapper.toCreateBeneficiaryRequest(
-      validRecord(gravida = 2, para = 0, livingChildren = 1, abortions = 0, stillBirths = 0),
+      validRecord(gravida = 3, para = 0, livingChildren = 1, abortions = 0, stillBirths = 0),
     )
 
     assertTrue(result.exceptionOrNull() is EnrollmentMappingException.CrossFieldValidation)
@@ -285,9 +286,9 @@ class EnrollmentApiMapperTest {
   fun `valid cross-total passes`() = runTest {
     sessionStore.saveSession(session)
 
-    // 1 (liveBirths) + 1 (stillbirths) + 1 (abortions) = 3 = gravida.
+    // 1 (liveBirths) + 1 (stillbirths) + 1 (abortions) = 3 = gravida (4) - 1.
     val result = mapper.toCreateBeneficiaryRequest(
-      validRecord(gravida = 3, para = 0, livingChildren = 1, abortions = 1, stillBirths = 1),
+      validRecord(gravida = 4, para = 0, livingChildren = 1, abortions = 1, stillBirths = 1),
     )
 
     assertTrue(result.isSuccess)

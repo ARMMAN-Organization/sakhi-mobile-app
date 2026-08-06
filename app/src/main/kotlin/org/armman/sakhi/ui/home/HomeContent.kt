@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +45,7 @@ import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG400
 import org.armman.sakhi.ui.theme.NeutralG50
+import org.armman.sakhi.ui.theme.NeutralG75
 import org.armman.sakhi.ui.theme.Primary
 import org.armman.sakhi.ui.theme.RiskHigh
 import org.armman.sakhi.ui.theme.StatusSuccess
@@ -91,16 +93,20 @@ private fun SakhiRow(summary: DashboardSummary, pendingUploadCount: Int, onDataU
   ) {
     // Name centers against the pill's height; caption centers under the pill.
     val isTabletRow = LocalConfiguration.current.screenWidthDp >= Dimens.TabletMinWidthDp
-    val pillHeight = if (isTabletRow) Dimens.ButtonHeightTablet else Dimens.ButtonHeight
+    val pillHeight = if (isTabletRow) Dimens.DataUploadPillHeightTablet else Dimens.DataUploadPillHeight
     Text(
       text = summary.sakhiName,
       style = MaterialTheme.typography.headlineSmall,
       color = NeutralG400,
       maxLines = 1,
       overflow = TextOverflow.Ellipsis,
+      // Cards below (e.g. "Active Visits") sit inside a SummaryCard with its own
+      // Dimens.ItemSpacing inner padding on top of this row's outer padding, so their title
+      // text starts one extra ItemSpacing in from the screen edge. Match that here so the
+      // Sakhi's name lines up with "Active Visits"/"Active Beneficiaries" below it.
       modifier = Modifier
         .weight(1f)
-        .padding(end = Dimens.SmallSpacing)
+        .padding(start = Dimens.ItemSpacing, end = Dimens.SmallSpacing)
         .height(pillHeight)
         .wrapContentHeight(Alignment.CenterVertically),
     )
@@ -125,10 +131,18 @@ private fun SakhiRow(summary: DashboardSummary, pendingUploadCount: Int, onDataU
 private fun DataUploadPill(pendingCount: Int, onClick: () -> Unit) {
   val isTablet = LocalConfiguration.current.screenWidthDp >= Dimens.TabletMinWidthDp
   val badgeSize = if (isTablet) 28.dp else 24.dp
+  // Nothing left to upload: the pill goes inert (grey, unclickable) rather than staying an
+  // actionable-looking purple CTA with no action left to take.
+  val allUploaded = pendingCount <= 0
   Button(
     onClick = onClick,
+    enabled = !allUploaded,
+    colors = ButtonDefaults.buttonColors(
+      disabledContainerColor = NeutralG75,
+      disabledContentColor = White,
+    ),
     contentPadding = PaddingValues(horizontal = Dimens.PillButtonPaddingH),
-    modifier = Modifier.height(if (isTablet) Dimens.ButtonHeightTablet else Dimens.ButtonHeight),
+    modifier = Modifier.height(if (isTablet) Dimens.DataUploadPillHeightTablet else Dimens.DataUploadPillHeight),
   ) {
     if (pendingCount > 0) {
       Box(

@@ -80,7 +80,7 @@ fun PersonalInfoStep(
   actions: PersonalInfoActions,
   modifier: Modifier = Modifier,
 ) {
-  val fieldGap = Dimens.ItemSpacing
+  val fieldGap = Dimens.FormFieldSpacing
   Column(
     verticalArrangement = Arrangement.spacedBy(fieldGap),
     modifier = modifier.fillMaxWidth(),
@@ -91,6 +91,16 @@ fun PersonalInfoStep(
       color = NeutralG200,
       modifier = Modifier.padding(top = Dimens.ItemSpacing),
     )
+
+    // Banner sits right after the instruction, at the TOP of the step's field list — not after
+    // the last field. `validationScrollTrigger` (see EnrollmentScreen) scrolls this step back to
+    // y=0 on a blocked Next tap, so the banner must already be on that first screenful; if it
+    // were below all the fields (as it used to be), scrolling to the top would land the Sakhi on
+    // the first field with no visible indication of what's wrong, and finding "Complete all
+    // necessary fields" would require scrolling all the way back down again.
+    if (state.showValidationBanner) {
+      ValidationErrorBanner(errors = state.validationErrors)
+    }
 
     // --- Identity (Q19–20) ---
     AppTextField(
@@ -301,10 +311,6 @@ fun PersonalInfoStep(
         label = stringResource(R.string.enrollment_pi_ga),
         value = state.gestationalAgeWeeks?.toString().orEmpty(),
       )
-    }
-
-    if (state.showValidationBanner) {
-      ValidationErrorBanner(errors = state.validationErrors)
     }
   }
 }

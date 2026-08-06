@@ -2,6 +2,7 @@ package org.armman.sakhi.data.db
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import org.armman.sakhi.data.childregistration.ChildFormDraftDao
@@ -10,6 +11,9 @@ import org.armman.sakhi.data.enrollment.EnrollmentDraftDao
 import org.armman.sakhi.data.enrollment.EnrollmentDraftEntity
 import org.armman.sakhi.data.forms.DynamicFormDraftDao
 import org.armman.sakhi.data.forms.DynamicFormDraftEntity
+import org.armman.sakhi.data.schedule.ScheduleTypeConverters
+import org.armman.sakhi.data.schedule.VisitScheduleDao
+import org.armman.sakhi.data.schedule.VisitScheduleEntity
 
 /**
  * App's single Room database. Holds enrollment, dynamic-form and Children Register sync-queue
@@ -24,16 +28,27 @@ import org.armman.sakhi.data.forms.DynamicFormDraftEntity
  *    this bump ships a REAL additive [MIGRATION_2_3] that only `CREATE TABLE`s the new
  *    `child_registration_drafts` table — no existing table is touched, so queued mother/enrollment
  *    drafts survive the upgrade. Keep providing a real migration for every future schema change.
+ *  - v4: [VisitScheduleEntity] (CR-022 offline visit scheduling). Additive [MIGRATION_3_4] —
+ *    creates `visit_schedules` plus its two indices, touches no existing table. First entity that
+ *    is real domain data rather than sync metadata, and the first to need [ScheduleTypeConverters]
+ *    for its [java.time.LocalDate] columns.
  */
 @Database(
-  entities = [EnrollmentDraftEntity::class, DynamicFormDraftEntity::class, ChildFormDraftEntity::class],
-  version = 3,
+  entities = [
+    EnrollmentDraftEntity::class,
+    DynamicFormDraftEntity::class,
+    ChildFormDraftEntity::class,
+    VisitScheduleEntity::class,
+  ],
+  version = 4,
   exportSchema = true,
 )
+@TypeConverters(ScheduleTypeConverters::class)
 abstract class SakhiDatabase : RoomDatabase() {
   abstract fun enrollmentDraftDao(): EnrollmentDraftDao
   abstract fun dynamicFormDraftDao(): DynamicFormDraftDao
   abstract fun childFormDraftDao(): ChildFormDraftDao
+  abstract fun visitScheduleDao(): VisitScheduleDao
 
   companion object {
     /**
@@ -57,6 +72,53 @@ abstract class SakhiDatabase : RoomDatabase() {
             "`remoteSubmissionId` TEXT, " +
             "`lastErrorMessage` TEXT, " +
             "PRIMARY KEY(`localBeneficiaryId`))",
+        )
+      }
+    }
+
+    /**
+     * v3 → v4: adds the CR-022 `visit_schedules` table and its two indices. Purely additive — the
+     * three draft tables are untouched, so anything queued for upload survives the upgrade.
+     *
+     * Column definitions must match [VisitScheduleEntity] exactly or Room's schema validation
+     * fails at open time. Two conversions to keep in mind when editing:
+     *  - enums (`visitType`, `anchorType`, `status`, `escalationPolicy`) are stored as TEXT by name;
+     *  - [java.time.LocalDate] columns are TEXT ISO-8601 via [ScheduleTypeConverters], NOT integers.
+     *
+     * Index names are Room's own convention (`index_<table>_<cols>`); a mismatch here also fails
+     * validation even though the index itself would be functionally identical.
+     */
+    val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `visit_schedules` (" +
+            "`localScheduleUuid` TEXT NOT NULL, " +
+            "`serverScheduleId` TEXT, " +
+            "`localBeneficiaryId` TEXT NOT NULL, " +
+            "`serverBeneficiaryId` TEXT, " +
+            "`visitCode` TEXT NOT NULL, " +
+            "`visitType` TEXT NOT NULL, " +
+            "`sequenceNo` INTEGER NOT NULL, " +
+            "`scheduledDate` TEXT NOT NULL, " +
+            "`windowStartDate` TEXT NOT NULL, " +
+            "`windowEndDate` TEXT NOT NULL, " +
+            "`anchorType` TEXT NOT NULL, " +
+            "`anchorDate` TEXT NOT NULL, " +
+            "`anchorVisitLocalUuid` TEXT, " +
+            "`status` TEXT NOT NULL, " +
+            "`reasonCode` TEXT, " +
+            "`generatedByRuleVersion` TEXT NOT NULL, " +
+            "`escalationPolicy` TEXT NOT NULL, " +
+            "`createdAtEpochMillis` INTEGER NOT NULL, " +
+            "PRIMARY KEY(`localScheduleUuid`))",
+        )
+        db.execSQL(
+          "CREATE INDEX IF NOT EXISTS `index_visit_schedules_localBeneficiaryId_status` " +
+            "ON `visit_schedules` (`localBeneficiaryId`, `status`)",
+        )
+        db.execSQL(
+          "CREATE INDEX IF NOT EXISTS `index_visit_schedules_scheduledDate` " +
+            "ON `visit_schedules` (`scheduledDate`)",
         )
       }
     }

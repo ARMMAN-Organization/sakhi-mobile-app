@@ -49,6 +49,8 @@ class VisitFormViewModelTest {
       if (shouldFail) throw NoSuchElementException("No visit context for beneficiary: $beneficiaryId")
       return context
     }
+
+    override suspend fun canStartVisit(beneficiaryId: String): Boolean = !shouldFail
   }
 
   @Before

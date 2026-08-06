@@ -6,6 +6,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.resetMain
@@ -18,13 +19,18 @@ import org.armman.sakhi.data.dashboard.DashboardRepository
 import org.armman.sakhi.data.dashboard.DashboardSummary
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.enrollment.FakeEnrollmentSyncScheduler
+import org.armman.sakhi.data.schedule.FakeVisitScheduleSyncScheduler
 import org.armman.sakhi.data.forms.FakeDynamicFormSyncScheduler
+import org.armman.sakhi.data.forms.DynamicFormDraftRepository
+import org.armman.sakhi.data.forms.DynamicFormSubmitResult
+import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.sync.ManualSyncTrigger
 import org.armman.sakhi.data.sync.UploadRecordsSource
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -91,11 +97,56 @@ class HomeViewModelTest {
       if (failObserve) flow { throw IOException("db read failed") } else recordsFlow
   }
 
+  /**
+   * Only the two duplicate-resolution methods matter here — Home reads the draft list through
+   * [UploadRecordsSource], and uses this repository purely to record the Sakhi's answer.
+   */
+  private class FakeDraftRepository : DynamicFormDraftRepository {
+    val confirmed = mutableListOf<Pair<String, String>>()
+    val dismissed = mutableListOf<String>()
+
+    override suspend fun saveDraft(
+      localBeneficiaryId: String,
+      formCode: String,
+      formVersionId: String,
+      localSubmissionUuid: String,
+      answers: FormAnswers,
+      registrationDate: LocalDate,
+    ): Result<Unit> = Result.success(Unit)
+
+    override suspend fun submitDraft(
+      localBeneficiaryId: String,
+      formCode: String,
+      formVersionId: String,
+      localSubmissionUuid: String,
+      answers: FormAnswers,
+      registrationDate: LocalDate,
+    ): DynamicFormSubmitResult = DynamicFormSubmitResult.Synced
+
+    override suspend fun confirmNewPregnancy(
+      localBeneficiaryId: String,
+      existingBeneficiaryId: String,
+    ): DynamicFormSubmitResult {
+      confirmed += localBeneficiaryId to existingBeneficiaryId
+      return DynamicFormSubmitResult.Synced
+    }
+
+    override suspend fun dismissNewPregnancyPrompt(localBeneficiaryId: String) {
+      dismissed += localBeneficiaryId
+    }
+
+    override suspend fun getUploadRecords(): List<FormUploadRecord> = emptyList()
+
+    override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = flowOf(emptyList())
+  }
+
   private lateinit var repository: FakeDashboardRepository
   private lateinit var uploadRecordsSource: FakeUploadRecordsSource
+  private lateinit var draftRepository: FakeDraftRepository
   private lateinit var dynamicScheduler: FakeDynamicFormSyncScheduler
   private lateinit var childScheduler: FakeChildFormSyncScheduler
   private lateinit var enrollmentScheduler: FakeEnrollmentSyncScheduler
+  private lateinit var visitScheduleScheduler: FakeVisitScheduleSyncScheduler
   private lateinit var manualSyncTrigger: ManualSyncTrigger
 
   @Before
@@ -103,12 +154,19 @@ class HomeViewModelTest {
     Dispatchers.setMain(dispatcher)
     repository = FakeDashboardRepository()
     uploadRecordsSource = FakeUploadRecordsSource()
+    draftRepository = FakeDraftRepository()
     dynamicScheduler = FakeDynamicFormSyncScheduler()
     childScheduler = FakeChildFormSyncScheduler()
     enrollmentScheduler = FakeEnrollmentSyncScheduler()
+    visitScheduleScheduler = FakeVisitScheduleSyncScheduler()
     // Real ManualSyncTrigger over fake schedulers: its whole job is the fan-out, so faking the
     // trigger itself would test nothing.
-    manualSyncTrigger = ManualSyncTrigger(dynamicScheduler, childScheduler, enrollmentScheduler)
+    manualSyncTrigger = ManualSyncTrigger(
+      dynamicScheduler,
+      childScheduler,
+      enrollmentScheduler,
+      visitScheduleScheduler,
+    )
   }
 
   @After
@@ -116,7 +174,8 @@ class HomeViewModelTest {
     Dispatchers.resetMain()
   }
 
-  private fun viewModel() = HomeViewModel(repository, uploadRecordsSource, manualSyncTrigger)
+  private fun viewModel() =
+    HomeViewModel(repository, uploadRecordsSource, manualSyncTrigger, draftRepository)
 
   /** Keeps the WhileSubscribed StateFlows active for the duration of a test so their derived values
    * are computed (mirrors the screen collecting them). */
@@ -125,12 +184,18 @@ class HomeViewModelTest {
     backgroundScope.launch(dispatcher) { viewModel.uploadModalState.collect {} }
   }
 
-  private fun record(id: String, status: EnrollmentSyncStatus, createdAtEpochMillis: Long) =
+  private fun record(
+    id: String,
+    status: EnrollmentSyncStatus,
+    createdAtEpochMillis: Long,
+    pendingNewPregnancyBeneficiaryId: String? = null,
+  ) =
     FormUploadRecord(
       localBeneficiaryId = id,
       formCode = "MOTHER_REGISTRATION",
       syncStatus = status,
       createdAtEpochMillis = createdAtEpochMillis,
+      pendingNewPregnancyBeneficiaryId = pendingNewPregnancyBeneficiaryId,
     )
 
   @Test
@@ -319,4 +384,74 @@ class HomeViewModelTest {
       assertEquals(0, viewModel.pendingUploadCount.value)
       assertTrue(viewModel.uiState.value is HomeUiState.Success)
     }
+
+  // --- CR-033 duplicate review (SRS FR-S-2.5) ---------------------------------------------------
+
+  private fun TestScope.observeDuplicateReview(viewModel: HomeViewModel) {
+    backgroundScope.launch(dispatcher) { viewModel.duplicateReview.collect {} }
+  }
+
+  @Test
+  fun `no duplicate review while nothing is awaiting an answer`() = runTest(dispatcher) {
+    uploadRecordsSource.setRecords(
+      listOf(
+        record("a", EnrollmentSyncStatus.PENDING, 1L),
+        // Rejected as a hard duplicate: nothing for the Sakhi to answer.
+        record("b", EnrollmentSyncStatus.DUPLICATE_CONFLICT, 2L),
+      ),
+    )
+    val vm = viewModel()
+    observeDuplicateReview(vm)
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertNull(vm.duplicateReview.value)
+  }
+
+  @Test
+  fun `a draft rejected during upload with a completed earlier pregnancy is offered for review`() =
+    runTest(dispatcher) {
+      uploadRecordsSource.setRecords(
+        listOf(record("a", EnrollmentSyncStatus.DUPLICATE_CONFLICT, 5L, "earlier-case")),
+      )
+      val vm = viewModel()
+      observeDuplicateReview(vm)
+      dispatcher.scheduler.advanceUntilIdle()
+
+      assertEquals(DuplicateReview("a", "earlier-case", 5L), vm.duplicateReview.value)
+    }
+
+  @Test
+  fun `the oldest pending question is asked first, one at a time`() = runTest(dispatcher) {
+    uploadRecordsSource.setRecords(
+      listOf(
+        record("newer", EnrollmentSyncStatus.DUPLICATE_CONFLICT, 900L, "case-2"),
+        record("older", EnrollmentSyncStatus.DUPLICATE_CONFLICT, 100L, "case-1"),
+      ),
+    )
+    val vm = viewModel()
+    observeDuplicateReview(vm)
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals("older", vm.duplicateReview.value?.localBeneficiaryId)
+  }
+
+  @Test
+  fun `confirming a review acknowledges that draft`() = runTest(dispatcher) {
+    val vm = viewModel()
+    vm.onConfirmNewPregnancy(DuplicateReview("a", "earlier-case", 5L))
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(listOf("a" to "earlier-case"), draftRepository.confirmed)
+    assertTrue(draftRepository.dismissed.isEmpty())
+  }
+
+  @Test
+  fun `declining a review clears the question without acknowledging anything`() = runTest(dispatcher) {
+    val vm = viewModel()
+    vm.onDismissDuplicateReview(DuplicateReview("a", "earlier-case", 5L))
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(listOf("a"), draftRepository.dismissed)
+    assertTrue(draftRepository.confirmed.isEmpty())
+  }
 }

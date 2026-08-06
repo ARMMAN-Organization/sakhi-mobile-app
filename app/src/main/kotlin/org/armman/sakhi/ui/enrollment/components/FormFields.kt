@@ -48,6 +48,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import org.armman.sakhi.R
 import org.armman.sakhi.ui.theme.Dimens
+import org.armman.sakhi.ui.theme.ErrorBorderSoft
 import org.armman.sakhi.ui.theme.NeutralG100
 import org.armman.sakhi.ui.theme.NeutralG400
 import org.armman.sakhi.ui.theme.NeutralG75
@@ -101,13 +102,24 @@ private fun FieldLabelText(label: String, required: Boolean, modifier: Modifier 
   )
 }
 
-/** Shared label + optional error scaffolding for enrollment form fields. */
+/**
+ * Shared label + optional error scaffolding for enrollment form fields.
+ *
+ * [errorBelowLabel] controls where [errorText] renders relative to [content]:
+ * - `false` (default, single-row fields like a text/dropdown/date box): error sits directly under
+ *   the box, since the box itself is the whole "question".
+ * - `true` (multi-row [AppCheckboxGroup] answer lists): error sits directly under the question
+ *   label instead, *above* the options — otherwise, with a long options list, "This field is
+ *   required" ends up far below the question, after the last checkbox, which reads as attached to
+ *   the last option rather than to the question itself.
+ */
 @Composable
 private fun FieldFrame(
   label: String,
   errorText: String?,
   modifier: Modifier = Modifier,
   required: Boolean = false,
+  errorBelowLabel: Boolean = false,
   content: @Composable () -> Unit,
 ) {
   Column(modifier = modifier.fillMaxWidth()) {
@@ -116,21 +128,31 @@ private fun FieldFrame(
       required = required,
       modifier = Modifier.padding(bottom = 4.dp),
     )
+    if (errorBelowLabel && errorText != null) {
+      FieldErrorText(errorText, modifier = Modifier.padding(bottom = 4.dp))
+    }
     content()
-    if (errorText != null) {
-      Text(
-        text = errorText,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.error,
-        modifier = Modifier.padding(top = 4.dp),
-      )
+    if (!errorBelowLabel && errorText != null) {
+      FieldErrorText(errorText, modifier = Modifier.padding(top = 4.dp))
     }
   }
 }
 
 @Composable
+private fun FieldErrorText(text: String, modifier: Modifier = Modifier) {
+  Text(
+    text = text,
+    style = MaterialTheme.typography.labelLarge,
+    color = MaterialTheme.colorScheme.error,
+    modifier = modifier,
+  )
+}
+
+@Composable
 private fun fieldBorder(isError: Boolean) =
-  if (isError) MaterialTheme.colorScheme.error else NeutralG75
+  // ErrorBorderSoft, not MaterialTheme.colorScheme.error (=RiskHigh) — the full-strength red read
+  // as too heavy for a 1dp field outline repeated down a whole form (2026-08 design feedback).
+  if (isError) ErrorBorderSoft else NeutralG75
 
 /**
  * Dropdown selector styled like the design's "Select …" fields: outlined box,
@@ -466,7 +488,13 @@ fun AppCheckboxGroup(
   enabled: (Int) -> Boolean = { true },
   required: Boolean = false,
 ) {
-  FieldFrame(label = label, errorText = errorText, modifier = modifier, required = required) {
+  FieldFrame(
+    label = label,
+    errorText = errorText,
+    modifier = modifier,
+    required = required,
+    errorBelowLabel = true,
+  ) {
     Column(verticalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing)) {
       options.forEachIndexed { index, option ->
         SelectableRow(

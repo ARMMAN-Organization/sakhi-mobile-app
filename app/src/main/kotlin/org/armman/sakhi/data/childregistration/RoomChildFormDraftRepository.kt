@@ -63,8 +63,7 @@ class RoomChildFormDraftRepository @Inject constructor(
 
     return when (val result = syncExecutor.runOne(localBeneficiaryId)) {
       is ChildFormSyncItemResult.Synced -> ChildFormSubmitResult.Synced
-      is ChildFormSyncItemResult.DuplicateConflict ->
-        ChildFormSubmitResult.DuplicateConflict(result.message)
+      is ChildFormSyncItemResult.DuplicateConflict -> ChildFormSubmitResult.DuplicateConflict
       is ChildFormSyncItemResult.Failed -> ChildFormSubmitResult.Failed(result.message)
       is ChildFormSyncItemResult.Retryable, null -> {
         // Transient (connectivity dropped mid-call despite the isOnline() check), or no draft row

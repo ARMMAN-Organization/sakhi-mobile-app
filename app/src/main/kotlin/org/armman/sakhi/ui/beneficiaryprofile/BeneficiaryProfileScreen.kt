@@ -74,7 +74,6 @@ fun BeneficiaryProfileScreen(
         title = stringResource(R.string.beneficiary_profile_back_title),
         subtitle = today,
         onBack = onBack,
-        onAvatarClick = onProfile,
       )
       Surface(
         color = White,
@@ -89,6 +88,7 @@ fun BeneficiaryProfileScreen(
               profile = profile,
               isTablet = isTablet,
               onComingSoon = { onComingSoon() },
+              canStartVisit = state.canStartVisit,
               onStartVisit = { visit -> onStartVisit(profile.id, visit) },
             )
           }
@@ -102,6 +102,7 @@ fun BeneficiaryProfileScreen(
 private fun ProfileContent(
   profile: BeneficiaryProfile,
   isTablet: Boolean,
+  canStartVisit: Boolean,
   onComingSoon: () -> Unit,
   onStartVisit: (ProfileVisit) -> Unit,
 ) {
@@ -119,13 +120,23 @@ private fun ProfileContent(
         isTablet = isTablet,
         modifier = Modifier.padding(top = Dimens.ItemSpacing),
       )
-      if (profile.visits.isNotEmpty()) {
+      // CR-022f: the section header always renders. Before, an empty list hid the whole section,
+      // which left a beneficiary with no generated schedule looking identical to one whose profile
+      // simply had no visits area — indistinguishable from a rendering bug.
+      Text(
+        text = stringResource(R.string.beneficiary_profile_see_visits),
+        style = SerifTitle,
+        color = NeutralG400,
+        modifier = Modifier.padding(top = Dimens.ScreenPadding),
+      )
+      if (profile.visits.isEmpty()) {
         Text(
-          text = stringResource(R.string.beneficiary_profile_see_visits),
-          style = SerifTitle,
+          text = stringResource(R.string.beneficiary_profile_no_visits),
+          style = MaterialTheme.typography.bodyMedium,
           color = NeutralG400,
-          modifier = Modifier.padding(top = Dimens.ScreenPadding),
+          modifier = Modifier.padding(top = Dimens.ItemSpacing),
         )
+      } else {
         profile.visits.forEach { visit ->
           VisitHistoryCard(
             visit = visit,
@@ -133,9 +144,12 @@ private fun ProfileContent(
             // CR-016: Start Visit / Fill Form now open the Visit Form flow;
             // See Data / Referral remain stubbed until their own CRs land.
             onAction = {
-              if (visit.action == ProfileVisitAction.START_VISIT ||
+              val opensVisitForm = visit.action == ProfileVisitAction.START_VISIT ||
                 visit.action == ProfileVisitAction.FILL_FORM
-              ) {
+              // CR-022g: the Visit Form is still backed by seeded data that only recognises its own
+              // ids, so opening it for a Sakhi's own enrolment throws and lands her on an error
+              // screen. Until CR-026 gives it real data, say "coming soon" instead of breaking.
+              if (opensVisitForm && canStartVisit) {
                 onStartVisit(visit)
               } else {
                 onComingSoon()

@@ -20,7 +20,9 @@ private const val HTTP_CONFLICT = 409
  */
 sealed interface ChildFormSyncItemResult {
   data object Synced : ChildFormSyncItemResult
-  data class DuplicateConflict(val message: String?) : ChildFormSyncItemResult
+  /** Duplicate child (SRS FR-S-2.4) — blocked. No message: the raw backend sentence stays on the
+   * draft for debugging, the screen shows localised copy. */
+  data object DuplicateConflict : ChildFormSyncItemResult
   data class Failed(val message: String?) : ChildFormSyncItemResult
   data class Retryable(val message: String?) : ChildFormSyncItemResult
 }
@@ -173,7 +175,7 @@ class ChildFormSyncExecutor @Inject constructor(
                   lastErrorMessage = error.message,
                 ),
               )
-              ChildFormSyncItemResult.DuplicateConflict(error.message)
+              ChildFormSyncItemResult.DuplicateConflict
             }
 
             error is IOException || error.cause is IOException -> {

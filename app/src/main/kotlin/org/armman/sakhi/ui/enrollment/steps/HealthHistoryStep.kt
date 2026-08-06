@@ -91,7 +91,7 @@ fun HealthHistoryStep(
 ) {
   val banner = state.showValidationBanner
   Column(
-    verticalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
+    verticalArrangement = Arrangement.spacedBy(Dimens.FormFieldSpacing),
     modifier = modifier.fillMaxWidth(),
   ) {
     Text(
@@ -100,6 +100,11 @@ fun HealthHistoryStep(
       color = NeutralG200,
       modifier = Modifier.padding(top = Dimens.ItemSpacing),
     )
+
+    // Banner sits right after the instruction (top of the field list), not after the last field —
+    // see the matching note in PersonalInfoStep. validationScrollTrigger scrolls this step back to
+    // y=0 on a blocked Next tap, so the banner needs to already be on that first screenful.
+    if (banner) ValidationErrorBanner(errors = state.validationErrors)
 
     // --- Current Pregnancy (Q35–44) ---
     SectionHeader(stringResource(R.string.enrollment_hh_section_current))
@@ -304,8 +309,6 @@ fun HealthHistoryStep(
       singleLine = false,
       minLines = 3,
     )
-
-    if (banner) ValidationErrorBanner(errors = state.validationErrors)
   }
 }
 

@@ -106,7 +106,10 @@ fun BeneficiaryCard(
         }
         Text(
           text = beneficiary.name,
-          style = MaterialTheme.typography.titleLarge,
+          // headlineSmall (24sp Bold) is the style guide's "Prominent names" token — using it
+          // here (not titleLarge/18sp) keeps the name proportionate against the 14sp bodyMedium
+          // meta row (pada / ANC / Sch Date) below it.
+          style = MaterialTheme.typography.headlineSmall,
           color = NeutralG400,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,

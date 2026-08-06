@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import org.armman.sakhi.data.dashboard.DashboardRepository
 import org.armman.sakhi.data.dashboard.DashboardSummary
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
+import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.sync.ManualSyncTrigger
 import org.armman.sakhi.data.sync.UploadRecordsSource
@@ -37,6 +38,23 @@ data class UploadModalState(
   val records: List<FormUploadRecord> = emptyList(),
 )
 
+/**
+ * A draft the backend rejected as a possible duplicate, where the earlier pregnancy is already
+ * complete (SRS FR-S-2.5) and nobody has answered the resulting question yet.
+ *
+ * Surfaced on Home because the rejection can happen during a manual Data Upload, when the Sakhi is
+ * nowhere near the enrollment form — without this the draft would stay in DUPLICATE_CONFLICT
+ * permanently, visible in the upload modal and impossible to upload.
+ *
+ * Identified by submission date rather than by name: [FormUploadRecord] carries no PII by design, and
+ * decrypting a beneficiary's name just to title a dialog isn't worth widening that boundary.
+ */
+data class DuplicateReview(
+  val localBeneficiaryId: String,
+  val existingBeneficiaryId: String,
+  val submittedAtEpochMillis: Long,
+)
+
 private const val SUBSCRIPTION_TIMEOUT_MS = 5_000L
 
 @HiltViewModel
@@ -44,6 +62,7 @@ class HomeViewModel @Inject constructor(
   private val dashboardRepository: DashboardRepository,
   private val uploadRecordsSource: UploadRecordsSource,
   private val manualSyncTrigger: ManualSyncTrigger,
+  private val dynamicFormDraftRepository: DynamicFormDraftRepository,
 ) : ViewModel() {
 
   private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
@@ -67,6 +86,31 @@ class HomeViewModel @Inject constructor(
       .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS), 0)
 
   private val _modalVisible = MutableStateFlow(false)
+
+  /**
+   * The oldest unanswered new-pregnancy question across the drafts, or null when there is none.
+   *
+   * One at a time on purpose: each answer creates a real beneficiary record, so they are worth
+   * showing deliberately rather than stacking dialogs. Answering one re-emits the list and the next
+   * (if any) takes its place.
+   */
+  val duplicateReview: StateFlow<DuplicateReview?> =
+    uploadRecords
+      .map { records ->
+        records
+          .filter { it.syncStatus == EnrollmentSyncStatus.DUPLICATE_CONFLICT }
+          .sortedBy { it.createdAtEpochMillis }
+          .firstNotNullOfOrNull { record ->
+            record.pendingNewPregnancyBeneficiaryId?.let { existingId ->
+              DuplicateReview(
+                localBeneficiaryId = record.localBeneficiaryId,
+                existingBeneficiaryId = existingId,
+                submittedAtEpochMillis = record.createdAtEpochMillis,
+              )
+            }
+          }
+      }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS), null)
 
   val uploadModalState: StateFlow<UploadModalState> =
     combine(_modalVisible, uploadRecords) { visible, records ->
@@ -111,5 +155,30 @@ class HomeViewModel @Inject constructor(
   /** Dismisses the modal. */
   fun onDismissUploadModal() {
     _modalVisible.value = false
+  }
+
+  /**
+   * The Sakhi confirmed that a rejected draft really is a new pregnancy. The acknowledgement is
+   * persisted on the draft and the upload retried, so the confirmation isn't lost if the retry fails
+   * or the device is offline.
+   *
+   * The prompt disappears on its own: [confirmNewPregnancy] clears the stored prompt, which
+   * re-emits [uploadRecords] and empties [duplicateReview].
+   */
+  fun onConfirmNewPregnancy(review: DuplicateReview) {
+    viewModelScope.launch {
+      dynamicFormDraftRepository.confirmNewPregnancy(
+        localBeneficiaryId = review.localBeneficiaryId,
+        existingBeneficiaryId = review.existingBeneficiaryId,
+      )
+    }
+  }
+
+  /** The Sakhi declined. The draft and its answers are left as they are — only the question is
+   * cleared, so it stops reappearing after every upload. */
+  fun onDismissDuplicateReview(review: DuplicateReview) {
+    viewModelScope.launch {
+      dynamicFormDraftRepository.dismissNewPregnancyPrompt(review.localBeneficiaryId)
+    }
   }
 }

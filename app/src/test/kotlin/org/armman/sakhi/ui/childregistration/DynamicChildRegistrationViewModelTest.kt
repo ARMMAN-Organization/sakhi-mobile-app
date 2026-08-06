@@ -1016,7 +1016,7 @@ class DynamicChildRegistrationViewModelTest {
 
   @Test
   fun `submit on duplicate conflict reports Failed with the DUPLICATE kind`() = runTest {
-    val draftRepository = FakeChildDraftRepository(ChildFormSubmitResult.DuplicateConflict("dup"))
+    val draftRepository = FakeChildDraftRepository(ChildFormSubmitResult.DuplicateConflict)
     val vm = viewModel(listOf(field("name_of_the_child", section = "Infant Details")), draftRepository)
     vm.setAnswer("name_of_the_child", "Aarav")
 

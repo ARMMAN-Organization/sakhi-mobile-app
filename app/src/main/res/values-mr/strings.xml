@@ -153,6 +153,7 @@
   <string name="beneficiary_profile_coming_soon">ही स्क्रीन लवकरच येत आहे</string>
   <string name="beneficiary_profile_error_load">लाभार्थी लोड होऊ शकला नाही. कृपया पुन्हा प्रयत्न करा.</string>
   <string name="beneficiary_profile_see_visits">भेटी पहा</string>
+  <string name="beneficiary_profile_no_visits">अद्याप कोणतीही भेट नियोजित नाही</string>
   <string name="beneficiary_profile_visit_open">सुरू</string>
   <string name="beneficiary_profile_visit_complete">पूर्ण झाले</string>
   <string name="beneficiary_profile_visit_complete_short">पूर्ण</string>
@@ -335,7 +336,7 @@
   <string name="enrollment_hh_error_para">पॅरा ग्रॅव्हिडापेक्षा जास्त असू शकत नाही</string>
   <string name="enrollment_hh_error_abortions">गर्भपात ग्रॅव्हिडापेक्षा जास्त असू शकत नाही</string>
   <string name="enrollment_hh_error_dead">जिवंत मुलांपेक्षा जास्त असू शकत नाही</string>
-  <string name="enrollment_hh_error_gravida_total">जिवंत मुले + मृत जन्म + गर्भपात = ग्रॅव्हिडा असावे</string>
+  <string name="enrollment_hh_error_gravida_total">जिवंत मुले + मृत जन्म + गर्भपात = ग्रॅव्हिडा − १ (सध्याची गर्भधारणा वगळून) असावे</string>
   <string name="enrollment_summary_health_history">आरोग्य इतिहास</string>
 
   <!-- Pre-Visit Health History (FR-S-4.6, CR-016a) — MR translations flagged for native QA -->
@@ -478,7 +479,7 @@
   <string name="child_reg_dob_future">जन्मतारीख भविष्यातील असू शकत नाही.</string>
   <string name="child_reg_ineligible_direct">हे बाळ १२ महिन्यांपेक्षा (३६५ दिवस) मोठे आहे, त्यामुळे थेट नोंदणी करता येणार नाही.</string>
   <string name="child_reg_ineligible_mother">नोंदणीकृत मातेच्या बाळाची नोंदणी जन्मानंतर ६ महिन्यांच्या (१८३ दिवस) आत करणे आवश्यक आहे.</string>
-  <string name="child_reg_duplicate">जुळणारे बाळाचे रेकॉर्ड आधीच अस्तित्वात आहे. नवीन रेकॉर्ड म्हणून नोंदणी सुरू ठेवायची का?</string>
+  <string name="child_reg_duplicate">जुळणारे बाळाचे रेकॉर्ड आधीच अस्तित्वात आहे, त्यामुळे ही नोंदणी पूर्ण करता येणार नाही. कृपया तुमच्या पर्यवेक्षकांशी संपर्क साधा.</string>
   <string name="child_reg_submit_failed">नोंदणी सबमिट करता आली नाही. कृपया फॉर्म तपासून पुन्हा प्रयत्न करा.</string>
 
   <!-- Mother link &amp; prefill (CR-031) -->
@@ -494,4 +495,12 @@
   <string name="child_reg_mother_link_retry">पुन्हा प्रयत्न करा</string>
   <string name="child_reg_mother_prefill_hint">मातेच्या नोंदीतून</string>
   <string name="field_required_content_description">%1$s, आवश्यक</string>
+  <!-- CR-033 duplicate detection & new pregnancy (SRS FR-S-2.4 / FR-S-2.5) -->
+  <string name="enrollment_duplicate_blocked">ही लाभार्थी आधीच नोंदणीकृत आहे आणि तिचा सध्याचा प्रवास सुरू आहे, त्यामुळे ही नोंदणी पूर्ण करता येणार नाही. कृपया तुमच्या पर्यवेक्षकांशी संपर्क साधा.</string>
+  <string name="enrollment_duplicate_new_pregnancy_title">पूर्वीची नोंद आढळली</string>
+  <string name="enrollment_duplicate_new_pregnancy_message">या लाभार्थीची नोंद आधीच आहे आणि तिची पूर्वीची गर्भधारणा पूर्ण झाली आहे. ही नवीन गर्भधारणा आहे का? होय निवडल्यास नवीन नोंद तयार होईल आणि पूर्वीची नोंद जशी आहे तशीच राहील.</string>
+  <string name="enrollment_duplicate_new_pregnancy_confirm">होय, नवीन गर्भधारणा</string>
+  <string name="enrollment_duplicate_new_pregnancy_cancel">नाही, मागे जा</string>
+  <string name="home_duplicate_review_title">पूर्वीची नोंद आढळली</string>
+  <string name="home_duplicate_review_message">%1$s रोजीची एक नोंदणी अपलोड होऊ शकली नाही: या लाभार्थीची नोंद आधीच आहे आणि तिची पूर्वीची गर्भधारणा पूर्ण झाली आहे. ही नवीन गर्भधारणा आहे का?</string>
 </resources>

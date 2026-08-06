@@ -75,4 +75,27 @@ class SubmitErrorCopyTest {
     // Free-text backend messages must not be cosmetically rewritten.
     assertEquals("too many", SubmitErrorCopy.humanize("too many"))
   }
+
+  @Test
+  fun `duplicate 409 detail keys are never rendered as field errors`() {
+    // The re-enrolment 409 puts machine-readable detail under fieldErrors. Before this filter the
+    // Sakhi was shown "RE_ENROLLMENT" and "Resubmit with acknowledgeDuplicate: true…" verbatim.
+    val details = mapOf(
+      "reason" to "RE_ENROLLMENT",
+      "existingBeneficiaryId" to "11111111-2222-3333-4444-555555555555",
+      "resolution" to "Resubmit with acknowledgeDuplicate: true to enroll a new pregnancy.",
+    )
+
+    assertEquals(SubmitErrorCopy.GENERIC, SubmitErrorCopy.forApiError(null, details))
+  }
+
+  @Test
+  fun `a real field error still wins even when duplicate detail keys are present alongside it`() {
+    val mixed = mapOf(
+      "reason" to "RE_ENROLLMENT",
+      "pii.firstName" to "First name is required",
+    )
+
+    assertEquals("First name is required", SubmitErrorCopy.forApiError(null, mixed))
+  }
 }

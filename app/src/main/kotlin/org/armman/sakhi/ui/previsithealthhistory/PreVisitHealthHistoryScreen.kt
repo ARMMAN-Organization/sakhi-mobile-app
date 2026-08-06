@@ -81,7 +81,6 @@ fun PreVisitHealthHistoryScreen(
         title = stringResource(R.string.previsit_back_title),
         subtitle = today,
         onBack = onBack,
-        onAvatarClick = onProfile,
       )
       Surface(
         color = White,
