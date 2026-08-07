@@ -16,19 +16,35 @@ import kotlin.math.roundToInt
 
 /**
  * Pure (non-Composable) rules for the "Forms Uploaded" modal, matching the Figma reference's
- * actual structure: **one card per form category** (e.g. "Mother Registration"), not one per
+ * actual structure: **one card per form category** (e.g. "Registration"), not one per
  * individual submission — each card shows an aggregate "synced/total" count, one progress bar,
  * and one status icon for the whole category.
  *
  * Pulled out of [FormsUploadedModal] so these rules are unit-testable with plain JUnit — this
  * repo has no Compose UI test harness (no `createComposeRule` usage exists anywhere).
  *
- * Two categories are surfaced today — Mother Registration (CR-018) and Children Register (CR-020),
- * merged by [org.armman.sakhi.data.sync.UploadRecordsSource]. [categoryLabelRes] is a `when`
- * specifically so adding a third (e.g. a Referral Form) is a one-line addition, not a rewrite.
+ * Mother Registration (CR-018) and Children Register (CR-020) drafts, merged by
+ * [org.armman.sakhi.data.sync.UploadRecordsSource], are folded into a single "Registration"
+ * category here via [displayCategoryCode] — they remain two distinct underlying form codes and
+ * two distinct submission/sync queues, only this status view presents them as one card.
+ * [categoryLabelRes] is a `when` specifically so adding a genuinely separate third category
+ * (e.g. a Referral Form) is a one-line addition, not a rewrite.
  */
 private const val MOTHER_REGISTRATION_FORM_CODE = "MOTHER_REGISTRATION"
 private const val CHILD_REGISTRATION_FORM_CODE = "CHILD_REGISTRATION"
+
+/** Display category all registration-family form codes are folded into for this modal. */
+private const val REGISTRATION_CATEGORY_CODE = "REGISTRATION"
+
+/**
+ * Maps a raw [FormUploadRecord.formCode] to the category code this modal groups and labels by.
+ * Mother and child registration codes fold into one "Registration" card; any other code (e.g. a
+ * future Referral Form) passes through unchanged and gets its own card.
+ */
+private fun displayCategoryCode(formCode: String): String = when (formCode) {
+  MOTHER_REGISTRATION_FORM_CODE, CHILD_REGISTRATION_FORM_CODE -> REGISTRATION_CATEGORY_CODE
+  else -> formCode
+}
 
 /** Which icon a category (or, before aggregation, a single record) renders. */
 internal enum class UploadStatusIconKind {
@@ -67,15 +83,17 @@ internal data class FormCategorySummary(
 )
 
 /**
- * Groups raw records into one [FormCategorySummary] per distinct form code. The modal renders one
- * card per entry in the returned list, not one per input record.
+ * Groups raw records into one [FormCategorySummary] per distinct display category (see
+ * [displayCategoryCode]) — e.g. Mother and Children Register records fold into one
+ * "Registration" card. The modal renders one card per entry in the returned list, not one per
+ * input record and not necessarily one per raw form code.
  */
 internal fun groupUploadRecordsByCategory(records: List<FormUploadRecord>): List<FormCategorySummary> =
   records
-    .groupBy { it.formCode }
-    .map { (formCode, group) ->
+    .groupBy { displayCategoryCode(it.formCode) }
+    .map { (categoryCode, group) ->
       FormCategorySummary(
-        formCode = formCode,
+        formCode = categoryCode,
         syncedCount = group.count { it.syncStatus == EnrollmentSyncStatus.SYNCED },
         totalCount = group.size,
         iconKind = categoryIconKind(group.map { it.syncStatus }),
@@ -107,14 +125,13 @@ internal fun categoryIconKind(statuses: List<EnrollmentSyncStatus>): UploadStatu
 }
 
 /**
- * Display label for a form category. The `else` branch falls back to the Mother Registration label
- * rather than crashing or showing a raw form code, since an unmapped code can only come from a
- * queue this screen doesn't know about yet — extend this `when` when a new form ships.
+ * Display label for a form category. The `else` branch falls back to the merged Registration
+ * label rather than crashing or showing a raw form code, since an unmapped code can only come
+ * from a queue this screen doesn't know about yet — extend this `when` when a new category ships.
  */
 internal fun categoryLabelRes(formCode: String): Int = when (formCode) {
-  MOTHER_REGISTRATION_FORM_CODE -> R.string.home_upload_modal_form_label
-  CHILD_REGISTRATION_FORM_CODE -> R.string.home_upload_modal_child_form_label
-  else -> R.string.home_upload_modal_form_label
+  REGISTRATION_CATEGORY_CODE -> R.string.home_upload_modal_registration_form_label
+  else -> R.string.home_upload_modal_registration_form_label
 }
 
 /** Real synced/total percentage, rounded to the nearest whole number — always a genuine fraction

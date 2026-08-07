@@ -112,4 +112,40 @@ class FormVisibilityEvaluatorTest {
     assertFalse(FormVisibilityEvaluator.isVisible(isSet, gravida("")))
     assertFalse(FormVisibilityEvaluator.isVisible(isSet, FormAnswers()))
   }
+
+  // --- contains ----------------------------------------------------------------------------------
+  // Added 2026-08-06 for the Td-dose date fields: `has_the_women_received_td_dose contains
+  // "td_1_date"` gates td_1_date's own date field on whether that checkbox is checked. Unlike every
+  // other operator, the governing field here is a MULTI-value answer.
+
+  private fun containsTd1() =
+    field(FormVisibleWhen(field = "td_dose", value = "td_1_date", operator = "contains"))
+
+  @Test
+  fun `contains shows the field when the value is one of the checked boxes`() {
+    val answers = FormAnswers(multiValues = mapOf("td_dose" to listOf("td_1_date", "td_2_date")))
+
+    assertTrue(FormVisibilityEvaluator.isVisible(containsTd1(), answers))
+  }
+
+  @Test
+  fun `contains hides the field when the value is not among the checked boxes`() {
+    val answers = FormAnswers(multiValues = mapOf("td_dose" to listOf("td_2_date")))
+
+    assertFalse(FormVisibilityEvaluator.isVisible(containsTd1(), answers))
+  }
+
+  @Test
+  fun `contains hides the field when the governing multiselect is unanswered`() {
+    assertFalse(FormVisibilityEvaluator.isVisible(containsTd1(), FormAnswers()))
+  }
+
+  @Test
+  fun `contains reads the multi-value map, not the single-value one`() {
+    // A stray single-value entry under the same question code must not satisfy `contains` — the
+    // two maps are deliberately separate (see FormAnswers), and this operator only reads multi.
+    val answers = FormAnswers(singleValues = mapOf("td_dose" to "td_1_date"))
+
+    assertFalse(FormVisibilityEvaluator.isVisible(containsTd1(), answers))
+  }
 }

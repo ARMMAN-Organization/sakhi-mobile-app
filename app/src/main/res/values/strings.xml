@@ -17,8 +17,7 @@
   <!-- Forms Uploaded sync-status modal -->
   <string name="home_upload_modal_title">%1$d/%2$d Forms Uploaded</string>
   <string name="home_upload_modal_empty">No forms submitted yet.</string>
-  <string name="home_upload_modal_form_label">Mother Registration</string>
-  <string name="home_upload_modal_child_form_label">Children Register</string>
+  <string name="home_upload_modal_registration_form_label">Registration</string>
   <string name="home_upload_modal_category_forms">%1$d/%2$d Forms</string>
   <string name="home_upload_status_synced">Uploaded</string>
   <string name="home_upload_status_pending">Pending</string>
@@ -262,6 +261,11 @@
   <string name="enrollment_error_lmp_future">LMP cannot be in the future</string>
   <string name="enrollment_error_lmp_recent">LMP must be more than 30 days before registration</string>
   <string name="enrollment_error_lmp_old">LMP must be less than 240 days before registration</string>
+  <string name="enrollment_error_anc1_date_not_after_lmp">ANC-1 date must be after the LMP date</string>
+  <string name="enrollment_error_anc1_date_too_late">ANC-1 date cannot be more than 5 days after the registration date</string>
+  <string name="form_error_td_date_future">This date cannot be in the future</string>
+  <string name="form_error_td2_not_after_td1">Td-2 date must be after the Td-1 date</string>
+  <string name="form_error_td_booster_not_after_td2">Td-Booster date must be after the Td-2 date</string>
   <string name="enrollment_error_name_chars">Only letters and spaces are allowed</string>
   <string name="enrollment_error_age_range">Age must be between 10 and 50 years</string>
   <string name="enrollment_error_mobile">Enter a valid 10-digit mobile number</string>

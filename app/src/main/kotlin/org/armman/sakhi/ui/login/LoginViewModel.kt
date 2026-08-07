@@ -16,6 +16,7 @@ import org.armman.sakhi.data.auth.LoginRequest
 import org.armman.sakhi.data.auth.LoginResult
 import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.lookup.LookupWarmer
+import org.armman.sakhi.data.motherlink.MotherDetailsWarmer
 import javax.inject.Inject
 
 /**
@@ -37,6 +38,7 @@ class LoginViewModel @Inject constructor(
   private val authRepository: AuthRepository,
   private val sessionStore: SessionStore,
   private val lookupWarmer: LookupWarmer,
+  private val motherDetailsWarmer: MotherDetailsWarmer,
 ) : ViewModel() {
 
   // A valid, unexpired "stay logged in" session skips the form entirely — LoginScreen treats
@@ -78,6 +80,10 @@ class LoginViewModel @Inject constructor(
           // enrollment can resolve caseType/beneficiaryType even offline or on a weak signal.
           // Fire-and-forget on the warmer's own scope so navigating away doesn't cancel it.
           lookupWarmer.warmSubmitCriticalCategoriesAsync()
+          // Same reasoning for every registered mother's consent + socio-demographics (CR-032): a
+          // Sakhi may go the whole day with no signal and never get the chance to warm them one
+          // mother at a time.
+          motherDetailsWarmer.warmAllMothersAsync()
           _uiState.update { it.copy(isSubmitting = false, loginSucceeded = true) }
         }
         is LoginResult.Failure ->

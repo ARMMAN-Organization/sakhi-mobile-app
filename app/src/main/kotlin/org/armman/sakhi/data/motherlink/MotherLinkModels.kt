@@ -55,3 +55,41 @@ data class LinkedMother(
  * this arrives from a second call that is allowed to fail (offline) without failing the selection.
  */
 data class LinkedMotherConsent(val consentGiven: Boolean)
+
+/**
+ * One already-resolved lookup answer inside [MotherSocioDemographics] — `beneficiary-service`'s own
+ * `categoryCode`/`label` for a socio-demographic answer, not yet translated to the
+ * CHILD_REGISTRATION form's `value_code`. [org.armman.sakhi.data.lookup.LookupLabelMatcher] does
+ * that translation at prefill time, against the live form schema's own options for the target
+ * question — see [MotherPrefill].
+ */
+data class MotherLookupAnswer(
+  val categoryCode: String,
+  val label: String,
+)
+
+/**
+ * Rows 21–34 of the mother's socio-demographic details (CR-032), read from
+ * `GET /beneficiaries/:id`'s `socioDemographics` block (+ `pii.address`/`pii.mobileNumber`, which
+ * only the detail response carries).
+ *
+ * Every property is independently nullable — a Sakhi may not have answered every question at the
+ * mother's own registration, and a missing value here must simply not prefill that one field,
+ * exactly like [LinkedMother]'s optional geography levels.
+ */
+data class MotherSocioDemographics(
+  val address: String?,
+  val mobileNumber: String?,
+  val phoneOwner: MotherLookupAnswer?,
+  val mobileNetworkAvailability: MotherLookupAnswer?,
+  val educationLevel: MotherLookupAnswer?,
+  val partnerEducationLevel: MotherLookupAnswer?,
+  val partnerOccupation: MotherLookupAnswer?,
+  val yearsInVillage: Int?,
+  val migrationPattern: MotherLookupAnswer?,
+  val monthlyIncome: MotherLookupAnswer?,
+  val religion: MotherLookupAnswer?,
+  val socialCategory: MotherLookupAnswer?,
+  val familyMembersCount: Int?,
+  val childrenUnder5Count: Int?,
+)

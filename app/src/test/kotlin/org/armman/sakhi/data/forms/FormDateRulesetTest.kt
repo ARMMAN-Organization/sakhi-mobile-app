@@ -405,6 +405,82 @@ class FormDateRulesetTest {
     assertEquals(FormDateRuleset.Violation.LMP_TOO_OLD, violation)
   }
 
+  // --- ANC1 completion date (row 42): strictly after LMP, <=5 days after registration ----------
+
+  private val anc1Date = FormDateRuleset.ANC1_DATE_QUESTION_CODE
+
+  @Test
+  fun `AD-1 bounds run from the day after LMP to registration date plus 5 days`() {
+    val lmp = registrationDate.minusDays(60)
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(anc1Date, answers(LMP_DATE_QUESTION_CODE to lmp.toString()), registrationDate),
+    )
+
+    assertEquals(lmp.plusDays(1), bounds.min)
+    assertEquals(registrationDate.plusDays(FormDateRuleset.ANC1_DATE_MAX_DAYS_AFTER_REGISTRATION), bounds.max)
+  }
+
+  @Test
+  fun `AD-2 with no LMP answered yet the lower bound is left open, not guessed`() {
+    val bounds = requireNotNull(FormDateRuleset.boundsFor(anc1Date, FormAnswers(), registrationDate))
+
+    assertNull(bounds.min)
+    assertEquals(registrationDate.plusDays(FormDateRuleset.ANC1_DATE_MAX_DAYS_AFTER_REGISTRATION), bounds.max)
+  }
+
+  @Test
+  fun `AD-3 a date on or before LMP is rejected - must be strictly after`() {
+    val lmp = registrationDate.minusDays(60)
+
+    assertEquals(FormDateRuleset.Violation.ANC1_DATE_NOT_AFTER_LMP, violationForAnc1(lmp, lmp))
+    assertEquals(
+      FormDateRuleset.Violation.ANC1_DATE_NOT_AFTER_LMP,
+      violationForAnc1(lmp, lmp.minusDays(1)),
+    )
+    // One day after LMP is the earliest accepted value.
+    assertNull(violationForAnc1(lmp, lmp.plusDays(1)))
+  }
+
+  @Test
+  fun `AD-4 registration date plus 5 days is accepted, plus 6 days is rejected`() {
+    val lmp = registrationDate.minusDays(60)
+    val atBound = registrationDate.plusDays(FormDateRuleset.ANC1_DATE_MAX_DAYS_AFTER_REGISTRATION)
+
+    assertNull(violationForAnc1(lmp, atBound))
+    assertEquals(
+      FormDateRuleset.Violation.ANC1_DATE_TOO_LATE,
+      violationForAnc1(lmp, atBound.plusDays(1)),
+    )
+  }
+
+  @Test
+  fun `AD-5 blank and unparseable values are not date violations`() {
+    assertNull(FormDateRuleset.violationFor(anc1Date, FormAnswers(), registrationDate))
+    assertNull(violationForRaw(anc1Date, ""))
+    assertNull(violationForRaw(anc1Date, "not-a-date"))
+  }
+
+  @Test
+  fun `AD-6 allDatesValid rejects an anc1 date on or before LMP`() {
+    val fields = listOf(dateField(LMP_DATE_QUESTION_CODE), dateField(anc1Date))
+    val lmp = registrationDate.minusDays(60)
+    val valid = answers(
+      LMP_DATE_QUESTION_CODE to lmp.toString(),
+      anc1Date to lmp.plusDays(10).toString(),
+    )
+
+    assertTrue(FormDateRuleset.allDatesValid(fields, valid, registrationDate))
+
+    val onLmp = valid.withSingleValue(anc1Date, lmp.toString())
+    assertFalse(FormDateRuleset.allDatesValid(fields, onLmp, registrationDate))
+  }
+
+  private fun violationForAnc1(lmp: LocalDate, value: LocalDate) = FormDateRuleset.violationFor(
+    anc1Date,
+    answers(LMP_DATE_QUESTION_CODE to lmp.toString(), anc1Date to value.toString()),
+    registrationDate,
+  )
+
   // --- Registration date: never in the future --------------------------------------------------
 
   @Test
@@ -525,6 +601,126 @@ class FormDateRulesetTest {
     val futureDob = answers(DOB_QUESTION_CODE to registrationDate.plusYears(1).toString())
     assertTrue(FormDateRuleset.allDatesValid(listOf(numberField), futureDob, registrationDate))
   }
+
+  // --- Td dose dates (row 44): Td-2 after Td-1, Booster after Td-2, none in the future --------
+  //
+  // Added 2026-08-06 once ARMMAN's schema change gave each dose a real `date` field
+  // (TdDoseQuestionCodes) — previously there was nowhere to store these at all.
+
+  private val td1 = TdDoseQuestionCodes.TD_1_DATE_QUESTION_CODE
+  private val td2 = TdDoseQuestionCodes.TD_2_DATE_QUESTION_CODE
+  private val tdBooster = TdDoseQuestionCodes.TD_BOOSTER_DATE_QUESTION_CODE
+
+  @Test
+  fun `TD-1 today is accepted and tomorrow is rejected for every dose date`() {
+    listOf(td1, td2, tdBooster).forEach { code ->
+      assertNull("expected today to be accepted for $code", violationForRaw(code, registrationDate.toString()))
+      assertEquals(
+        "expected tomorrow to be rejected for $code",
+        FormDateRuleset.Violation.TD_DATE_IN_FUTURE,
+        violationForRaw(code, registrationDate.plusDays(1).toString()),
+      )
+    }
+  }
+
+  @Test
+  fun `TD-2 td-1 alone has no ordering rule to break`() {
+    assertNull(violationForRaw(td1, registrationDate.minusDays(400).toString()))
+  }
+
+  @Test
+  fun `TD-3 td-2 must be strictly after td-1`() {
+    val td1Date = registrationDate.minusDays(30)
+
+    assertEquals(
+      FormDateRuleset.Violation.TD_2_NOT_AFTER_TD_1,
+      violationForTd2(td1Date, td1Date),
+    )
+    assertEquals(
+      FormDateRuleset.Violation.TD_2_NOT_AFTER_TD_1,
+      violationForTd2(td1Date, td1Date.minusDays(1)),
+    )
+    assertNull(violationForTd2(td1Date, td1Date.plusDays(1)))
+  }
+
+  @Test
+  fun `TD-4 td-2 with no td-1 answered yet has nothing to compare against`() {
+    assertNull(FormDateRuleset.violationFor(td2, answers(td2 to registrationDate.toString()), registrationDate))
+  }
+
+  @Test
+  fun `TD-5 td-booster must be strictly after td-2`() {
+    val td2Date = registrationDate.minusDays(10)
+
+    assertEquals(
+      FormDateRuleset.Violation.TD_BOOSTER_NOT_AFTER_TD_2,
+      violationForTdBooster(td2Date, td2Date),
+    )
+    assertNull(violationForTdBooster(td2Date, td2Date.plusDays(1)))
+  }
+
+  @Test
+  fun `TD-6 td-2 bounds start the day after the answered td-1 date and cap at today`() {
+    val td1Date = registrationDate.minusDays(30)
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(td2, answers(td1 to td1Date.toString()), registrationDate),
+    )
+
+    assertEquals(td1Date.plusDays(1), bounds.min)
+    assertEquals(registrationDate, bounds.max)
+  }
+
+  @Test
+  fun `TD-7 td-2 bounds are open at the bottom until td-1 is answered`() {
+    val bounds = requireNotNull(FormDateRuleset.boundsFor(td2, FormAnswers(), registrationDate))
+
+    assertNull(bounds.min)
+    assertEquals(registrationDate, bounds.max)
+  }
+
+  @Test
+  fun `TD-8 td-booster bounds start the day after the answered td-2 date and cap at today`() {
+    val td2Date = registrationDate.minusDays(10)
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(tdBooster, answers(td2 to td2Date.toString()), registrationDate),
+    )
+
+    assertEquals(td2Date.plusDays(1), bounds.min)
+    assertEquals(registrationDate, bounds.max)
+  }
+
+  @Test
+  fun `TD-9 allDatesValid rejects a td-2 date on or before td-1`() {
+    val fields = listOf(dateField(td1), dateField(td2), dateField(tdBooster))
+    val td1Date = registrationDate.minusDays(30)
+    val valid = answers(td1 to td1Date.toString(), td2 to td1Date.plusDays(5).toString())
+
+    assertTrue(FormDateRuleset.allDatesValid(fields, valid, registrationDate))
+
+    val onTd1 = valid.withSingleValue(td2, td1Date.toString())
+    assertFalse(FormDateRuleset.allDatesValid(fields, onTd1, registrationDate))
+  }
+
+  @Test
+  fun `TD-10 blank and unparseable td dose dates are not date violations`() {
+    listOf(td1, td2, tdBooster).forEach { code ->
+      assertNull(FormDateRuleset.violationFor(code, FormAnswers(), registrationDate))
+      assertNull(violationForRaw(code, ""))
+      assertNull(violationForRaw(code, "not-a-date"))
+    }
+  }
+
+  private fun violationForTd2(td1Date: LocalDate, td2Date: LocalDate) = FormDateRuleset.violationFor(
+    td2,
+    answers(td1 to td1Date.toString(), td2 to td2Date.toString()),
+    registrationDate,
+  )
+
+  private fun violationForTdBooster(td2Date: LocalDate, boosterDate: LocalDate) = FormDateRuleset.violationFor(
+    tdBooster,
+    answers(td2 to td2Date.toString(), tdBooster to boosterDate.toString()),
+    registrationDate,
+  )
 
   private fun violationForDob(date: LocalDate) = violationForRaw(DOB_QUESTION_CODE, date.toString())
 

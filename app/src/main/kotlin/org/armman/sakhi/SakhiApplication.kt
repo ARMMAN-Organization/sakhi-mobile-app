@@ -8,6 +8,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import org.armman.sakhi.data.forms.ReconnectLookupWarmer
+import org.armman.sakhi.data.motherlink.ReconnectMotherDetailsWarmer
 import org.armman.sakhi.data.sync.LegacyPeriodicSyncCleanup
 import javax.inject.Inject
 
@@ -30,6 +31,7 @@ class SakhiApplication : Application(), Configuration.Provider {
 
   @Inject lateinit var workerFactory: HiltWorkerFactory
   @Inject lateinit var reconnectLookupWarmer: ReconnectLookupWarmer
+  @Inject lateinit var reconnectMotherDetailsWarmer: ReconnectMotherDetailsWarmer
   @Inject lateinit var legacyPeriodicSyncCleanup: LegacyPeriodicSyncCleanup
 
   /** Process-lifetime scope for app-wide background collectors (connectivity → lookup warming).
@@ -49,5 +51,6 @@ class SakhiApplication : Application(), Configuration.Provider {
     // Reference-data warming only — moves no beneficiary data, so it stays event-driven while
     // actual uploads remain manual.
     reconnectLookupWarmer.start(applicationScope)
+    reconnectMotherDetailsWarmer.start(applicationScope)
   }
 }

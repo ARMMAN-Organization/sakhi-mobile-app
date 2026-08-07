@@ -8,6 +8,7 @@ import org.armman.sakhi.data.enrollment.CreateBeneficiaryRequestDto
 import org.armman.sakhi.data.enrollment.DuplicateAcknowledgement
 import org.armman.sakhi.data.enrollment.EnrollmentMappingException
 import org.armman.sakhi.data.enrollment.MotherDetailsDto
+import org.armman.sakhi.data.enrollment.joinFullName
 import org.armman.sakhi.data.lookup.LookupRepository
 import java.time.LocalDate
 import javax.inject.Inject
@@ -33,15 +34,11 @@ private object QuestionCode {
   const val DEAD_CHILDREN = "dead_children"
 
   /**
-   * 2026-07-22: the v5 schema's single combined name question
-   * (`beneficary_name_first_name_middle_name_last_name`) was replaced with three separate
-   * questions — confirmed against a real `active-version` response (`api-calls.jsonl`). The
-   * backend's `/beneficiaries` PII contract changed the same day, twice, both confirmed against
-   * real 400 bodies: it briefly wanted a single joined `fullName`, then switched to requiring
-   * `firstName`/`lastName` as discrete fields and rejecting `fullName` outright
-   * (`pii: Unrecognized key(s) in object: 'fullName'`). These three answers are now sent straight
-   * through to `BeneficiaryPiiDto.firstName`/`middleName`/`lastName` — see that DTO's doc before
-   * changing this again, the contract has been unstable.
+   * The FORM schema's own name question has flip-flopped, not just the API contract — see
+   * [BeneficiaryNameQuestionCodes]'s doc for the full timeline. As of 2026-08-06 the live schema
+   * is back to ONE combined `beneficiary_name` question, so these split codes are now the
+   * FALLBACK [beneficiaryFullName] reads only when no combined-name answer exists — kept rather
+   * than deleted because this exact field has already reverted once and may again.
    */
   const val FIRST_NAME = "first_name"
   const val MIDDLE_NAME = "middle_name"
@@ -146,14 +143,24 @@ class DynamicFormSubmissionMapper @Inject constructor(
 
     val registrationDate = answers.registrationDateAnswer() ?: fallbackRegistrationDate.toString()
 
+    // 2026-08-06: reached here once with a blank/space-only name because the live schema had
+    // silently moved from the split first/middle/last questions to ONE combined `beneficiary_name`
+    // field and this mapper hadn't caught up — the backend accepted it (its own validation only
+    // checks non-empty, and a lone space is technically non-empty to a naive check) and the
+    // Sakhi's actual typed name never made it into pii.fullName. Fail loudly here instead of
+    // repeating that: a blank result from beneficiaryFullName is always a mapping bug, not a
+    // legitimate "no name" case (Personal Info's own required gate already blocks Submit while
+    // it's genuinely unanswered).
+    val fullName = beneficiaryFullName(answers)
+    if (fullName.isBlank()) {
+      throw EnrollmentMappingException.CrossFieldValidation(
+        "Beneficiary name is required",
+      )
+    }
+
     CreateBeneficiaryRequestDto(
       pii = BeneficiaryPiiDto(
-        // Trimmed: BeneficiaryNameRule allows spaces (names have them), so leading/trailing space
-        // survives input filtering and must not reach the backend's PII fields or the duplicate
-        // -detection hash built from the name. A whitespace-only middle name is no middle name.
-        firstName = answers.valueOf(QuestionCode.FIRST_NAME).orEmpty().trim(),
-        middleName = answers.valueOf(QuestionCode.MIDDLE_NAME)?.trim()?.takeIf { it.isNotBlank() },
-        lastName = answers.valueOf(QuestionCode.LAST_NAME).orEmpty().trim(),
+        fullName = fullName,
         phone = answers.valueOf(QuestionCode.MOBILE_NUMBER),
         alternatePhone = null,
         dateOfBirth = dateOfBirth,
@@ -239,4 +246,19 @@ class DynamicFormSubmissionMapper @Inject constructor(
    * injected by [DynamicFormSubmissionCoordinator] after `POST /beneficiaries` returns. */
   fun toFormSubmissionData(answers: FormAnswers): Map<String, Any?> =
     answers.singleValues + answers.multiValues
+
+  /**
+   * The beneficiary's `pii.fullName`, preferring the live schema's current combined-name field
+   * ([BeneficiaryNameQuestionCodes.COMBINED_CODES]) and falling back to joining the split
+   * [QuestionCode.FIRST_NAME]/[QuestionCode.MIDDLE_NAME]/[QuestionCode.LAST_NAME] questions if
+   * none of those are answered. The fallback exists because this exact field has already
+   * flip-flopped between the two shapes once (see [BeneficiaryNameQuestionCodes]'s doc) — reading
+   * both means the next flip doesn't silently reproduce today's blank-name bug.
+   */
+  private fun beneficiaryFullName(answers: FormAnswers): String =
+    BeneficiaryNameQuestionCodes.combinedNameAnswer(answers) ?: joinFullName(
+      first = answers.valueOf(QuestionCode.FIRST_NAME).orEmpty(),
+      middle = answers.valueOf(QuestionCode.MIDDLE_NAME),
+      last = answers.valueOf(QuestionCode.LAST_NAME).orEmpty(),
+    )
 }

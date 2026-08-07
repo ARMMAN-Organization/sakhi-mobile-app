@@ -27,8 +27,15 @@ object BeneficiaryNameRule {
   const val NAME_OF_THE_CHILD = "name_of_the_child"
 
   /** The name questions this rule governs. Every other TEXT field (address, RCH number, …) is
-   * deliberately left alone — they legitimately contain digits and punctuation. */
-  val QUESTION_CODES = setOf(FIRST_NAME, MIDDLE_NAME, LAST_NAME, NAME_OF_THE_CHILD)
+   * deliberately left alone — they legitimately contain digits and punctuation.
+   *
+   * [BeneficiaryNameQuestionCodes.COMBINED_CODES] is included because the MOTHER_REGISTRATION
+   * beneficiary-name field has flip-flopped between one combined question and this rule's own
+   * split FIRST_NAME/MIDDLE_NAME/LAST_NAME — without listing both shapes, whichever one the live
+   * schema ISN'T currently using would silently stop getting character sanitization the moment it
+   * came back (see that object's doc for the full timeline). */
+  val QUESTION_CODES = setOf(FIRST_NAME, MIDDLE_NAME, LAST_NAME, NAME_OF_THE_CHILD) +
+    BeneficiaryNameQuestionCodes.COMBINED_CODES
 
   fun appliesTo(questionCode: String): Boolean = questionCode in QUESTION_CODES
 

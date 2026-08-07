@@ -160,26 +160,26 @@ class ChildRegistrationSubmissionMapperTest {
   }
 
   @Test
-  fun `name splits into first, middle and last across 3, 2 and 1 token forms`() = runTest {
+  fun `name splits into first, middle and last then rejoins into fullName`() = runTest {
     sessionStore.saveSession(session)
 
+    // The child name is split into first/middle/last (see the mapper's ChildName heuristic) and
+    // then rejoined by joinFullName, because the backend's PII contract takes ONE `fullName` —
+    // see BeneficiaryPiiDto's doc. The split still matters: it decides where the spaces land.
     val three = mapper.toCreateBeneficiaryRequest("c", answeredForm(name = "Aarav Kumar Sharma"), LocalDate.of(2026, 7, 20))
       .getOrThrow().pii
-    assertEquals("Aarav", three.firstName)
-    assertEquals("Kumar", three.middleName)
-    assertEquals("Sharma", three.lastName)
+    assertEquals("Aarav Kumar Sharma", three.fullName)
 
     val two = mapper.toCreateBeneficiaryRequest("c", answeredForm(name = "Aarav Sharma"), LocalDate.of(2026, 7, 20))
       .getOrThrow().pii
-    assertEquals("Aarav", two.firstName)
-    assertNull(two.middleName)
-    assertEquals("Sharma", two.lastName)
+    assertEquals("Aarav Sharma", two.fullName)
 
+    // A single token becomes BOTH first and last name in the split heuristic, so the rejoin
+    // doubles it. Pinned deliberately: it is the visible consequence of that heuristic, and is
+    // part of the "CONFIRM WITH ARMMAN" question flagged on ChildName.
     val one = mapper.toCreateBeneficiaryRequest("c", answeredForm(name = "Aarav"), LocalDate.of(2026, 7, 20))
       .getOrThrow().pii
-    assertEquals("Aarav", one.firstName)
-    assertNull(one.middleName)
-    assertEquals("Aarav", one.lastName)
+    assertEquals("Aarav Aarav", one.fullName)
   }
 
   @Test

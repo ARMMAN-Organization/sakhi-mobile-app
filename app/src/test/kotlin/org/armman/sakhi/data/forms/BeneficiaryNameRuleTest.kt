@@ -67,4 +67,13 @@ class BeneficiaryNameRuleTest {
     assertFalse(BeneficiaryNameRule.appliesTo("enter_the_beneficiary_address"))
     assertFalse(BeneficiaryNameRule.appliesTo("input_rch_number"))
   }
+
+  @Test
+  fun `also applies to both combined-shape codes the mother beneficiary-name field has used`() {
+    // 2026-08-06: the live MOTHER_REGISTRATION schema went back to ONE combined field
+    // (BeneficiaryNameQuestionCodes.CURRENT) after the 2026-07-22 split — without this, character
+    // sanitization would silently stop working the moment the schema flipped.
+    assertTrue(BeneficiaryNameRule.appliesTo(BeneficiaryNameQuestionCodes.CURRENT))
+    assertTrue(BeneficiaryNameRule.appliesTo(BeneficiaryNameQuestionCodes.LEGACY_TYPO))
+  }
 }

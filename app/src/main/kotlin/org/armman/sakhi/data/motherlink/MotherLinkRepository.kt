@@ -2,7 +2,8 @@ package org.armman.sakhi.data.motherlink
 
 /**
  * Boundary for the child-enrollment mother link (CR-031): the list of registered mothers a Sakhi can
- * link a newborn to, and that mother's inherited consent state.
+ * link a newborn to, that mother's inherited consent state, and her socio-demographic details
+ * (CR-032).
  */
 interface MotherLinkRepository {
 
@@ -25,4 +26,16 @@ interface MotherLinkRepository {
    * inheritance is simply skipped.
    */
   suspend fun getMotherConsent(motherId: String): LinkedMotherConsent?
+
+  /**
+   * Rows 21–34 socio-demographic details (CR-032), or null if they could not be read at all
+   * (offline, 404, malformed body). A successful read still returns a value even when every
+   * individual field inside it is null — see [MotherSocioDemographics] — so [MotherPrefill] can skip
+   * fields independently rather than losing every row 21–34 field because one was missing.
+   *
+   * Deliberately a second call, mirroring [getMotherConsent]: allowed to fail without failing the
+   * selection, so an offline Sakhi still gets the id/name/DOB/geography/consent prefill and only
+   * loses these extra rows.
+   */
+  suspend fun getMotherSocioDemographics(motherId: String): MotherSocioDemographics?
 }

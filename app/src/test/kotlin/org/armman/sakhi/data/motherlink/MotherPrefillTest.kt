@@ -1,6 +1,8 @@
 package org.armman.sakhi.data.motherlink
 
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormFieldOption
+import org.armman.sakhi.data.forms.FormFieldSchema
 import org.armman.sakhi.data.forms.FormGeographyUnit
 import org.armman.sakhi.data.forms.GeographyQuestionCodes
 import org.junit.Assert.assertEquals
@@ -245,5 +247,149 @@ class MotherPrefillTest {
     assertTrue(mother(currentPhase = "ANC").deliveryNotRecorded)
     assertFalse(mother(currentPhase = "PP").deliveryNotRecorded)
     assertFalse(mother(currentPhase = "DELIVERY").deliveryNotRecorded)
+  }
+
+  // --- Rows 21-34 (CR-032) ---------------------------------------------------------------------
+
+  private fun radioField(questionCode: String, vararg valueCodeToLabel: Pair<String, String>) = FormFieldSchema(
+    label = questionCode,
+    required = false,
+    inputTypeRaw = "radio",
+    questionCode = questionCode,
+    options = valueCodeToLabel.mapIndexed { index, (valueCode, label) ->
+      FormFieldOption(label = label, sortOrder = index, valueCode = valueCode)
+    },
+  )
+
+  /** The live CHILD_REGISTRATION schema's own options for the fields CR-032 prefills (captured from
+   * api-calls-live.jsonl), trimmed to the option this test file actually exercises. */
+  private val socioDemoSchema = listOf(
+    radioField(MotherPrefillQuestionCodes.PHONE_OWNER, "self" to "Self", "husband" to "Husband"),
+    radioField(
+      MotherPrefillQuestionCodes.MOBILE_NETWORK_AVAILABILITY,
+      "no_network" to "No Network",
+      "full_network_available" to "Full Network Available",
+    ),
+    radioField(
+      MotherPrefillQuestionCodes.EDUCATION_LEVEL,
+      "no_formal_education_never_attended_school_cannot_read_or_write" to
+        "No formal education (Never attended school / cannot read or write)",
+      "10th_pass" to "10TH Pass",
+    ),
+    radioField(
+      MotherPrefillQuestionCodes.MONTHLY_INCOME,
+      "10000" to "≤10000",
+      "25000" to ">25000",
+    ),
+    radioField(MotherPrefillQuestionCodes.RELIGION, "buddhist" to "Buddhist", "hindu" to "Hindu"),
+  )
+
+  private fun socioDemographics(
+    address: String? = "abbbsss",
+    mobileNumber: String? = "6948454949",
+    phoneOwner: MotherLookupAnswer? = MotherLookupAnswer("PHONE_OWNER", "Self"),
+    mobileNetworkAvailability: MotherLookupAnswer? = MotherLookupAnswer("MOBILE_NETWORK_AVAILABILITY", "No Network"),
+    educationLevel: MotherLookupAnswer? = MotherLookupAnswer("EDUCATION_LEVEL", "No formal education"),
+    monthlyIncome: MotherLookupAnswer? = MotherLookupAnswer("MONTHLY_INCOME_BRACKET", "<=10000"),
+    religion: MotherLookupAnswer? = MotherLookupAnswer("RELIGION", "Buddhist"),
+    yearsInVillage: Int? = 6,
+    familyMembersCount: Int? = 6,
+    childrenUnder5Count: Int? = 1,
+  ) = MotherSocioDemographics(
+    address = address,
+    mobileNumber = mobileNumber,
+    phoneOwner = phoneOwner,
+    mobileNetworkAvailability = mobileNetworkAvailability,
+    educationLevel = educationLevel,
+    partnerEducationLevel = null,
+    partnerOccupation = null,
+    yearsInVillage = yearsInVillage,
+    migrationPattern = null,
+    monthlyIncome = monthlyIncome,
+    religion = religion,
+    socialCategory = null,
+    familyMembersCount = familyMembersCount,
+    childrenUnder5Count = childrenUnder5Count,
+  )
+
+  // SOCIO-01 — direct values (no lookup translation needed) map straight across.
+  @Test
+  fun `prefills the direct-value socio demographic fields`() {
+    val result = MotherPrefill.apply(
+      FormAnswers(), mother(), consent = null, geography = geography,
+      socioDemographics = socioDemographics(), formSchema = socioDemoSchema,
+    )
+    assertEquals("abbbsss", result.answers.valueOf(MotherPrefillQuestionCodes.ADDRESS))
+    assertEquals("6948454949", result.answers.valueOf(MotherPrefillQuestionCodes.MOBILE_NUMBER))
+    assertEquals("6", result.answers.valueOf(MotherPrefillQuestionCodes.YEARS_IN_VILLAGE))
+    assertEquals("6", result.answers.valueOf(MotherPrefillQuestionCodes.FAMILY_MEMBERS_COUNT))
+    assertEquals("1", result.answers.valueOf(MotherPrefillQuestionCodes.CHILDREN_UNDER_5_COUNT))
+  }
+
+  // SOCIO-02 — an exact label match (Self, No Network, Buddhist, <=10000) resolves to the schema's
+  // own value_code, never the API's own upper-snake-case valueCode.
+  @Test
+  fun `resolves lookup fields to the schema value_code by exact label match`() {
+    val result = MotherPrefill.apply(
+      FormAnswers(), mother(), consent = null, geography = geography,
+      socioDemographics = socioDemographics(), formSchema = socioDemoSchema,
+    )
+    assertEquals("self", result.answers.valueOf(MotherPrefillQuestionCodes.PHONE_OWNER))
+    assertEquals("no_network", result.answers.valueOf(MotherPrefillQuestionCodes.MOBILE_NETWORK_AVAILABILITY))
+    assertEquals("buddhist", result.answers.valueOf(MotherPrefillQuestionCodes.RELIGION))
+    assertEquals("10000", result.answers.valueOf(MotherPrefillQuestionCodes.MONTHLY_INCOME))
+  }
+
+  // SOCIO-03 — the API's shorter label ("No formal education") is a prefix of the schema's fuller
+  // one; the prefix fallback must still resolve it rather than leaving the field blank.
+  @Test
+  fun `resolves education via the longest label prefix fallback`() {
+    val result = MotherPrefill.apply(
+      FormAnswers(), mother(), consent = null, geography = geography,
+      socioDemographics = socioDemographics(), formSchema = socioDemoSchema,
+    )
+    assertEquals(
+      "no_formal_education_never_attended_school_cannot_read_or_write",
+      result.answers.valueOf(MotherPrefillQuestionCodes.EDUCATION_LEVEL),
+    )
+  }
+
+  // SOCIO-04 — a label that matches nothing in the live schema (renamed/removed option) must skip
+  // the field, never write a guess or the API's own raw code.
+  @Test
+  fun `skips a lookup field with no confident match in the schema`() {
+    val result = MotherPrefill.apply(
+      FormAnswers(), mother(), consent = null, geography = geography,
+      socioDemographics = socioDemographics(religion = MotherLookupAnswer("RELIGION", "Zoroastrian")),
+      formSchema = socioDemoSchema,
+    )
+    assertNull(result.answers.valueOf(MotherPrefillQuestionCodes.RELIGION))
+    assertFalse(MotherPrefillQuestionCodes.RELIGION in result.prefilledCodes)
+  }
+
+  // SOCIO-05 — a null socioDemographics (offline/failed fetch) must not touch rows 21-34 at all,
+  // and every other row must still prefill normally.
+  @Test
+  fun `null socio demographics skips rows 21-34 without affecting the rest`() {
+    val result = MotherPrefill.apply(
+      FormAnswers(), mother(), consent = null, geography = geography,
+      socioDemographics = null, formSchema = socioDemoSchema,
+    )
+    assertNull(result.answers.valueOf(MotherPrefillQuestionCodes.ADDRESS))
+    assertNull(result.answers.valueOf(MotherPrefillQuestionCodes.PHONE_OWNER))
+    assertEquals("mother-uuid-1", result.answers.valueOf(MotherPrefillQuestionCodes.MOTHER_BENEFICIARY_ID))
+  }
+
+  // SOCIO-06 — prefilledCodes must include every row 21-34 field that was actually written.
+  @Test
+  fun `prefilled codes includes the written socio demographic fields`() {
+    val result = MotherPrefill.apply(
+      FormAnswers(), mother(), consent = null, geography = geography,
+      socioDemographics = socioDemographics(), formSchema = socioDemoSchema,
+    )
+    assertTrue(MotherPrefillQuestionCodes.ADDRESS in result.prefilledCodes)
+    assertTrue(MotherPrefillQuestionCodes.PHONE_OWNER in result.prefilledCodes)
+    assertTrue(MotherPrefillQuestionCodes.MONTHLY_INCOME in result.prefilledCodes)
+    assertTrue(MotherPrefillQuestionCodes.YEARS_IN_VILLAGE in result.prefilledCodes)
   }
 }

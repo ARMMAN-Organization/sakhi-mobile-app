@@ -16,6 +16,11 @@ import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.armman.sakhi.data.lookup.LookupWarmer
+import org.armman.sakhi.data.motherlink.LinkedMother
+import org.armman.sakhi.data.motherlink.LinkedMotherConsent
+import org.armman.sakhi.data.motherlink.MotherDetailsWarmer
+import org.armman.sakhi.data.motherlink.MotherLinkRepository
+import org.armman.sakhi.data.motherlink.MotherSocioDemographics
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -73,13 +78,27 @@ class LoginViewModelTest {
     override suspend fun logout() { /* no session state in the fake */ }
   }
 
+  /** No mothers, nothing to warm — this test suite only cares that login succeeds/fails, not
+   * about warming behaviour, which [org.armman.sakhi.data.motherlink.MotherDetailsWarmerTest] and
+   * [org.armman.sakhi.data.motherlink.RemoteMotherLinkRepositoryTest] already cover. */
+  private class NoopMotherLinkRepository : MotherLinkRepository {
+    override suspend fun getRegisteredMothers(): List<LinkedMother>? = emptyList()
+    override suspend fun getMotherConsent(motherId: String): LinkedMotherConsent? = null
+    override suspend fun getMotherSocioDemographics(motherId: String): MotherSocioDemographics? = null
+  }
+
   private lateinit var repository: FakeAuthRepository
   private lateinit var keyValueStore: FakeSecureKeyValueStore
   private lateinit var sessionStore: SessionStore
   private lateinit var viewModel: LoginViewModel
 
   private fun createViewModel() {
-    viewModel = LoginViewModel(repository, sessionStore, LookupWarmer(FakeLookupRepository()))
+    viewModel = LoginViewModel(
+      repository,
+      sessionStore,
+      LookupWarmer(FakeLookupRepository()),
+      MotherDetailsWarmer(NoopMotherLinkRepository()),
+    )
   }
 
   @Before

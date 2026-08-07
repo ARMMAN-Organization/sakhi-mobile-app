@@ -246,7 +246,12 @@ private fun FormContent(
   // Violated cross-field rules (e.g. "children under 5" higher than "family members"), resolved
   // once per composition: attributed to the field that should show them inline, and listed in a
   // banner on the Summary tab so a rule spanning other tabs still explains a blocked Submit.
-  val labelOf = labelResolver(viewModel.visibleFields())
+  //
+  // Resolved against EVERY schema field, not just the currently visible ones: a rule can name a
+  // field that's hidden right now (e.g. Living children/Still births/Abortions while Gravida == 1)
+  // and it's still a real question with a real label, not one that stopped existing — falling back
+  // to visibleFields() here printed the raw question_code instead (the reported bug).
+  val labelOf = labelResolver(viewModel.allFields())
   val crossFieldMessages: Map<String, String> = buildMap {
     CrossFieldErrorAttribution.byQuestionCode(viewModel.crossFieldViolations())
       .forEach { (code, rule) -> crossFieldMessage(rule, labelOf)?.let { put(code, it) } }

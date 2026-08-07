@@ -15,6 +15,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
@@ -448,12 +450,20 @@ private fun TdDoseRow(
 
 @Composable
 private fun TdCheckbox(label: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
+  val focusManager = LocalFocusManager.current
+  val keyboardController = LocalSoftwareKeyboardController.current
   Row(
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing),
     modifier = Modifier
       .fillMaxWidth()
-      .clickable { onChecked(!checked) },
+      .clickable {
+        // See FormFields.SelectableRow: a still-focused text field above (e.g. RCH number) can
+        // otherwise bring the keyboard back even though this checkbox isn't a text input.
+        focusManager.clearFocus()
+        keyboardController?.hide()
+        onChecked(!checked)
+      },
   ) {
     Icon(
       painter = painterResource(

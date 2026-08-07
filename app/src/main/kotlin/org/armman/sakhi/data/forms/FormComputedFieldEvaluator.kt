@@ -44,6 +44,11 @@ private const val COMPUTED_GESTATIONAL_AGE_AT_REGISTRATION = "GESTATIONAL_AGE_AT
 private const val COMPUTED_UNIQUE_ID = "UNIQUE_ID"
 const val COMPUTED_AGE_FROM_DOB = "AGE_FROM_DOB"
 
+/** Internal-only token for the trimester stopgap — the backend declares no `computedFrom` for
+ * [TRIMESTER_QUESTION_CODE], so nothing publishes this string; it only has to match between
+ * [FormComputedFieldEvaluator.compute] and the ViewModel stopgap that calls it. */
+const val COMPUTED_TRIMESTER = "TRIMESTER_OF_PREGNANCY"
+
 /** CR-020 Children Register: the `current_age_of_infant_in_days` field is declared
  * `computedFrom: "CHILD_AGE_MONTHS"`. NOTE the deliberate label/name mismatch — the field's label
  * says "in days" and the eligibility rules (0..365 direct, 0..183 registered-mother) are all in
@@ -63,6 +68,20 @@ private const val INFANT_DOB_QUESTION_CODE = ChildRegistrationQuestionCodes.DATE
 const val DOB_QUESTION_CODE = "date_of_birth"
 
 /**
+ * Spec row 35 ("Trimester of preganancy" — the sheet's own typo, carried into the live
+ * `question_code`). Declared by the live schema as a plain `input_type: "text"` field with no
+ * `computedFrom` — nothing auto-fills it, so the Sakhi types straight into it. Production data
+ * (`api-calls.jsonl`/`api-calls-live.jsonl`) shows exactly the result: raw fat-fingered digits
+ * ("666", "55665", "56") instead of the 1st/2nd/3rd the spec's formula would produce. Computed here
+ * as a stopgap the same way [AGE_FROM_DOB_QUESTION_CODES] is — see that constant's doc for why this
+ * is safe to do client-side without backend confirmation: the formula
+ * (`Floor((RegDate-LMP)/7)` then bucketed into trimesters) is exactly [COMPUTED_GESTATIONAL_AGE_AT_REGISTRATION]'s
+ * own formula, just bucketed, so it needs no new business input. Remove this stopgap once the
+ * backend declares `computedFrom` on the field.
+ */
+const val TRIMESTER_QUESTION_CODE = "trimester_of_preganancy"
+
+/**
  * The MOTHER's DOB, collected on the CHILD_REGISTRATION form (Infant Registration spec row 20.0:
  * "Age or DOB of the mother"). Distinct from [DOB_QUESTION_CODE], which is the beneficiary's own DOB
  * on the mother-enrollment form — on the child form the beneficiary is the infant
@@ -71,30 +90,50 @@ const val DOB_QUESTION_CODE = "date_of_birth"
  * The spec's 10–50 year range is identical to the mother form's row 23, so [FormDateRuleset] applies
  * the SAME rule to both codes rather than duplicating it.
  *
- * NOTE: the spec also asks for an "either DOB or age" pair and autopopulation from the mother's
- * registration. Neither is implemented — the live schema declares no mother-age field, so there is
- * nothing to fill or gate, and an app-invented field would be rejected by the backend validator.
- * Tracked in `docs/backend-requests/CR-021-mother-age-field-gap.md`.
+ * Per CR-039 (2026-08-06), `CHILD_REGISTRATION` now declares this as its own plain, independently
+ * editable `date` field, split out of the old single `age_or_dob_of_the_mother` field (which had
+ * shipped with an unrenderable `input_type: "date,integer"`). The mother's age lives in a sibling
+ * `number` field, `mother_age` — plain, `numericRange 10..50`, no `computedFrom` — and the spec's
+ * "either DOB or age" requirement is enforced entirely by a schema `ANY_OF_REQUIRED` rule over
+ * `["mother_date_of_birth", "mother_age"]` (handled generically by [FormCrossFieldValidator], same
+ * mechanism as CR-037's mother-form pair — no per-field code needed for that part). Unlike
+ * [AGE_FROM_DOB_QUESTION_CODES], `mother_age` is never derived/read-only: both fields stay
+ * independently Sakhi-editable at all times. See
+ * `docs/backend-requests/CR-039-child-mother-age-dob-field-regression.md`.
  *
- * The value is the code the PUBLISHED schema uses, verified against a live `active-version` response
- * (`api-calls.jsonl`, 2026-07-31) — not the spec's wording and not what CR-021 recorded, which was
- * `mother_date_of_birth` from an earlier publish. Getting this string wrong is silent: the field
- * still renders, but every rule keyed on it (date bounds, the 10–50 gate, the mother prefill) simply
- * never matches, which is exactly the defect this replaced.
+ * The value is the code the PUBLISHED schema uses, verified against the live `active-version`
+ * response (PR #119, `fix/mother-registration-form-schema`, 2026-08-06) — not
+ * `age_or_dob_of_the_mother`, the earlier (now retired) single-field code this replaced. Getting
+ * this string wrong is silent: the field still renders, but every rule keyed on it (date bounds,
+ * the 10–50 gate, the mother prefill) simply never matches, which is exactly the defect the earlier
+ * rename fixed.
  */
-const val MOTHER_DOB_QUESTION_CODE = "age_or_dob_of_the_mother"
+const val MOTHER_DOB_QUESTION_CODE = "mother_date_of_birth"
 
-/** The DOB-derived age question. The backend declares it as a plain `number` field and — unlike
- * EDD/gestational age — never marks it `computedFrom: "AGE_FROM_DOB"`, so it would never auto-fill
- * on its own. It has also been renamed more than once across schema versions
- * (`age_of_the_beneficiary` on the live `api.armman.org` schema, `age_years` on the earlier v9),
- * so we match ANY of these known codes rather than a single one — resilient to the next rename
- * instead of silently breaking on it. Whichever code the live schema uses is auto-filled by
- * [org.armman.sakhi.ui.forms.DynamicMotherRegistrationViewModel.recomputeDerivedFields] and shown
- * read-only by [org.armman.sakhi.ui.forms.DynamicFormRenderer]. The formula (whole years between
- * DOB and registration date) is standard and unambiguous — unlike `UNIQUE_ID`, it needs no backend
- * confirmation. Remove this stopgap once the backend declares `computedFrom` on the field. */
+/**
+ * The DOB-derived age question. Per CR-037 (2026-08-06), `MOTHER_REGISTRATION` now declares
+ * `date_of_birth` and `age_of_the_beneficiary` as two separate fields, `age_of_the_beneficiary`
+ * carrying `computedFrom: "AGE_FROM_DOB"` and a schema `ANY_OF_REQUIRED` rule over the pair (spec
+ * row 20: "Either date of birth or age should be filled") — see
+ * `docs/backend-requests/CR-037-beneficiary-age-dob-field-gap.md`. This set still matches by
+ * `question_code` rather than by `computedFrom` alone, and still includes the older `age_years`
+ * alias, for the same resilience-to-rename reason as before.
+ *
+ * Unlike every other `computedFrom` field, this one has a legitimate manual fallback: when
+ * `date_of_birth` is blank the Sakhi types the age directly, per the spec's "either" wording. So,
+ * unlike EDD/gestational age/unique_id, this field is read-only ONLY while `date_of_birth` has a
+ * value — see [isAgeFromDobReadOnly] — and both
+ * [org.armman.sakhi.ui.forms.DynamicMotherRegistrationViewModel.recomputeDerivedFields] and
+ * [org.armman.sakhi.ui.forms.DynamicFormRenderer] must consult that, not just `computedFrom !=
+ * null`, or a manually-typed age gets silently clobbered/never becomes editable. */
 val AGE_FROM_DOB_QUESTION_CODES: Set<String> = setOf("age_of_the_beneficiary", "age_years")
+
+/** True while an [AGE_FROM_DOB_QUESTION_CODES] field should render read-only and be
+ * backend/derivation-owned (DOB is answered, so the value is [COMPUTED_AGE_FROM_DOB]-derived);
+ * false once [DOB_QUESTION_CODE] is blank, meaning the spec's "either DOB or age" fallback applies
+ * and the field must become a normal Sakhi-editable number input instead. */
+fun isAgeFromDobReadOnly(answers: FormAnswers): Boolean =
+  !answers.valueOf(DOB_QUESTION_CODE).isNullOrBlank()
 
 /**
  * Evaluates [FormFieldSchema.computedFrom] fields — values the Sakhi never types, derived from
@@ -106,9 +145,9 @@ val AGE_FROM_DOB_QUESTION_CODES: Set<String> = setOf("age_of_the_beneficiary", "
  * decision, this is deliberately left unimplemented (returns null) until confirmed. Do not guess
  * at a formula here; a wrong one would ship an incorrect identifier silently.
  *
- * `AGE_FROM_DOB` is not currently declared by the live schema (see [AGE_FROM_DOB_QUESTION_CODES]'
- * doc) but is implemented here anyway — ready for the day the backend adds the declaration — and
- * also invoked directly as a stopgap by the ViewModel in the meantime.
+ * `AGE_FROM_DOB` is declared by the live `MOTHER_REGISTRATION` schema as of CR-037 (see
+ * [AGE_FROM_DOB_QUESTION_CODES]' doc). The ViewModel's stopgap direct-invocation path (for a
+ * schema version that hasn't picked up the declaration yet) still exists as a fallback.
  */
 object FormComputedFieldEvaluator {
 
@@ -122,6 +161,14 @@ object FormComputedFieldEvaluator {
 
       COMPUTED_AGE_FROM_DOB -> dob(answers)?.let {
         ChronoUnit.YEARS.between(it, registrationDate).toString()
+      }
+
+      // Spec row 35: gestational age in weeks, bucketed into trimester 1/2/3. Same LMP/registration
+      // formula as COMPUTED_GESTATIONAL_AGE_AT_REGISTRATION, computed independently here rather than
+      // read back off that field's answer so this doesn't depend on schema field ordering.
+      COMPUTED_TRIMESTER -> lmpDate(answers)?.let {
+        val gestationalAgeWeeks = ChronoUnit.DAYS.between(it, registrationDate) / DAYS_PER_WEEK
+        trimesterFor(gestationalAgeWeeks).toString()
       }
 
       // CR-020: age in DAYS between the infant DOB and the registration date (see
@@ -142,6 +189,16 @@ object FormComputedFieldEvaluator {
 
   private fun dob(answers: FormAnswers): LocalDate? =
     answers.valueOf(DOB_QUESTION_CODE)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+
+  /** Spec row 35's thresholds: <14w = 1st trimester, 14–27w = 2nd, >=28w = 3rd. */
+  private const val SECOND_TRIMESTER_WEEK = 14
+  private const val THIRD_TRIMESTER_WEEK = 28
+
+  private fun trimesterFor(gestationalAgeWeeks: Long): Int = when {
+    gestationalAgeWeeks < SECOND_TRIMESTER_WEEK -> 1
+    gestationalAgeWeeks < THIRD_TRIMESTER_WEEK -> 2
+    else -> 3
+  }
 
   private fun infantDob(answers: FormAnswers): LocalDate? =
     answers.valueOf(INFANT_DOB_QUESTION_CODE)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }

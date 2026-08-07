@@ -15,6 +15,7 @@ import org.armman.sakhi.data.forms.AGE_FROM_DOB_QUESTION_CODES
 import org.armman.sakhi.data.forms.BeneficiaryFieldErrorMapper
 import org.armman.sakhi.data.forms.BeneficiaryNameRule
 import org.armman.sakhi.data.forms.COMPUTED_AGE_FROM_DOB
+import org.armman.sakhi.data.forms.COMPUTED_TRIMESTER
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormComputedFieldEvaluator
 import org.armman.sakhi.data.forms.FormCrossFieldRule
@@ -22,6 +23,7 @@ import org.armman.sakhi.data.forms.FormCrossFieldValidator
 import org.armman.sakhi.data.forms.FormDateRuleset
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
+import org.armman.sakhi.data.forms.FormHiddenFieldReset
 import org.armman.sakhi.data.forms.FormNumericRangeValidator
 import org.armman.sakhi.data.forms.FormObstetricRuleset
 import org.armman.sakhi.data.forms.FormVersion
@@ -31,11 +33,13 @@ import org.armman.sakhi.data.forms.MobileNumberRule
 import org.armman.sakhi.data.forms.NonRenderableQuestionCodes
 import org.armman.sakhi.data.forms.RegistrationDatePrefill
 import org.armman.sakhi.data.forms.SubmitErrorCopy
+import org.armman.sakhi.data.forms.TRIMESTER_QUESTION_CODE
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.DynamicFormSubmitResult
 import org.armman.sakhi.data.forms.FormsRepository
 import org.armman.sakhi.data.forms.GeographyFieldOptionsResolver
 import org.armman.sakhi.data.forms.GeographyQuestionCodes
+import org.armman.sakhi.data.forms.TdDoseQuestionCodes
 import org.armman.sakhi.data.forms.newLocalSubmissionUuid
 import org.armman.sakhi.data.enrollment.DuplicateOutcome
 import org.armman.sakhi.data.lookup.LookupRepository
@@ -240,10 +244,17 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
   }
 
   fun setAnswer(questionCode: String, value: String?) {
+    val fields = _uiState.value.version?.schemaJson.orEmpty()
     _uiState.update {
+      val previousAnswers = it.answers
+      val updatedAnswers = previousAnswers.withSingleValue(questionCode, value)
+      // A field this answer just hid (e.g. dropping Gravida to 1 hiding Living children/Still
+      // births/…) must not leave its old value sitting in FormAnswers — see
+      // FormHiddenFieldReset's doc for the bug that causes.
+      val newlyHidden = FormHiddenFieldReset.newlyHiddenQuestionCodes(fields, previousAnswers, updatedAnswers)
       it.copy(
-        answers = it.answers.withSingleValue(questionCode, value),
-        fieldErrors = it.fieldErrors - questionCode,
+        answers = FormHiddenFieldReset.apply(fields, previousAnswers, updatedAnswers),
+        fieldErrors = it.fieldErrors - questionCode - newlyHidden,
       )
     }
     recomputeDerivedFields()
@@ -256,10 +267,14 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
   }
 
   fun setMultiAnswer(questionCode: String, values: List<String>) {
+    val fields = _uiState.value.version?.schemaJson.orEmpty()
     _uiState.update {
+      val previousAnswers = it.answers
+      val updatedAnswers = previousAnswers.withMultiValue(questionCode, values)
+      val newlyHidden = FormHiddenFieldReset.newlyHiddenQuestionCodes(fields, previousAnswers, updatedAnswers)
       it.copy(
-        answers = it.answers.withMultiValue(questionCode, values),
-        fieldErrors = it.fieldErrors - questionCode,
+        answers = FormHiddenFieldReset.apply(fields, previousAnswers, updatedAnswers),
+        fieldErrors = it.fieldErrors - questionCode - newlyHidden,
       )
     }
   }
@@ -300,18 +315,36 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
     version.schemaJson.forEach { field ->
       val computedFrom = field.computedFrom ?: return@forEach
       val value = FormComputedFieldEvaluator.compute(computedFrom, answers, registrationDate)
+      // AGE_FROM_DOB (per CR-037) has a legitimate Sakhi-typed fallback when date_of_birth is
+      // blank — spec row 20's "either DOB or age". A null derivation there means "DOB isn't
+      // answered", NOT "clear whatever age was typed"; withSingleValue(code, null) would otherwise
+      // delete a manually-entered age every time ANY other field on the form changes. Every other
+      // computedFrom field has no manual fallback, so clearing on a null derivation (e.g. after LMP
+      // is cleared, EDD should clear too) stays correct for them.
+      if (value == null && computedFrom == COMPUTED_AGE_FROM_DOB) return@forEach
       answers = answers.withSingleValue(field.questionCode, value)
     }
-    // Stopgap: the live schema doesn't declare `computedFrom: "AGE_FROM_DOB"` for the age field (see
-    // AGE_FROM_DOB_QUESTION_CODES' doc), so the generic loop above never touches it. Compute it
-    // directly whenever this schema version has the field (under whichever of its known codes) and
-    // it wasn't already handled by a real `computedFrom` declaration — forward-compatible with the
-    // day the backend adds one (then `ageField.computedFrom` is non-null and this is skipped).
+    // Stopgap: for a schema version that hasn't yet picked up CR-037's `computedFrom:
+    // "AGE_FROM_DOB"` declaration (see AGE_FROM_DOB_QUESTION_CODES' doc), the generic loop above
+    // never touches the age field. Same null-guard as above, same reason.
     val ageField = version.schemaJson
       .firstOrNull { it.questionCode in AGE_FROM_DOB_QUESTION_CODES && it.computedFrom == null }
     if (ageField != null) {
       val value = FormComputedFieldEvaluator.compute(COMPUTED_AGE_FROM_DOB, answers, registrationDate)
-      answers = answers.withSingleValue(ageField.questionCode, value)
+      if (value != null) {
+        answers = answers.withSingleValue(ageField.questionCode, value)
+      }
+    }
+    // Stopgap: same reasoning as the age field above — the live schema declares no `computedFrom`
+    // for `trimester_of_preganancy` (see TRIMESTER_QUESTION_CODE's doc). Compute it from LMP/
+    // registration date instead of leaving it as the free-text box the Sakhi was typing raw digits
+    // into. Forward-compatible with the day the backend adds a real `computedFrom` declaration
+    // (then `trimesterField.computedFrom` is non-null and this is skipped).
+    val trimesterField = version.schemaJson
+      .firstOrNull { it.questionCode == TRIMESTER_QUESTION_CODE && it.computedFrom == null }
+    if (trimesterField != null) {
+      val value = FormComputedFieldEvaluator.compute(COMPUTED_TRIMESTER, answers, registrationDate)
+      answers = answers.withSingleValue(trimesterField.questionCode, value)
     }
     _uiState.update { it.copy(answers = answers) }
   }
@@ -338,6 +371,14 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
   /** Visible fields belonging to one tab, in schema order. */
   fun fieldsInSection(section: String): List<FormFieldSchema> =
     visibleFields().filter { sectionOf(it) == section }
+
+  /**
+   * Every field in the active schema, regardless of current visibility. Use this (not
+   * [visibleFields]) for anything that has to describe a field that might currently be hidden —
+   * e.g. resolving a cross-field rule's label — since a hidden field is still a real question the
+   * Sakhi answered earlier or will answer again, not one that stopped existing.
+   */
+  fun allFields(): List<FormFieldSchema> = _uiState.value.version?.schemaJson.orEmpty()
 
   /** Options for a select/radio/multiselect field, in priority order: inline `options` from the
    * schema itself, then the geography/project special case (CR-018 product decision), then a
@@ -378,7 +419,13 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
       // FormComputedFieldEvaluator) with nothing the Sakhi could do about it. Its value is either
       // there because the derivation succeeded, or it isn't and that's a backend/data gap to
       // chase separately, not a reason to block every registration.
-      if (!field.required || field.computedFrom != null) return@all true
+      //
+      // The Td-dose date fields are the one place `field.required` alone isn't the whole story —
+      // schema says `required: false` for all 3 (correct: each is only mandatory once its own
+      // checkbox is checked), so TdDoseQuestionCodes adds them back in here. See that object's doc.
+      val effectivelyRequired = field.required ||
+        field.questionCode in TdDoseQuestionCodes.CONDITIONALLY_REQUIRED_DATE_QUESTION_CODES
+      if (!effectivelyRequired || field.computedFrom != null) return@all true
       when (field.inputType) {
         FormFieldInputType.MULTISELECT, FormFieldInputType.MULTISELECT_DATE ->
           state.answers.multiValueOf(field.questionCode).isNotEmpty()

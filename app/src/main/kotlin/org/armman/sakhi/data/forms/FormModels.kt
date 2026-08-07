@@ -21,6 +21,21 @@ enum class FormFieldInputType {
   UNKNOWN,
 }
 
+/**
+ * [Q44's `has_the_women_received_td_dose`] has now shipped under THREE different `input_type`
+ * spellings across three schema publishes, confirmed against real payloads each time:
+ * `"multiselect_date"` (CR-018, `api-calls.jsonl`), then unchanged through `api-calls-live.jsonl`
+ * (2026-07-31), then `"multiselect,calendar"` (2026-08-06, reported live — bharath's screenshot
+ * showed the field falling into [FormFieldInputType.UNKNOWN] and printing the raw
+ * "Unsupported field type ... (multiselect,calendar)" message). Matching the SET rather than one
+ * literal — same reasoning as [REGISTRATION_DATE_QUESTION_CODES] — so the next republish doesn't
+ * silently break this field again the same way. `"multiselect, calendar"` (with the space the
+ * spec's own "Multiple choice, calendar" column text has) is included pre-emptively since the
+ * comma-joined spelling already showed the backend is normalizing the spec's Data Type column
+ * text directly rather than using a fixed enum token.
+ */
+private val MULTISELECT_DATE_SPELLINGS = setOf("multiselect_date", "multiselect,calendar", "multiselect, calendar")
+
 fun String.toFormFieldInputType(): FormFieldInputType = when (this) {
   "text" -> FormFieldInputType.TEXT
   "text_geo" -> FormFieldInputType.TEXT_GEO
@@ -29,7 +44,7 @@ fun String.toFormFieldInputType(): FormFieldInputType = when (this) {
   "select" -> FormFieldInputType.SELECT
   "radio" -> FormFieldInputType.RADIO
   "multiselect" -> FormFieldInputType.MULTISELECT
-  "multiselect_date" -> FormFieldInputType.MULTISELECT_DATE
+  in MULTISELECT_DATE_SPELLINGS -> FormFieldInputType.MULTISELECT_DATE
   "media" -> FormFieldInputType.MEDIA
   "image" -> FormFieldInputType.IMAGE
   else -> FormFieldInputType.UNKNOWN

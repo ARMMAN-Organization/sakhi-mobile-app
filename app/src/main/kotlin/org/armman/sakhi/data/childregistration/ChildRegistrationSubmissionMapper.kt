@@ -3,6 +3,7 @@ package org.armman.sakhi.data.childregistration
 import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.enrollment.BeneficiaryCaseDto
 import org.armman.sakhi.data.enrollment.BeneficiaryPiiDto
+import org.armman.sakhi.data.enrollment.joinFullName
 import org.armman.sakhi.data.enrollment.ChildDetailsDto
 import org.armman.sakhi.data.enrollment.ConsentDto
 import org.armman.sakhi.data.enrollment.CreateBeneficiaryRequestDto
@@ -134,9 +135,8 @@ class ChildRegistrationSubmissionMapper @Inject constructor(
     CreateBeneficiaryRequestDto(
       // The beneficiary here IS the child.
       pii = BeneficiaryPiiDto(
-        firstName = childName.firstName,
-        middleName = childName.middleName,
-        lastName = childName.lastName,
+        // See BeneficiaryPiiDto's doc: the backend wants ONE joined `fullName` now.
+        fullName = joinFullName(first = childName.firstName, middle = childName.middleName, last = childName.lastName),
         phone = answers.valueOf(QuestionCode.MOBILE_NUMBER),
         alternatePhone = null,
         dateOfBirth = dateOfBirth,

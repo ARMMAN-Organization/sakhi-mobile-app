@@ -142,8 +142,7 @@ class DynamicFormSubmissionCoordinatorTest {
 
     // POST /beneficiaries got the mapped PII/case/motherDetails payload.
     val beneficiaryRequest = requireNotNull(enrollmentApi.lastRequest)
-    assertEquals("Test", beneficiaryRequest.pii.firstName)
-    assertEquals("Mother", beneficiaryRequest.pii.lastName)
+    assertEquals("Test Mother", beneficiaryRequest.pii.fullName)
     assertEquals("local-case-1", beneficiaryRequest.case.localCaseUuid)
 
     // POST /forms/MOTHER_REGISTRATION/submissions used the SERVER's beneficiary id, not the

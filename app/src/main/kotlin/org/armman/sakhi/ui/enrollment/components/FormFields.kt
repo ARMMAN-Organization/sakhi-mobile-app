@@ -33,6 +33,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -184,6 +186,8 @@ fun AppDropdownField(
   var expanded by remember { mutableStateOf(false) }
   var fieldWidthPx by remember { mutableIntStateOf(0) }
   val density = LocalDensity.current
+  val focusManager = LocalFocusManager.current
+  val keyboardController = LocalSoftwareKeyboardController.current
 
   LaunchedEffect(options, enabled, selectedIndex) {
     if (enabled && selectedIndex == null && options.size == 1) {
@@ -202,7 +206,17 @@ fun AppDropdownField(
           .clip(FieldShape)
           .background(White)
           .border(1.dp, fieldBorder(errorText != null), FieldShape)
-          .clickable(enabled = enabled && options.isNotEmpty()) { expanded = true }
+          .clickable(enabled = enabled && options.isNotEmpty()) {
+            // A field further down the form (a dropdown, date, checkbox, radio — none of them
+            // real text input) doesn't take Compose focus away from whatever AppTextField the
+            // Sakhi was just typing in merely by being tapped, since focus only transfers between
+            // focusable nodes. Left alone, that still-focused text field can bring the keyboard
+            // back regardless of what was actually tapped — see the matching note on AppDateField
+            // and SelectableRow (2026-08 QA).
+            focusManager.clearFocus()
+            keyboardController?.hide()
+            expanded = true
+          }
           .padding(horizontal = Dimens.ItemSpacing),
       ) {
         Text(
@@ -274,7 +288,13 @@ fun AppDateField(
 ) {
   val context = LocalContext.current
   val formatter = remember { DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.getDefault()) }
+  val focusManager = LocalFocusManager.current
+  val keyboardController = LocalSoftwareKeyboardController.current
   val openPicker = {
+    // See the matching note on AppDropdownField: clear focus off any still-focused text field
+    // above this one so the keyboard doesn't reappear once the dialog closes.
+    focusManager.clearFocus()
+    keyboardController?.hide()
     // Clamp the seed into range so the dialog never opens on a month the bounds forbid (which
     // reads as a broken picker: every day greyed out).
     val seed = (value ?: maxDate ?: LocalDate.now()).coerceIntoRange(minDate, maxDate)
@@ -549,6 +569,8 @@ private fun SelectableRow(
    * marker — so this stays false there. */
   required: Boolean = false,
 ) {
+  val focusManager = LocalFocusManager.current
+  val keyboardController = LocalSoftwareKeyboardController.current
   val labelColor = when {
     !enabled -> NeutralG75
     selected -> MaterialTheme.colorScheme.primary
@@ -571,7 +593,14 @@ private fun SelectableRow(
   Row(
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing),
-    modifier = Modifier.clickable(enabled = enabled, onClick = onClick),
+    modifier = Modifier.clickable(enabled = enabled) {
+      // See the matching note on AppDropdownField/AppDateField: this checkbox/radio row isn't a
+      // text input, but tapping it doesn't by itself take Compose focus away from a still-focused
+      // AppTextField above it, so the keyboard can otherwise pop back up for no visible reason.
+      focusManager.clearFocus()
+      keyboardController?.hide()
+      onClick()
+    },
   ) {
     Icon(
       painter = painterResource(if (selected) iconSelected else iconUnselected),

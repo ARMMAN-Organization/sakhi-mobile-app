@@ -6,10 +6,11 @@ package org.armman.sakhi.data.forms
  *
  * Mirrors the service's own `isVisible` (`visit-form-service/src/forms/form-validation.ts`) so a
  * field the app hides is exactly the field the backend excludes from its required-field check.
- * Both sides support the same four operators — the backend's Zod enum is
- * `['eq', 'gte', 'lt', 'isSet']`. Until this class caught up, `gte`/`lt`/`isSet` fell through to
- * the unknown-operator branch and rendered unconditionally: a `gte` rule the backend accepted and
- * enforced simply did nothing on the device.
+ * Both sides support the same five operators — the backend's Zod enum is
+ * `['eq', 'gte', 'lt', 'isSet', 'contains']` (`contains` added 2026-08-06 for the Td-dose date
+ * fields, see [TdDoseQuestionCodes]). Until this class caught up, `gte`/`lt`/`isSet` fell through
+ * to the unknown-operator branch and rendered unconditionally: a `gte` rule the backend accepted
+ * and enforced simply did nothing on the device.
  */
 object FormVisibilityEvaluator {
 
@@ -23,13 +24,23 @@ object FormVisibilityEvaluator {
    * - If [FormVisibleWhen.operator] is one we don't know, the field is shown. An unrecognized rule
    *   failing open means a Sakhi sees one extra field, not that a field she needed silently
    *   vanished — and the backend applies the real rule regardless.
+   *
+   * [OPERATOR_CONTAINS] is a genuinely NEW operator (added 2026-08-06, per the Td-dose
+   * backend-request doc's "Ask #2" — not a spelling the backend already enforced that the app
+   * simply hadn't caught up to, unlike `gte`/`lt` above). It's the one operator that compares
+   * against a MULTI-value answer ([FormAnswers.multiValues]) rather than [FormAnswers.valueOf]'s
+   * single value — e.g. `has_the_women_received_td_dose` `contains` `"td_1_date"` gates the
+   * `td_1_date` date field's visibility on whether that checkbox is checked.
    */
   fun isVisible(field: FormFieldSchema, answers: FormAnswers): Boolean {
     val condition = field.visibleWhen ?: return true
     val actual = answers.valueOf(condition.field)
-    // `isSet` is the one operator that asks about presence, so it must be answered before the
-    // unanswered-means-hidden rule below (which would give the same result here, but by accident).
+    // `isSet`/`contains` don't compare against [actual] (the single-value slot) at all, so both
+    // must be handled before the unanswered-means-hidden rule below.
     if (condition.operator == OPERATOR_IS_SET) return !actual.isNullOrBlank()
+    if (condition.operator == OPERATOR_CONTAINS) {
+      return condition.value != null && condition.value in answers.multiValueOf(condition.field)
+    }
     if (actual.isNullOrBlank()) return false
     return when (condition.operator) {
       OPERATOR_EQ -> actual == condition.value
@@ -61,4 +72,5 @@ object FormVisibilityEvaluator {
   private const val OPERATOR_GTE = "gte"
   private const val OPERATOR_LT = "lt"
   private const val OPERATOR_IS_SET = "isSet"
+  private const val OPERATOR_CONTAINS = "contains"
 }

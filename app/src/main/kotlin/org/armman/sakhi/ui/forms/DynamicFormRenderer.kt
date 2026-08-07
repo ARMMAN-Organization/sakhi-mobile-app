@@ -36,6 +36,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import org.armman.sakhi.R
 import org.armman.sakhi.data.forms.AGE_FROM_DOB_QUESTION_CODES
+import org.armman.sakhi.data.forms.isAgeFromDobReadOnly
 import org.armman.sakhi.data.forms.BeneficiaryNameRule
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormDateRuleset
@@ -46,6 +47,8 @@ import org.armman.sakhi.data.forms.FormNumericInputRule
 import org.armman.sakhi.data.forms.FormNumericRangeValidator
 import org.armman.sakhi.data.forms.GeographyQuestionCodes
 import org.armman.sakhi.data.forms.MobileNumberRule
+import org.armman.sakhi.data.forms.FormMultiSelectExclusivity
+import org.armman.sakhi.data.forms.TRIMESTER_QUESTION_CODE
 import org.armman.sakhi.ui.enrollment.components.AppCheckboxGroup
 import org.armman.sakhi.ui.enrollment.components.AppDateField
 import org.armman.sakhi.ui.enrollment.components.AppDropdownField
@@ -89,12 +92,13 @@ private val CONSENT_CHECKBOX_QUESTION_CODES = setOf(
  * heart of CR-018: a field the backend adds or changes shows up here automatically, no per-field
  * Compose code to write.
  *
- * Known, deliberate simplification: `multiselect_date` (currently only
- * `has_the_women_received_td_dose`) renders as a plain multi-select checkbox group, without a
- * per-option date picker. The real schema implies each selected option should also capture a
- * date (Td-1/Td-2/Booster dates), but building a bespoke multi-date-per-checkbox UI wasn't
- * included in this pass — flagged here rather than silently dropped; a follow-up should extend
- * this case once confirmed how those per-option dates should be captured/submitted.
+ * `multiselect_date` (currently only `has_the_women_received_td_dose`) renders as a plain
+ * multi-select checkbox group with NO per-option date picker embedded in it — that part is
+ * deliberate and permanent, not a gap. The per-option dates ([TdDoseQuestionCodes]) are 3
+ * separate ordinary `date` fields the schema declares alongside it (added 2026-08-06, see
+ * `td-dose-dates-schema-gap.md`), each shown/hidden by its own `visibleWhen` `contains` rule
+ * against this field's answer — so they render through the plain DATE branch below like any
+ * other date field, and CR-018's "no per-field Compose code" property holds even for this case.
  *
  * `media`/`image` fields don't perform real capture themselves (same as the existing static
  * Consent step) — [onPlayMedia]/[onCaptureImage] are callbacks the hosting screen wires to real
@@ -107,11 +111,15 @@ private val CONSENT_CHECKBOX_QUESTION_CODES = setOf(
  * A blank/not-yet-computed value shows a placeholder rather than an empty box, so it doesn't look
  * broken.
  *
- * The DOB-derived age field ([AGE_FROM_DOB_QUESTION_CODES]) is treated the same way even though the
- * live schema doesn't (yet) set `computedFrom` on it — see that constant's doc. Without this, it
- * would render as a normal editable number box whose typed value gets silently clobbered by
- * `recomputeDerivedFields`'s stopgap every time any other answer changes — exactly the broken
- * pattern this whole read-only branch exists to avoid.
+ * The trimester field ([TRIMESTER_QUESTION_CODE]) is treated the same way even though the live
+ * schema doesn't (yet) set `computedFrom` on it — see that constant's doc. Without this, it'd
+ * render as a normal editable box whose typed value gets silently clobbered by
+ * `recomputeDerivedFields`'s stopgap every time any other answer changes.
+ *
+ * The DOB-derived age field ([AGE_FROM_DOB_QUESTION_CODES]) is the one exception to "computedFrom
+ * means read-only": per CR-037 the spec's "either DOB or age" pair means this field is read-only
+ * ONLY while `date_of_birth` has a value ([isAgeFromDobReadOnly]) — once DOB is blank it renders as
+ * a normal editable NUMBER input so the Sakhi can type age directly instead.
  */
 // `WindowInsets.isImeVisible` and `BringIntoViewRequester` are both still opt-in; used only for the
 // keep-focused-field-visible effect below.
@@ -145,10 +153,20 @@ fun DynamicFormField(
   // other branch gets a trailing [FieldErrorText] appended below it, so a select/radio/geography
   // field can show a server error too. Tracked so the trailing line isn't duplicated for the
   // widget-native cases.
-  val rendersErrorInline = field.computedFrom == null &&
-    field.questionCode !in AGE_FROM_DOB_QUESTION_CODES &&
-    field.questionCode !in GeographyQuestionCodes.ALL &&
+  // The age-from-DOB field is only forced into the read-only/no-inline-error bucket while DOB is
+  // actually answered (see isAgeFromDobReadOnly's doc) — once DOB is blank it renders and errors
+  // exactly like any other NUMBER field.
+  val ageFromDobEditable = field.questionCode in AGE_FROM_DOB_QUESTION_CODES &&
+    !isAgeFromDobReadOnly(answers)
+  val rendersErrorInline = if (ageFromDobEditable) {
     field.inputType in INLINE_ERROR_INPUT_TYPES
+  } else {
+    field.computedFrom == null &&
+      field.questionCode !in AGE_FROM_DOB_QUESTION_CODES &&
+      field.questionCode != TRIMESTER_QUESTION_CODE &&
+      field.questionCode !in GeographyQuestionCodes.ALL &&
+      field.inputType in INLINE_ERROR_INPUT_TYPES
+  }
 
   // Keep a focused field above the keyboard.
   //
@@ -212,6 +230,11 @@ private fun FormDateRuleset.Violation.messageRes(): Int = when (this) {
   FormDateRuleset.Violation.LMP_TOO_RECENT -> R.string.enrollment_error_lmp_recent
   FormDateRuleset.Violation.LMP_TOO_OLD -> R.string.enrollment_error_lmp_old
   FormDateRuleset.Violation.REGISTRATION_DATE_IN_FUTURE -> R.string.enrollment_error_registration_date_future
+  FormDateRuleset.Violation.ANC1_DATE_NOT_AFTER_LMP -> R.string.enrollment_error_anc1_date_not_after_lmp
+  FormDateRuleset.Violation.ANC1_DATE_TOO_LATE -> R.string.enrollment_error_anc1_date_too_late
+  FormDateRuleset.Violation.TD_DATE_IN_FUTURE -> R.string.form_error_td_date_future
+  FormDateRuleset.Violation.TD_2_NOT_AFTER_TD_1 -> R.string.form_error_td2_not_after_td1
+  FormDateRuleset.Violation.TD_BOOSTER_NOT_AFTER_TD_2 -> R.string.form_error_td_booster_not_after_td2
 }
 
 /** Inline error line shown under a field whose widget has no native error slot (select, radio,
@@ -249,7 +272,13 @@ private fun DynamicFormFieldBody(
   onCaptureImage: () -> Unit,
   serverErrorText: String?,
 ) {
-  if (field.computedFrom != null || field.questionCode in AGE_FROM_DOB_QUESTION_CODES) {
+  val ageFromDobEditable = field.questionCode in AGE_FROM_DOB_QUESTION_CODES &&
+    !isAgeFromDobReadOnly(answers)
+  if (!ageFromDobEditable &&
+    (field.computedFrom != null ||
+      field.questionCode in AGE_FROM_DOB_QUESTION_CODES ||
+      field.questionCode == TRIMESTER_QUESTION_CODE)
+  ) {
     AppReadOnlyField(
       label = field.label,
       value = singleValue.ifBlank { "Auto-calculated" },
@@ -335,13 +364,21 @@ private fun DynamicFormFieldBody(
         value = singleValue,
         onValueChange = { new ->
           val digits = new.filter { it.isDigit() }
-          onSingleAnswer(
-            when {
-              isMobile -> digits.take(MobileNumberRule.REQUIRED_DIGITS)
-              maxDigits != null -> digits.take(maxDigits)
-              else -> digits
-            },
-          )
+          val capped = when {
+            isMobile -> digits.take(MobileNumberRule.REQUIRED_DIGITS)
+            maxDigits != null -> digits.take(maxDigits)
+            else -> digits
+          }
+          // The digit cap alone lets a right-length-but-out-of-range value through (e.g. "16" in
+          // a 2..15 field needs only 2 digits, same as "15"). Reject that keystroke outright
+          // instead of letting it in and only flagging it via localError below — see
+          // FormNumericRangeValidator.exceedsMax for why this can never block a legitimate entry.
+          val next = if (FormNumericRangeValidator.exceedsMax(field.numericRange, capped)) {
+            singleValue
+          } else {
+            capped
+          }
+          onSingleAnswer(next)
         },
         keyboardType = KeyboardType.Number,
         // Server error wins on submit; once the Sakhi edits the field its server error is cleared
@@ -421,6 +458,14 @@ private fun DynamicFormFieldBody(
           val code = options.getOrNull(index)?.valueCode ?: return@AppCheckboxGroup
           val updated = if (code in multiValue) multiValue - code else multiValue + code
           onMultiAnswer(updated)
+        },
+        // Spec row 43 (and others sharing the identical dev note — see
+        // FormMultiSelectExclusivity's doc): "No known condition"/"Don't know" disable every other
+        // option and vice versa. A code the Sakhi has already checked is never disabled, so
+        // unchecking is always possible.
+        enabled = { index ->
+          val code = options.getOrNull(index)?.valueCode
+          code == null || !FormMultiSelectExclusivity.isDisabled(field.questionCode, code, multiValue)
         },
         required = required,
       )

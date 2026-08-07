@@ -2,6 +2,7 @@ package org.armman.sakhi.ui.forms
 
 import org.armman.sakhi.data.forms.AGE_FROM_DOB_QUESTION_CODES
 import org.armman.sakhi.data.forms.FormFieldSchema
+import org.armman.sakhi.data.forms.TdDoseQuestionCodes
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -71,5 +72,32 @@ class RequiredFieldMarkerTest {
   @Test
   fun `optional field of an excluded type is still unmarked`() {
     assertFalse(RequiredFieldMarker.isShownFor(field(inputTypeRaw = "media", required = false)))
+  }
+
+  // --- Td dose date fields: required:false in the schema, but conditionally required client-side -
+
+  @Test
+  fun `shows marker for a Td-dose date field even though the schema says required false`() {
+    TdDoseQuestionCodes.CONDITIONALLY_REQUIRED_DATE_QUESTION_CODES.forEach { code ->
+      assertTrue(
+        code,
+        RequiredFieldMarker.isShownFor(field(questionCode = code, inputTypeRaw = "date", required = false)),
+      )
+    }
+  }
+
+  @Test
+  fun `a Td-dose date field is unaffected if the schema ever does mark it required`() {
+    TdDoseQuestionCodes.CONDITIONALLY_REQUIRED_DATE_QUESTION_CODES.forEach { code ->
+      assertTrue(
+        code,
+        RequiredFieldMarker.isShownFor(field(questionCode = code, inputTypeRaw = "date", required = true)),
+      )
+    }
+  }
+
+  @Test
+  fun `an ordinary date field with the same input type stays governed by its own required flag`() {
+    assertFalse(RequiredFieldMarker.isShownFor(field(questionCode = "date_of_birth", inputTypeRaw = "date", required = false)))
   }
 }

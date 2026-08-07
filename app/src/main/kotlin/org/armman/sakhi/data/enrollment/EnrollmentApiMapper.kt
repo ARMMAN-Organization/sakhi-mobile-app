@@ -71,9 +71,8 @@ class EnrollmentApiMapper @Inject constructor(
 
     CreateBeneficiaryRequestDto(
       pii = BeneficiaryPiiDto(
-        firstName = record.firstName,
-        middleName = record.middleName.takeIf { it.isNotBlank() },
-        lastName = record.lastName,
+        // See BeneficiaryPiiDto's doc: the backend wants ONE joined `fullName` now.
+        fullName = joinFullName(first = record.firstName, middle = record.middleName, last = record.lastName),
         phone = record.mobileNumber.takeIf { it.isNotBlank() },
         alternatePhone = null, // Not collected by the current form.
         // PersonalInfoState.isComplete only requires ageYears (Q20: "DOB or age — either one

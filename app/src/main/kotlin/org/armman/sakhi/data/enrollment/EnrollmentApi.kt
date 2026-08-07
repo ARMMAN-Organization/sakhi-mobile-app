@@ -4,22 +4,26 @@ import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.POST
 
-/** `pii` block of the `POST /beneficiaries` request. Name is sent as three discrete fields.
+/** `pii` block of the `POST /beneficiaries` request. Name is sent as ONE joined field.
  *
- * 2026-07-22 timeline, both confirmed against real backend 400 responses (see
- * `api-calls.jsonl` and chat history — the live schema changed mid-day, not a misread):
- *  1. Earlier: backend required a single `fullName` (`pii.fullName: String must contain at
- *     least 1 character(s)` when omitted) and rejected split fields.
- *  2. Now: backend requires `firstName`/`lastName` and rejects `fullName` outright
- *     (`pii: Unrecognized key(s) in object: 'fullName'`, `pii.firstName: Required`,
- *     `pii.lastName: Required`).
- * This DTO matches contract #2, the current one. If submissions start failing again with either
- * of these messages, check the live error body before assuming this shape is still right — the
- * `/beneficiaries` PII contract has changed at least twice in one day. */
+ * Timeline, each confirmed against a real backend 400 response (see `api-calls.jsonl`/
+ * `api-calls-live.jsonl` and chat history — the live contract has changed at least three times,
+ * not a misread each time):
+ *  1. 2026-07-22 (first change that day): backend required a single `fullName`
+ *     (`pii.fullName: String must contain at least 1 character(s)` when omitted) and rejected
+ *     split fields.
+ *  2. 2026-07-22 (later the same day): backend switched to requiring `firstName`/`lastName` and
+ *     rejecting `fullName` outright (`pii: Unrecognized key(s) in object: 'fullName'`).
+ *  3. 2026-08-06: reverted to #1 — confirmed live via the Sakhi app's own submit error
+ *     (`Unrecognized key(s) in object: 'firstName', 'lastName'`) and by ARMMAN's own reference
+ *     curl for this endpoint, which sends `pii.fullName` and nothing else.
+ * This DTO matches contract #3 (== #1), the current one. [joinFullName] is the single place the
+ * three schema/record fields become one string — every caller uses it rather than concatenating
+ * inline, so a future spacing/ordering fix only needs to change one function. If submissions start
+ * failing again with either message above, check the live error body before assuming this shape
+ * is still right. */
 data class BeneficiaryPiiDto(
-  val firstName: String,
-  val middleName: String?,
-  val lastName: String,
+  val fullName: String,
   val phone: String?,
   val alternatePhone: String?,
   val dateOfBirth: String?,
@@ -35,6 +39,16 @@ data class BeneficiaryPiiDto(
   val talukaId: String?,
   val rchNumber: String?,
 )
+
+/** Joins a beneficiary's discrete first/middle/last name answers into the single `fullName`
+ * string [BeneficiaryPiiDto] now sends — the ONE place this join happens, per that DTO's doc, so
+ * every caller (dynamic mother form, static enrollment, child registration) stays consistent if
+ * the join rule (spacing, missing-middle handling) ever needs to change. [first]/[last] are
+ * expected non-blank (each caller's own required-field gate already enforces that); [middle] is
+ * skipped entirely when blank rather than leaving a double space. */
+fun joinFullName(first: String, middle: String?, last: String): String =
+  listOfNotNull(first.trim(), middle?.trim()?.takeIf { it.isNotBlank() }, last.trim())
+    .joinToString(" ")
 
 /** `case` block — `beneficiaryTypeLookupId`/`caseTypeLookupId` are UUIDs resolved via
  * [org.armman.sakhi.data.lookup.LookupRepository], never hardcoded.

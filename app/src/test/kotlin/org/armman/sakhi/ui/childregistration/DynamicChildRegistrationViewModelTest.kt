@@ -12,6 +12,7 @@ import kotlinx.coroutines.test.setMain
 import org.armman.sakhi.data.childregistration.ChildFormDraftRepository
 import org.armman.sakhi.data.childregistration.ChildFormSubmitResult
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormCrossFieldRule
 import org.armman.sakhi.data.forms.FormDateRuleset
 import org.armman.sakhi.data.forms.FormFieldSchema
 import org.armman.sakhi.data.forms.FormGeographyUnit
@@ -33,6 +34,7 @@ import org.armman.sakhi.data.lookup.LookupValue
 import org.armman.sakhi.data.motherlink.LinkedMother
 import org.armman.sakhi.data.motherlink.LinkedMotherConsent
 import org.armman.sakhi.data.motherlink.MotherLinkRepository
+import org.armman.sakhi.data.motherlink.MotherSocioDemographics
 import org.armman.sakhi.data.motherlink.MotherPrefill
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -53,7 +55,7 @@ private const val PATH_REGISTERED_MOTHER = "child_of_a_registered_pregnant_woman
 private const val PATH_DIRECT = "child_directly_mother_not_registered_in_the_program"
 private const val MOTHER_BENEFICIARY_ID = "mother_beneficiary_id"
 private const val CAREGIVER_NAME = "caregiver_name_first_name_middle_name_last_name"
-private const val MOTHER_DATE_OF_BIRTH = "age_or_dob_of_the_mother"
+private const val MOTHER_DATE_OF_BIRTH = "mother_date_of_birth"
 private const val DATE_OF_BIRTH_OF_INFANT = "date_of_birth_of_infant"
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -152,6 +154,7 @@ class DynamicChildRegistrationViewModelTest {
   private class FakeMotherLinkRepository(
     private val mothers: List<LinkedMother>? = emptyList(),
     private val consent: LinkedMotherConsent? = null,
+    private val socioDemographics: MotherSocioDemographics? = null,
   ) : MotherLinkRepository {
     var listCallCount = 0
 
@@ -161,6 +164,9 @@ class DynamicChildRegistrationViewModelTest {
     }
 
     override suspend fun getMotherConsent(motherId: String): LinkedMotherConsent? = consent
+
+    override suspend fun getMotherSocioDemographics(motherId: String): MotherSocioDemographics? =
+      socioDemographics
   }
 
   private fun viewModel(
@@ -168,13 +174,14 @@ class DynamicChildRegistrationViewModelTest {
     draftRepository: FakeChildDraftRepository = FakeChildDraftRepository(),
     geography: List<FormGeographyUnit>? = null,
     motherLinkRepository: MotherLinkRepository = FakeMotherLinkRepository(),
+    validationJson: List<FormCrossFieldRule> = emptyList(),
   ): DynamicChildRegistrationViewModel {
     val version = FormVersion(
       id = "v2",
       formDefinitionId = "def-child",
       versionNo = "v2",
       schemaJson = fields,
-      validationJson = emptyList(),
+      validationJson = validationJson,
       effectiveFrom = "2026-07-21T00:00:00Z",
       effectiveTo = null,
       status = "PUBLISHED",
@@ -749,6 +756,77 @@ class DynamicChildRegistrationViewModelTest {
     dispatcher.scheduler.advanceUntilIdle()
     assertTrue(vm.isReadyToSubmit())
     vm.setAnswer("child_weight_at_birth_in_kg", "16")
+    dispatcher.scheduler.advanceUntilIdle()
+    assertFalse(vm.isReadyToSubmit())
+  }
+
+  // --- CR-039: mother_date_of_birth / mother_age split (schema fixed 2026-08-06, PR #119) -------
+  //
+  // The old single `age_or_dob_of_the_mother` field shipped with an unrenderable
+  // `input_type: "date,integer"`. The republished schema splits it into two plain, independently
+  // editable fields — `mother_date_of_birth` (date) and `mother_age` (number, 10..50) — with the
+  // spec's "either DOB or age" requirement expressed as a schema `ANY_OF_REQUIRED` rule, the exact
+  // same mechanism CR-037 introduced for the mother form's own DOB/age pair. The rule engine
+  // itself is already covered generically in FormCrossFieldValidatorTest; these tests only confirm
+  // it's actually wired through DynamicChildRegistrationViewModel for this field pair.
+
+  private fun motherAgeFields() = listOf(
+    field("mother_date_of_birth", section = "Personal Info", required = false, inputType = "date"),
+    field(
+      "mother_age",
+      section = "Personal Info",
+      required = false,
+      inputType = "number",
+      numericRange = FormNumericRange(min = 10.0, max = 50.0),
+    ),
+  )
+
+  private val anyOfRequiredMotherAgeRule = FormCrossFieldRule(
+    rule = "ANY_OF_REQUIRED",
+    fields = listOf("mother_date_of_birth", "mother_age"),
+  )
+
+  @Test
+  fun `CR-039 isReadyToSubmit blocks when neither mother_date_of_birth nor mother_age is answered`() = runTest {
+    val vm = viewModel(motherAgeFields(), validationJson = listOf(anyOfRequiredMotherAgeRule))
+
+    assertFalse(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `CR-039 isReadyToSubmit passes once only mother_date_of_birth is filled`() = runTest {
+    val vm = viewModel(motherAgeFields(), validationJson = listOf(anyOfRequiredMotherAgeRule))
+
+    vm.setAnswer("mother_date_of_birth", "2001-07-29")
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertTrue(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `CR-039 isReadyToSubmit passes once only mother_age is typed directly`() = runTest {
+    val vm = viewModel(motherAgeFields(), validationJson = listOf(anyOfRequiredMotherAgeRule))
+
+    vm.setAnswer("mother_age", "28")
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertTrue(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `CR-039 numeric range for mother_age (10-50) gates on boundaries`() = runTest {
+    val vm = viewModel(motherAgeFields(), validationJson = listOf(anyOfRequiredMotherAgeRule))
+
+    vm.setAnswer("mother_age", "9")
+    dispatcher.scheduler.advanceUntilIdle()
+    assertFalse(vm.isReadyToSubmit())
+    vm.setAnswer("mother_age", "10")
+    dispatcher.scheduler.advanceUntilIdle()
+    assertTrue(vm.isReadyToSubmit())
+    vm.setAnswer("mother_age", "50")
+    dispatcher.scheduler.advanceUntilIdle()
+    assertTrue(vm.isReadyToSubmit())
+    vm.setAnswer("mother_age", "51")
     dispatcher.scheduler.advanceUntilIdle()
     assertFalse(vm.isReadyToSubmit())
   }

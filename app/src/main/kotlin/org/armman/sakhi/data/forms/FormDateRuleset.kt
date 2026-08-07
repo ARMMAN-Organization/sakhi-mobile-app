@@ -12,6 +12,12 @@ import java.time.temporal.ChronoUnit
  * - **Registration date** (row 13): "Automatically popup todays date" — so never in the future.
  * - **Date of birth** (row 23): "Should accept only those dates whose age will be in range 10-50
  *   years. Error message to be shown if the age is out of the range."
+ * - **Td dose dates** (row 44, [TdDoseQuestionCodes]): "Should accept the old date or today's
+ *   date... Should not accept a future date." Td-2 must be after Td-1, and Td-Booster after Td-2.
+ *   These 3 fields didn't exist until ARMMAN's 2026-08-06 schema change (see
+ *   `td-dose-dates-schema-gap.md`) — the checkbox-only field they hang off,
+ *   [TdDoseQuestionCodes.TD_DOSE_QUESTION_CODE], has its own mutual-exclusivity rule in
+ *   [FormMultiSelectExclusivity], not here.
  *
  * From the `Infant Registration form` (child registration) tab:
  * - **Age or DOB of the mother** (row 20.0): same 10-50 year range, so [MOTHER_DOB_QUESTION_CODE]
@@ -72,6 +78,15 @@ object FormDateRuleset {
   const val LMP_MAX_DAYS_BEFORE_REGISTRATION = 239L
 
   /**
+   * Spec row 42 ("If ANC1 completed, please record the date"): "Only accept date after LMP or +5
+   * days after enrollment form submission date. Should not accept any date post this." Read as two
+   * bounds — must be strictly after LMP, and no later than the registration date (this form's own
+   * submission-day proxy, per this file's existing LMP/DOB convention) plus 5 days.
+   */
+  const val ANC1_DATE_QUESTION_CODE = "if_anc1_completed_please_record_the_date"
+  const val ANC1_DATE_MAX_DAYS_AFTER_REGISTRATION = 5L
+
+  /**
    * Which rule a date answer breaks. Mapped to a localized message by the UI layer.
    *
    * Mirrors the legacy static flow's [org.armman.sakhi.ui.enrollment.FieldError] cases
@@ -96,6 +111,25 @@ object FormDateRuleset {
 
     /** Registration date is after today. */
     REGISTRATION_DATE_IN_FUTURE,
+
+    /** [ANC1_DATE_QUESTION_CODE] is on or before the answered LMP date (must be strictly after). */
+    ANC1_DATE_NOT_AFTER_LMP,
+
+    /** [ANC1_DATE_QUESTION_CODE] is more than [ANC1_DATE_MAX_DAYS_AFTER_REGISTRATION] days after
+     * the registration date. */
+    ANC1_DATE_TOO_LATE,
+
+    /** One of the 3 Td-dose dates ([TdDoseQuestionCodes]) is after the registration date — spec
+     * row 44: "Should not accept a future date." */
+    TD_DATE_IN_FUTURE,
+
+    /** Td-2 date is not strictly after the answered Td-1 date — spec row 44: "TD2 date should be
+     * after TD1". */
+    TD_2_NOT_AFTER_TD_1,
+
+    /** Td-Booster date is not strictly after the answered Td-2 date — spec row 44: "the TD
+     * booster dose should be after the TD2 date". */
+    TD_BOOSTER_NOT_AFTER_TD_2,
   }
 
   /** Selectable range for a field's date picker — the prevention half of the rule. Null means the
@@ -129,8 +163,32 @@ object FormDateRuleset {
         max = reference.minusDays(LMP_MIN_DAYS_BEFORE_REGISTRATION),
       )
 
+      // "After LMP" with no LMP answer yet has nothing to bound against — leave the lower end
+      // open rather than guessing; violationFor is likewise a no-op until LMP is answered (parse()
+      // returns null and the whole check is skipped, same convention as every other rule here).
+      ANC1_DATE_QUESTION_CODE -> Bounds(
+        min = lmpDateAnswer(answers)?.plusDays(1),
+        max = registrationDate.plusDays(ANC1_DATE_MAX_DAYS_AFTER_REGISTRATION),
+      )
+
       // Matches BOTH published spellings — see REGISTRATION_DATE_QUESTION_CODES.
       in REGISTRATION_DATE_QUESTION_CODES -> Bounds(min = null, max = registrationDate)
+
+      // Spec row 44: "Should not accept a future date" on all three, plus "TD2 date should be
+      // after TD1, and the TD booster dose should be after the TD2 date". Each lower bound comes
+      // from the PREVIOUS dose's answered date (open/unbounded until that's answered — nothing to
+      // derive from yet, same convention as ANC1_DATE_QUESTION_CODE's LMP-based lower bound above).
+      TdDoseQuestionCodes.TD_1_DATE_QUESTION_CODE -> Bounds(min = null, max = registrationDate)
+
+      TdDoseQuestionCodes.TD_2_DATE_QUESTION_CODE -> Bounds(
+        min = td1DateAnswer(answers)?.plusDays(1),
+        max = registrationDate,
+      )
+
+      TdDoseQuestionCodes.TD_BOOSTER_DATE_QUESTION_CODE -> Bounds(
+        min = td2DateAnswer(answers)?.plusDays(1),
+        max = registrationDate,
+      )
 
       // Measured against registrationDate rather than `reference` on purpose: the ViewModel's
       // eligibility gate counts days from the same registrationDate, and prevention must not be able
@@ -196,8 +254,39 @@ object FormDateRuleset {
         }
       }
 
+      ANC1_DATE_QUESTION_CODE -> {
+        val lmp = lmpDateAnswer(answers)
+        val tooLate = value.isAfter(registrationDate.plusDays(ANC1_DATE_MAX_DAYS_AFTER_REGISTRATION))
+        when {
+          lmp != null && !value.isAfter(lmp) -> Violation.ANC1_DATE_NOT_AFTER_LMP
+          tooLate -> Violation.ANC1_DATE_TOO_LATE
+          else -> null
+        }
+      }
+
       in REGISTRATION_DATE_QUESTION_CODES ->
         Violation.REGISTRATION_DATE_IN_FUTURE.takeIf { value.isAfter(registrationDate) }
+
+      TdDoseQuestionCodes.TD_1_DATE_QUESTION_CODE ->
+        Violation.TD_DATE_IN_FUTURE.takeIf { value.isAfter(registrationDate) }
+
+      TdDoseQuestionCodes.TD_2_DATE_QUESTION_CODE -> {
+        val td1 = td1DateAnswer(answers)
+        when {
+          value.isAfter(registrationDate) -> Violation.TD_DATE_IN_FUTURE
+          td1 != null && !value.isAfter(td1) -> Violation.TD_2_NOT_AFTER_TD_1
+          else -> null
+        }
+      }
+
+      TdDoseQuestionCodes.TD_BOOSTER_DATE_QUESTION_CODE -> {
+        val td2 = td2DateAnswer(answers)
+        when {
+          value.isAfter(registrationDate) -> Violation.TD_DATE_IN_FUTURE
+          td2 != null && !value.isAfter(td2) -> Violation.TD_BOOSTER_NOT_AFTER_TD_2
+          else -> null
+        }
+      }
 
       // NOTE: DATE_OF_BIRTH_OF_INFANT is deliberately absent, even though `boundsFor` bounds it.
       // Its eligibility windows are detected by DynamicChildRegistrationViewModel, which has the
@@ -231,6 +320,18 @@ object FormDateRuleset {
 
   private fun answeredRegistrationDate(answers: FormAnswers): LocalDate? =
     parse(answers.registrationDateAnswer())
+
+  /** The answered [LMP_DATE_QUESTION_CODE] value, or null if LMP hasn't been answered (or isn't
+   * parseable) yet — [ANC1_DATE_QUESTION_CODE]'s lower bound has nothing to derive from in that
+   * case. */
+  private fun lmpDateAnswer(answers: FormAnswers): LocalDate? =
+    parse(answers.valueOf(LMP_DATE_QUESTION_CODE))
+
+  private fun td1DateAnswer(answers: FormAnswers): LocalDate? =
+    parse(answers.valueOf(TdDoseQuestionCodes.TD_1_DATE_QUESTION_CODE))
+
+  private fun td2DateAnswer(answers: FormAnswers): LocalDate? =
+    parse(answers.valueOf(TdDoseQuestionCodes.TD_2_DATE_QUESTION_CODE))
 
   private fun parse(raw: String?): LocalDate? =
     raw?.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() }

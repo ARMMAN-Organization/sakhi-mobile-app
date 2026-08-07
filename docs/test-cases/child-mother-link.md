@@ -34,12 +34,12 @@ Legend: ☐ pending · ☑ passing. Layer — `REPO` repository, `MAP` prefill m
 
 | # | Case | Expected |
 |---|---|---|
-| ☐ MAP-01 | Mother with full `pii`, geography array contains every matching unit | Prefills `mother_beneficiary_id`, `caregiver_name_first_name_middle_name_last_name`, `age_or_dob_of_the_mother`, `name_of_the_state`, `name_of_district`, `name_of_block_taluka`, `name_of_the_revenue_village_grampanchayat`, `beneficary_pada_name`, `beneficary_phc_name`, `name_of_sub_center`. |
+| ☐ MAP-01 | Mother with full `pii`, geography array contains every matching unit | Prefills `mother_beneficiary_id`, `caregiver_name_first_name_middle_name_last_name`, `mother_date_of_birth`, `name_of_the_state`, `name_of_district`, `name_of_block_taluka`, `name_of_the_revenue_village_grampanchayat`, `beneficary_pada_name`, `beneficary_phc_name`, `name_of_sub_center`. |
 | ☐ MAP-02 | `name_of_block_taluka` source | Maps from `pii.talukaId`, **not** `pii.healthBlockId` — the submission mapper sends `talukaId` from this answer and `healthBlockId = null`. |
 | ☐ MAP-03 | `project_name` | **Never prefilled.** Its option `valueCode` is the project *name* from the Sakhi profile, not `projectId`; writing the UUID would produce an answer matching no option. Already handled by `prefillAutoSelectedGeography`. |
 | ☐ MAP-04 | Mother's `villageId` is **not** present in `FormVersion.geography` | That field is skipped. Guard against submitting a `geographyUnitId` the backend's `/beneficiaries` validation rejects (the `pii.phcId does not refer to a known geography unit` 422 class of bug). |
 | ☐ MAP-05 | Mother's `padaId` present in geography but under a different `geoType` | Skipped — match requires both id and geoType. |
-| ☐ MAP-06 | `pii.dateOfBirth == null` | `age_or_dob_of_the_mother` not written; every other field still prefills. |
+| ☐ MAP-06 | `pii.dateOfBirth == null` | `mother_date_of_birth` not written; every other field still prefills. |
 | ☐ MAP-07 | `pii.fullName` is blank | Name field not written (a blank answer would satisfy nothing and clear an existing one). |
 | ☐ MAP-08 | Returned `prefilledCodes` | Exactly the set of codes actually written — never codes that were skipped. This set drives the "From mother's record" hint. |
 | ☐ MAP-09 | An answer already exists for a target code (resumed draft) | **Overwritten** by the mother's value, and the code is marked prefilled. Selecting a mother is an explicit act; it wins over an earlier auto-selected geography value. |
@@ -64,7 +64,7 @@ Legend: ☐ pending · ☑ passing. Layer — `REPO` repository, `MAP` prefill m
 | ☐ VM-10 | `mother_beneficiary_id` value shape | The beneficiary **UUID**, never a display name. Asserts the submission mapper's `motherBeneficiaryId` passes the backend's `z.string().uuid()`. |
 | ☐ VM-11 | `isSectionReady` for the section holding `mother_beneficiary_id`, registered-mother path, no mother selected | `false` — the field is required and unanswered. |
 | ☐ VM-12 | Same, direct path | `true` — `hiddenByDirectPathFallback` still hides the field; CR-031 must not regress the CR-020 fallback. |
-| ☐ VM-13 | Prefilled `age_or_dob_of_the_mother` violates the 10–50 year rule (live data has a mother with `dateOfBirth` in 2026) | Value is still written; `FormDateRuleset` renders its inline error and blocks Next. Do **not** silently drop it — the Sakhi must see and fix it. |
+| ☐ VM-13 | Prefilled `mother_date_of_birth` violates the 10–50 year rule (live data has a mother with `dateOfBirth` in 2026) | Value is still written; `FormDateRuleset` renders its inline error and blocks Next. Do **not** silently drop it — the Sakhi must see and fix it. |
 | ☐ VM-14 | Prefilled infant-irrelevant fields | `date_of_birth_of_infant`, `name_of_the_child`, `sex_of_child` and every Infant Details field are never written by prefill. |
 | ☐ VM-15 | `selectMother` when `version == null` | No-op, no crash. |
 | ☐ VM-16 | Eligibility window after selecting a mother | Still 183 days (`INELIGIBLE_MOTHER`), unchanged by prefill. |

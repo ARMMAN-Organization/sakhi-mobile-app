@@ -253,4 +253,146 @@ class RemoteMotherLinkRepositoryTest {
   fun `returns null consent when the detail call fails`() = runTest {
     assertNull(repo(FakeBeneficiaryApi(detailResponse = null)).getMotherConsent("mother-1"))
   }
+
+  private fun resolvedLookup(categoryCode: String = "PHONE_OWNER", label: String = "Self") =
+    ResolvedLookupDto(categoryCode = categoryCode, valueCode = label.uppercase(), label = label)
+
+  // REPO-16 (CR-032) — every socioDemographics field maps onto the domain type.
+  @Test
+  fun `reads socio demographics with every field present`() = runTest {
+    val api = FakeBeneficiaryApi(
+      detailResponse = {
+        Response.success(
+          BeneficiaryDetailResponseDto(
+            success = true,
+            message = "OK",
+            data = BeneficiaryDetailDto(
+              id = "mother-1",
+              consentRecords = emptyList(),
+              pii = pii().copy(address = "abbbsss", mobileNumber = "6948454949"),
+              socioDemographics = SocioDemographicsDto(
+                phoneOwner = resolvedLookup("PHONE_OWNER", "Self"),
+                mobileNetworkAvailability = resolvedLookup("MOBILE_NETWORK_AVAILABILITY", "No Network"),
+                educationLevel = resolvedLookup("EDUCATION_LEVEL", "No formal education"),
+                partnerEducationLevel = resolvedLookup("EDUCATION_LEVEL", "No formal education"),
+                partnerOccupation = resolvedLookup("PARTNER_OCCUPATION", "Labour"),
+                migrationPattern = resolvedLookup("MIGRATION_PATTERN", "Permanent migration"),
+                monthlyIncome = resolvedLookup("MONTHLY_INCOME_BRACKET", "<=10000"),
+                religion = resolvedLookup("RELIGION", "Buddhist"),
+                socialCategory = resolvedLookup("SOCIAL_CATEGORY", "General"),
+                yearsInVillage = 6,
+                familyMembersCount = 6,
+                childrenUnder5Count = 1,
+              ),
+            ),
+          ),
+        )
+      },
+    )
+    val result = repo(api).getMotherSocioDemographics("mother-1")
+
+    assertEquals("abbbsss", result?.address)
+    assertEquals("6948454949", result?.mobileNumber)
+    assertEquals(MotherLookupAnswer("PHONE_OWNER", "Self"), result?.phoneOwner)
+    assertEquals(6, result?.yearsInVillage)
+    assertEquals(6, result?.familyMembersCount)
+    assertEquals(1, result?.childrenUnder5Count)
+  }
+
+  // REPO-17 — a bare successful fetch (no socioDemographics block at all, e.g. an older record)
+  // must still return a non-null result whose fields are individually null, not null overall — the
+  // caller (MotherPrefill) needs to skip each field on its own, same as a missing geography level.
+  @Test
+  fun `returns a value with null fields when socioDemographics is absent`() = runTest {
+    val api = FakeBeneficiaryApi(
+      detailResponse = {
+        Response.success(
+          BeneficiaryDetailResponseDto(
+            success = true,
+            message = "OK",
+            data = BeneficiaryDetailDto(id = "mother-1", consentRecords = emptyList()),
+          ),
+        )
+      },
+    )
+    val result = repo(api).getMotherSocioDemographics("mother-1")
+    assertEquals(MotherSocioDemographics(null, null, null, null, null, null, null, null, null, null, null, null, null, null), result)
+  }
+
+  // REPO-18 — a failed fetch must not fail the selection, same contract as getMotherConsent.
+  @Test
+  fun `returns null socio demographics when the detail call fails`() = runTest {
+    assertNull(repo(FakeBeneficiaryApi(detailResponse = null)).getMotherSocioDemographics("mother-1"))
+  }
+
+  private fun successfulDetail(
+    consentStatus: String = "GIVEN",
+    address: String? = "abbbsss",
+  ) = Response.success(
+    BeneficiaryDetailResponseDto(
+      success = true,
+      message = "OK",
+      data = BeneficiaryDetailDto(
+        id = "mother-1",
+        consentRecords = listOf(ConsentRecordDto("ENROLLMENT", consentStatus, "2026-07-28T00:00:00.000Z")),
+        pii = pii().copy(address = address),
+        socioDemographics = SocioDemographicsDto(
+          phoneOwner = resolvedLookup("PHONE_OWNER", "Self"),
+          mobileNetworkAvailability = null,
+          educationLevel = null,
+          partnerEducationLevel = null,
+          partnerOccupation = null,
+          migrationPattern = null,
+          monthlyIncome = null,
+          religion = null,
+          socialCategory = null,
+          yearsInVillage = 6,
+          familyMembersCount = null,
+          childrenUnder5Count = null,
+        ),
+      ),
+    ),
+  )
+
+  // REPO-19 (CR-032 offline warming) — a live consent fetch persists to disk, so a *later* call for
+  // the same mother that fails live still returns the last-known value instead of null. This is the
+  // behaviour MotherDetailsWarmer relies on: warm once online, read it back all day offline.
+  @Test
+  fun `falls back to the last cached consent when a later fetch fails`() = runTest {
+    val store = InMemoryStore()
+    val api = FakeBeneficiaryApi(detailResponse = { successfulDetail() })
+    val repository = repo(api, store)
+    assertEquals(LinkedMotherConsent(true), repository.getMotherConsent("mother-1"))
+
+    api.detailResponse = null // now offline
+    assertEquals(LinkedMotherConsent(true), repository.getMotherConsent("mother-1"))
+  }
+
+  // REPO-20 — same contract for socio-demographics, and across repository *instances*: the cache is
+  // on disk, not just in the in-memory object that happened to do the live fetch (the warmer and the
+  // ViewModel's own repository instance are the same Hilt singleton in production, but the test
+  // should not rely on that).
+  @Test
+  fun `falls back to the last cached socio demographics when a later fetch fails`() = runTest {
+    val store = InMemoryStore()
+    val api = FakeBeneficiaryApi(detailResponse = { successfulDetail(address = "abbbsss") })
+    repo(api, store).getMotherSocioDemographics("mother-1")
+
+    val offlineRepo = repo(FakeBeneficiaryApi(detailResponse = null), store)
+    val cached = offlineRepo.getMotherSocioDemographics("mother-1")
+    assertEquals("abbbsss", cached?.address)
+    assertEquals(MotherLookupAnswer("PHONE_OWNER", "Self"), cached?.phoneOwner)
+    assertEquals(6, cached?.yearsInVillage)
+  }
+
+  // REPO-21 — caches are keyed per motherId; one mother's cached details must not leak onto another.
+  @Test
+  fun `does not leak one mother's cached details onto another`() = runTest {
+    val store = InMemoryStore()
+    val api = FakeBeneficiaryApi(detailResponse = { successfulDetail(consentStatus = "GIVEN") })
+    repo(api, store).getMotherConsent("mother-1")
+
+    val offlineRepo = repo(FakeBeneficiaryApi(detailResponse = null), store)
+    assertNull(offlineRepo.getMotherConsent("mother-2"))
+  }
 }

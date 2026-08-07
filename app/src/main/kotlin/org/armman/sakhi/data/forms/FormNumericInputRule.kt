@@ -8,9 +8,15 @@ package org.armman.sakhi.data.forms
  * years of age" is *"1 digit"* with no range at all. The two do different jobs:
  *
  * - the **digit cap** stops nonsense being typed in the first place (`6666` in a 2-digit field),
- * - the **range** ([FormNumericRangeValidator]) reports a value that is the right length but still
- *   out of bounds (`16` in a 2..15 field), which the Sakhi may legitimately be mid-way through
- *   typing, so it must stay an error message and not a keystroke block.
+ * - the **range** ([FormNumericRangeValidator.isWithinRange]) reports a value that is the right
+ *   length but still out of bounds (`16` in a 2..15 field) as an error message, for the `min` side
+ *   of a range — blocking below `min` would break ordinary left-to-right typing.
+ *
+ * The `max` side of the range gets a harder stop: [FormNumericRangeValidator.exceedsMax] rejects a
+ * keystroke outright once the value-so-far is already above `max` (same "16" example — the digit
+ * cap alone can't catch it, since "16" is the same length as the valid "15"). That's safe to do at
+ * keystroke time because appending digits only grows a value, so no legitimate final entry `<= max`
+ * ever passes through an intermediate state above it.
  *
  * Caps are derived from `numericRange.max` wherever the schema declares one, so a range the backend
  * changes takes effect without an app release. [EXPLICIT_MAX_DIGITS] covers only the fields whose

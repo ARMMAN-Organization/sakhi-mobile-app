@@ -4,6 +4,7 @@ import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.enrollment.EnrollmentRiskAssessment
 import org.armman.sakhi.data.forms.DynamicFormDraftDao
 import org.armman.sakhi.data.forms.DynamicFormDraftEntity
+import org.armman.sakhi.data.forms.BeneficiaryNameQuestionCodes
 import org.armman.sakhi.data.forms.DynamicFormDraftPayload
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormsRepository
@@ -167,11 +168,21 @@ class LocalEnrolmentBeneficiarySource @Inject constructor(
     return units?.firstOrNull { it.geographyUnitId == answer }?.name
   }
 
-  private fun FormAnswers.fullName(): String = listOfNotNull(
-    valueOf(QuestionCode.FIRST_NAME)?.trim()?.takeIf { it.isNotBlank() },
-    valueOf(QuestionCode.MIDDLE_NAME)?.trim()?.takeIf { it.isNotBlank() },
-    valueOf(QuestionCode.LAST_NAME)?.trim()?.takeIf { it.isNotBlank() },
-  ).joinToString(" ").ifBlank { UNNAMED }
+  /**
+   * 2026-08-06: this used to read ONLY [QuestionCode.FIRST_NAME]/[MIDDLE_NAME]/[LAST_NAME] — the
+   * live schema moved to ONE combined `beneficiary_name` question the same day, those three
+   * answers went permanently blank, and every freshly enrolled woman showed as "Unnamed
+   * beneficiary" on this list (the bug that got reported). Now prefers
+   * [BeneficiaryNameQuestionCodes.combinedNameAnswer] — the ONE place that knows the combined
+   * field's possible codes — before falling back to the split questions, same priority
+   * [org.armman.sakhi.data.forms.DynamicFormSubmissionMapper] uses for `pii.fullName`.
+   */
+  private fun FormAnswers.fullName(): String =
+    BeneficiaryNameQuestionCodes.combinedNameAnswer(this) ?: listOfNotNull(
+      valueOf(QuestionCode.FIRST_NAME)?.trim()?.takeIf { it.isNotBlank() },
+      valueOf(QuestionCode.MIDDLE_NAME)?.trim()?.takeIf { it.isNotBlank() },
+      valueOf(QuestionCode.LAST_NAME)?.trim()?.takeIf { it.isNotBlank() },
+    ).joinToString(" ").ifBlank { UNNAMED }
 
   companion object {
     /**

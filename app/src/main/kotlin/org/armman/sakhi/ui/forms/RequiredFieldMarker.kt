@@ -3,6 +3,7 @@ package org.armman.sakhi.ui.forms
 import org.armman.sakhi.data.forms.AGE_FROM_DOB_QUESTION_CODES
 import org.armman.sakhi.data.forms.FormFieldInputType
 import org.armman.sakhi.data.forms.FormFieldSchema
+import org.armman.sakhi.data.forms.TdDoseQuestionCodes
 
 /**
  * Decides whether a dynamic-form field shows the red `*` required marker next to its label.
@@ -12,8 +13,13 @@ import org.armman.sakhi.data.forms.FormFieldSchema
  *
  * The marker is a *user affordance*: it means "you must fill this in before Next/Submit enables".
  * So it is shown only where the Sakhi can actually act:
- * - [FormFieldSchema.required] must be true — the same flag the ViewModel's `fieldsAnsweredAndInRange`
- *   gate uses, so the marker can never disagree with what actually blocks submission.
+ * - [FormFieldSchema.required] must be true, OR the field is one of
+ *   [TdDoseQuestionCodes.CONDITIONALLY_REQUIRED_DATE_QUESTION_CODES] (schema says `required: false`
+ *   because they're only mandatory once their checkbox is checked — and this marker only ever
+ *   sees them rendered when that's already true, per [org.armman.sakhi.data.forms
+ *   .FormVisibilityEvaluator]'s `contains` gating). Either way this must match the ViewModel's
+ *   `fieldsAnsweredAndInRange` gate exactly, so the marker never disagrees with what actually
+ *   blocks submission.
  * - Computed/derived fields are excluded ([FormFieldSchema.computedFrom], and the DOB-derived age
  *   codes in [AGE_FROM_DOB_QUESTION_CODES] which the schema doesn't yet mark as computed). These
  *   render read-only via `AppReadOnlyField`; marking a box the Sakhi cannot type into would read as
@@ -39,7 +45,9 @@ object RequiredFieldMarker {
 
   /** True when [field]'s label should be suffixed with the red `*`. */
   fun isShownFor(field: FormFieldSchema): Boolean {
-    if (!field.required) return false
+    val effectivelyRequired = field.required ||
+      field.questionCode in TdDoseQuestionCodes.CONDITIONALLY_REQUIRED_DATE_QUESTION_CODES
+    if (!effectivelyRequired) return false
     if (field.computedFrom != null) return false
     if (field.questionCode in AGE_FROM_DOB_QUESTION_CODES) return false
     if (field.inputType in ACTION_INPUT_TYPES) return false

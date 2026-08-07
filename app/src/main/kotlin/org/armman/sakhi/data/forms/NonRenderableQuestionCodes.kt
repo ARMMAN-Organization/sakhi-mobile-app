@@ -12,11 +12,31 @@ package org.armman.sakhi.data.forms
  * this special case it would render as an empty box the Sakhi could type a value into — which
  * would never be used (the real id always comes back from the server response).
  *
- * Same risk as [GeographyQuestionCodes]: if the backend ever renames this `question_code`, this
- * silently stops applying (the field reappears as an editable input) rather than failing loudly.
+ * `unique_id` is a `computedFrom: "UNIQUE_ID"` field whose formula is unconfirmed with the backend
+ * (see [FormComputedFieldEvaluator]); it is additionally hidden here so the Sakhi is never shown a
+ * permanently-blank read-only box (the twin of [org.armman.sakhi.data.childregistration
+ * .ChildNonRenderableQuestionCodes.UNIQUE_ID], already applied on the child flow). Risk flagged:
+ * because its formula is unimplemented, `unique_id` is submitted with no value — if the backend
+ * types it `required` on the MOTHER_REGISTRATION submissions endpoint, this could 422 until the
+ * formula is supplied.
+ *
+ * `project_name` is populated via [GeographyFieldOptionsResolver]/the Sakhi's profile
+ * (form spec row 11, "Autopopulated based on Sakhi's project") and is hidden unconditionally per
+ * product decision — including for a Sakhi assigned to more than one project, where it would
+ * otherwise fall back to an interactive dropdown (see [DynamicMotherRegistrationViewModel
+ * .prefillAutoSelectedGeography]). Risk flagged: for a multi-project Sakhi this field now submits
+ * whatever [GeographyFieldOptionsResolver] happens to resolve (or blank, if it can't resolve a
+ * single value) with no way for the Sakhi to pick — revisit if multi-project Sakhis exist in
+ * production.
+ *
+ * Same risk as [GeographyQuestionCodes]: if the backend ever renames one of these `question_code`s,
+ * this silently stops applying (the field reappears as an editable input) rather than failing
+ * loudly.
  */
 object NonRenderableQuestionCodes {
   const val BENEFICIARY_ID = "beneficiary_id"
+  const val UNIQUE_ID = "unique_id"
+  const val PROJECT_NAME = "project_name"
 
-  val ALL: Set<String> = setOf(BENEFICIARY_ID)
+  val ALL: Set<String> = setOf(BENEFICIARY_ID, UNIQUE_ID, PROJECT_NAME)
 }

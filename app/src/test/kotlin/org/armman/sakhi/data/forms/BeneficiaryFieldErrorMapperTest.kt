@@ -40,6 +40,79 @@ class BeneficiaryFieldErrorMapperTest {
   }
 
   @Test
+  fun `pins a pii-fullName error to first_name - the current live contract`() {
+    // 2026-08-06: the backend reverted to sending ONE pii.fullName error instead of separate
+    // firstName/lastName ones (see BeneficiaryPiiDto's doc) — this is the path a real 400 hits
+    // today, not the legacy split-path test above.
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf("pii.fullName" to "fullName must contain at least 1 character(s)"),
+      splitNameSchemaCodes,
+    )
+
+    assertEquals("fullName must contain at least 1 character(s)", result["first_name"])
+  }
+
+  @Test
+  fun `a pii-fullName error falls back to the combined name field on an older schema`() {
+    val combinedNameCode = "beneficary_name_first_name_middle_name_last_name"
+    val v1SchemaCodes = setOf(combinedNameCode, "still_births")
+
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf("pii.fullName" to "fullName must contain at least 1 character(s)"),
+      v1SchemaCodes,
+    )
+
+    assertEquals("fullName must contain at least 1 character(s)", result[combinedNameCode])
+  }
+
+  @Test
+  fun `a pii-fullName error pins to the CURRENT combined field when the schema has it`() {
+    // 2026-08-06: the live schema replaced the split first/middle/last questions with ONE
+    // beneficiary_name field again (see BeneficiaryNameQuestionCodes) — this is the shape a real
+    // 400 hits today, and it must win over both older fallbacks.
+    val currentSchemaCodes = setOf(BeneficiaryNameQuestionCodes.CURRENT, "still_births")
+
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf("pii.fullName" to "fullName must contain at least 1 character(s)"),
+      currentSchemaCodes,
+    )
+
+    assertEquals(
+      "fullName must contain at least 1 character(s)",
+      result[BeneficiaryNameQuestionCodes.CURRENT],
+    )
+  }
+
+  @Test
+  fun `the combined field wins over the split fallback when both happen to be present`() {
+    // Shouldn't be possible in one real schema, but resolve() must still be deterministic rather
+    // than order-of-map-iteration dependent.
+    val bothPresent = setOf(BeneficiaryNameQuestionCodes.CURRENT, "first_name")
+
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf("pii.fullName" to "message"),
+      bothPresent,
+    )
+
+    assertEquals("message", result[BeneficiaryNameQuestionCodes.CURRENT])
+  }
+
+  @Test
+  fun `a split-name path falls back to the combined field when its own target is gone`() {
+    // The live schema dropped first_name/middle_name/last_name entirely in favour of
+    // beneficiary_name — an older-shaped 400 body (pii.firstName) must still land somewhere
+    // rather than silently vanish to the page-level banner.
+    val currentSchemaCodes = setOf(BeneficiaryNameQuestionCodes.CURRENT, "still_births")
+
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf("pii.firstName" to "First name is required"),
+      currentSchemaCodes,
+    )
+
+    assertEquals("First name is required", result[BeneficiaryNameQuestionCodes.CURRENT])
+  }
+
+  @Test
   fun `pins a registration date error to whichever spelling the active schema declares`() {
     val errors = mapOf("case.registrationDate" to "Registration date cannot be in the future")
 

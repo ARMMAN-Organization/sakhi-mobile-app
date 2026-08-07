@@ -329,12 +329,17 @@ class DynamicChildRegistrationViewModel @Inject constructor(
   fun selectMother(mother: LinkedMother) {
     val version = _uiState.value.version ?: return
     viewModelScope.launch {
+      // Both allowed to fail independently (offline, 404): the id/name/DOB/geography prefill above
+      // must still land even if one or both of these come back null.
       val consent = motherLinkRepository.getMotherConsent(mother.id)
+      val socioDemographics = motherLinkRepository.getMotherSocioDemographics(mother.id)
       val result = MotherPrefill.apply(
         answers = _uiState.value.answers,
         mother = mother,
         consent = consent,
         geography = version.geography.orEmpty(),
+        socioDemographics = socioDemographics,
+        formSchema = version.schemaJson,
       )
       _uiState.update {
         it.copy(

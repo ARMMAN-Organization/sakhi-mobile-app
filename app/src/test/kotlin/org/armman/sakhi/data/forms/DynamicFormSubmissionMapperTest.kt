@@ -79,9 +79,7 @@ class DynamicFormSubmissionMapperTest {
     val dto = mapper.toCreateBeneficiaryRequest("local-case-1", answeredForm(), LocalDate.of(2026, 7, 20))
       .getOrThrow()
 
-    assertEquals("Test", dto.pii.firstName)
-    assertEquals(null, dto.pii.middleName)
-    assertEquals("Mother", dto.pii.lastName)
+    assertEquals("Test Mother", dto.pii.fullName)
     assertEquals("9876543210", dto.pii.phone)
     assertEquals("1996-01-01", dto.pii.dateOfBirth)
     assertEquals("Pada 4, Dhadgaon", dto.pii.addressLine)
@@ -129,9 +127,8 @@ class DynamicFormSubmissionMapperTest {
     val dto = mapper.toCreateBeneficiaryRequest("local-case-1", answers, LocalDate.of(2026, 7, 20))
       .getOrThrow()
 
-    assertEquals("Reema", dto.pii.firstName)
-    assertEquals(null, dto.pii.middleName)
-    assertEquals("Devi", dto.pii.lastName)
+    // Trimmed AND single-spaced when joined, not "Reema    Devi" with the padding baked in.
+    assertEquals("Reema Devi", dto.pii.fullName)
   }
 
   @Test
@@ -218,7 +215,53 @@ class DynamicFormSubmissionMapperTest {
   }
 
   @Test
-  fun `first, middle and last name are sent as discrete fields, blank middle becomes null`() = runTest {
+  fun `beneficiary_name (current live schema) is preferred over the split fields`() = runTest {
+    // 2026-08-06: the live schema replaced first_name/middle_name/last_name with ONE
+    // beneficiary_name field again — see BeneficiaryNameQuestionCodes's doc. Answers can carry
+    // both codes on a draft started before this switch; the combined field must win.
+    sessionStore.saveSession(session)
+    val form = answeredForm().let {
+      it.copy(singleValues = it.singleValues + mapOf(BeneficiaryNameQuestionCodes.CURRENT to "Priya Sharma"))
+    }
+
+    val dto = mapper.toCreateBeneficiaryRequest("local-case-1", form, LocalDate.of(2026, 7, 20)).getOrThrow()
+
+    assertEquals("Priya Sharma", dto.pii.fullName)
+  }
+
+  @Test
+  fun `beneficiary_name alone (no split fields at all) is enough to build the DTO`() = runTest {
+    sessionStore.saveSession(session)
+    val form = answeredForm().let {
+      it.copy(
+        singleValues = it.singleValues - "first_name" - "last_name" +
+          (BeneficiaryNameQuestionCodes.CURRENT to "Priya Sharma"),
+      )
+    }
+
+    val dto = mapper.toCreateBeneficiaryRequest("local-case-1", form, LocalDate.of(2026, 7, 20)).getOrThrow()
+
+    assertEquals("Priya Sharma", dto.pii.fullName)
+  }
+
+  @Test
+  fun `a blank-only name (neither combined nor split fields answered) fails loudly instead of submitting a space`() = runTest {
+    // The 2026-08-06 bug this guards: the schema moved to beneficiary_name, the mapper still only
+    // read the split fields, joinFullName("", null, "") produced a single space, and that space
+    // silently reached the backend as pii.fullName. This must now fail before building the DTO.
+    sessionStore.saveSession(session)
+    val form = answeredForm().let {
+      it.copy(singleValues = it.singleValues - "first_name" - "last_name")
+    }
+
+    val result = mapper.toCreateBeneficiaryRequest("local-case-1", form, LocalDate.of(2026, 7, 20))
+
+    assertTrue(result.isFailure)
+    assertTrue(result.exceptionOrNull() is EnrollmentMappingException.CrossFieldValidation)
+  }
+
+  @Test
+  fun `first, middle and last name are joined into a single fullName field`() = runTest {
     sessionStore.saveSession(session)
     val form = answeredForm().let {
       it.copy(singleValues = it.singleValues + mapOf("middle_name" to "Kumari"))
@@ -226,9 +269,7 @@ class DynamicFormSubmissionMapperTest {
 
     val dto = mapper.toCreateBeneficiaryRequest("local-case-1", form, LocalDate.of(2026, 7, 20)).getOrThrow()
 
-    assertEquals("Test", dto.pii.firstName)
-    assertEquals("Kumari", dto.pii.middleName)
-    assertEquals("Mother", dto.pii.lastName)
+    assertEquals("Test Kumari Mother", dto.pii.fullName)
   }
 
   @Test

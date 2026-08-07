@@ -1,9 +1,11 @@
 package org.armman.sakhi.data.motherlink
 
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormFieldSchema
 import org.armman.sakhi.data.forms.FormGeographyUnit
 import org.armman.sakhi.data.forms.GeographyQuestionCodes
 import org.armman.sakhi.data.forms.MOTHER_DOB_QUESTION_CODE
+import org.armman.sakhi.data.lookup.LookupLabelMatcher
 
 /**
  * Child-enrollment question codes this prefill writes. Kept here rather than in the ViewModel so the
@@ -20,16 +22,35 @@ object MotherPrefillQuestionCodes {
    * and this prefill silently drifted apart from the published schema. */
   const val MOTHER_DATE_OF_BIRTH = MOTHER_DOB_QUESTION_CODE
   const val DID_WE_RECEIVE_CONSENT = "did_we_receive_consent"
+
+  // Rows 21–34 (CR-032) — confirmed against the live CHILD_REGISTRATION schema's `question_code`s
+  // (api-calls-live.jsonl), not guessed from the CSV spec's wording.
+  const val ADDRESS = "enter_the_beneficiary_address"
+  const val MOBILE_NUMBER = "mobile_number"
+  const val PHONE_OWNER = "who_owns_the_phone"
+  const val MOBILE_NETWORK_AVAILABILITY = "availability_of_mobile_network"
+  const val EDUCATION_LEVEL = "what_is_the_highest_level_of_education_you_have_completed"
+  const val PARTNER_EDUCATION_LEVEL = "what_is_the_highest_level_of_education_your_partner_have_completed"
+  const val PARTNER_OCCUPATION = "what_is_the_occupation_of_your_partner"
+  const val YEARS_IN_VILLAGE = "since_when_have_you_been_staying_in_this_village"
+  const val MIGRATION_PATTERN = "which_of_the_following_best_describes_your_household_s_migration_pattern"
+  const val MONTHLY_INCOME = "what_is_the_income_of_the_family_per_month"
+  const val RELIGION = "what_is_your_religion"
+  const val SOCIAL_CATEGORY = "what_is_your_category"
+  const val FAMILY_MEMBERS_COUNT = "how_many_family_members_in_your_household_including_children_under_5_years_of_age"
+  const val CHILDREN_UNDER_5_COUNT = "how_many_children_under_5_years_of_age_are_in_your_household"
 }
 
 /**
- * Copies a selected mother's record onto a child-enrollment draft (CR-031, spec rows 1, 4, 9, 12–20).
+ * Copies a selected mother's record onto a child-enrollment draft (CR-031/CR-032, spec rows 1, 4, 9,
+ * 12–34).
  *
  * Pure and Android-free so the whole mapping is unit-testable. Two rules the callers depend on:
  *
- * 1. **A field is only written when the value is actually usable.** A blank name, a null DOB, or a
- *    geography id the backend did not ship for this Sakhi are skipped, not written as empty or as a
- *    foreign id. Writing an unshipped `geographyUnitId` is precisely what produced
+ * 1. **A field is only written when the value is actually usable.** A blank name, a null DOB, a
+ *    geography id the backend did not ship for this Sakhi, or a socio-demographic answer that
+ *    doesn't confidently match a form option is skipped, not written as empty or as a wrong code.
+ *    Writing an unshipped `geographyUnitId` is precisely what produced
  *    `pii.phcId does not refer to a known geography unit` (HTTP 422) on the mother flow.
  * 2. **[Result.prefilledCodes] lists exactly what was written** — never what was skipped. That set
  *    drives the "From mother's record" hint and, via [clear], what a path switch is allowed to
@@ -40,10 +61,10 @@ object MotherPrefillQuestionCodes {
  *   `projectId` UUID the list endpoint returns. It is already auto-selected on form load.
  * - every Infant Details field (`date_of_birth_of_infant`, `name_of_the_child`, `sex_of_child`,
  *   birth weight/length …) — those describe the baby, not the mother.
- * - rows 21–34 (address, mobile, phone owner, education, income …) — they live only in the mother's
- *   `MOTHER_REGISTRATION.formData`, which needs the submissions-read endpoint (CR-032).
  * - consent video/audio/photo (rows 2, 3, 5) — the mother's consent photo is never uploaded
  *   anywhere, only a device file path sits in her `formData` (CR-028).
+ * - rows 35–49 (delivery details, infant-at-birth details) — no Delivery form exists yet to source
+ *   them from.
  */
 object MotherPrefill {
 
@@ -63,12 +84,20 @@ object MotherPrefill {
   )
 
   /**
-   * Applies [mother] (and her [consent], when available) onto [answers].
+   * Applies [mother] (and her [consent]/[socioDemographics], when available) onto [answers].
    *
    * [geography] is the active [org.armman.sakhi.data.forms.FormVersion.geography] — the only
    * `geographyUnitId`s the backend's `/beneficiaries` validation recognises. A mother living outside
    * the units shipped for this Sakhi simply doesn't prefill those levels; the values already
    * auto-selected from the Sakhi's own assignment stay in place.
+   *
+   * [formSchema] is the active [org.armman.sakhi.data.forms.FormVersion.schemaJson] — the source of
+   * truth for each socio-demographic question's own option `value_code`s. [socioDemographics]'s
+   * lookup answers arrive as a `{categoryCode, label}` from `beneficiary-service`'s own resolved
+   * lookup, in its own upper-snake-case convention; that never matches the form schema's
+   * lower-snake-case `value_code` byte-for-byte, so each is translated via [LookupLabelMatcher]
+   * against the *live* schema's options for that question, never a hardcoded translation table that
+   * could drift from a schema change.
    *
    * Existing answers for a target code are overwritten: selecting a mother is an explicit act by the
    * Sakhi and outranks an earlier auto-selected geography value or a resumed draft.
@@ -78,6 +107,8 @@ object MotherPrefill {
     mother: LinkedMother,
     consent: LinkedMotherConsent?,
     geography: List<FormGeographyUnit>,
+    socioDemographics: MotherSocioDemographics? = null,
+    formSchema: List<FormFieldSchema> = emptyList(),
   ): Result {
     var next = answers
     val written = mutableSetOf<String>()
@@ -103,6 +134,27 @@ object MotherPrefill {
     // the registration on the Sakhi's behalf, based on a record about a different beneficiary.
     if (INHERIT_CONSENT_FROM_MOTHER && consent?.consentGiven == true) {
       write(MotherPrefillQuestionCodes.DID_WE_RECEIVE_CONSENT, VALUE_YES)
+    }
+
+    if (socioDemographics != null) {
+      write(MotherPrefillQuestionCodes.ADDRESS, socioDemographics.address)
+      write(MotherPrefillQuestionCodes.MOBILE_NUMBER, socioDemographics.mobileNumber)
+      write(MotherPrefillQuestionCodes.YEARS_IN_VILLAGE, socioDemographics.yearsInVillage?.toString())
+      write(MotherPrefillQuestionCodes.FAMILY_MEMBERS_COUNT, socioDemographics.familyMembersCount?.toString())
+      write(MotherPrefillQuestionCodes.CHILDREN_UNDER_5_COUNT, socioDemographics.childrenUnder5Count?.toString())
+
+      fun writeLookup(questionCode: String, answer: MotherLookupAnswer?) {
+        write(questionCode, LookupLabelMatcher.match(answer?.label, optionsFor(questionCode, formSchema)))
+      }
+      writeLookup(MotherPrefillQuestionCodes.PHONE_OWNER, socioDemographics.phoneOwner)
+      writeLookup(MotherPrefillQuestionCodes.MOBILE_NETWORK_AVAILABILITY, socioDemographics.mobileNetworkAvailability)
+      writeLookup(MotherPrefillQuestionCodes.EDUCATION_LEVEL, socioDemographics.educationLevel)
+      writeLookup(MotherPrefillQuestionCodes.PARTNER_EDUCATION_LEVEL, socioDemographics.partnerEducationLevel)
+      writeLookup(MotherPrefillQuestionCodes.PARTNER_OCCUPATION, socioDemographics.partnerOccupation)
+      writeLookup(MotherPrefillQuestionCodes.MIGRATION_PATTERN, socioDemographics.migrationPattern)
+      writeLookup(MotherPrefillQuestionCodes.MONTHLY_INCOME, socioDemographics.monthlyIncome)
+      writeLookup(MotherPrefillQuestionCodes.RELIGION, socioDemographics.religion)
+      writeLookup(MotherPrefillQuestionCodes.SOCIAL_CATEGORY, socioDemographics.socialCategory)
     }
 
     return Result(answers = next, prefilledCodes = written)
@@ -145,6 +197,14 @@ object MotherPrefill {
     val geoType = GeographyQuestionCodes.QUESTION_CODE_TO_GEO_TYPE[questionCode] ?: return false
     return geography.any { it.geographyUnitId == unitId && it.geoType == geoType }
   }
+
+  /** [questionCode]'s own `(value_code, label)` option pairs from the live [formSchema] — empty
+   * (never a hardcoded fallback list) when the question isn't in the schema, so a renamed or removed
+   * question simply stops matching instead of writing a code the current form no longer defines. */
+  private fun optionsFor(questionCode: String, formSchema: List<FormFieldSchema>): List<Pair<String, String>> =
+    formSchema.firstOrNull { it.questionCode == questionCode }
+      ?.options.orEmpty()
+      .map { it.valueCode to it.label }
 
   private const val VALUE_YES = "yes"
 }

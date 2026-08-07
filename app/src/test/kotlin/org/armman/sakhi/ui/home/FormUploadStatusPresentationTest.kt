@@ -29,10 +29,11 @@ class FormUploadStatusPresentationTest {
   ) = FormUploadRecord(localBeneficiaryId = id, formCode = formCode, syncStatus = status, createdAtEpochMillis = 0L)
 
   @Test
-  fun `mother and child registration get distinct category labels`() {
-    // Both queues now feed this modal (UploadRecordsSource merges them), so a shared label would
-    // make two different categories indistinguishable to the Sakhi.
-    assertNotEquals(categoryLabelRes("MOTHER_REGISTRATION"), categoryLabelRes("CHILD_REGISTRATION"))
+  fun `mother and child registration now share the same merged Registration label`() {
+    // Mother and Children Register drafts are presented as one "Registration" card in this modal
+    // (they remain two distinct form codes and two distinct sync queues everywhere else) — a
+    // shared label here is the point of the merge, not an accident.
+    assertEquals(categoryLabelRes("MOTHER_REGISTRATION"), categoryLabelRes("CHILD_REGISTRATION"))
   }
 
   @Test
@@ -60,13 +61,33 @@ class FormUploadStatusPresentationTest {
 
     assertEquals(1, categories.size)
     val summary = categories.single()
-    assertEquals("MOTHER_REGISTRATION", summary.formCode)
+    assertEquals("REGISTRATION", summary.formCode)
     assertEquals(2, summary.syncedCount)
     assertEquals(3, summary.totalCount)
   }
 
   @Test
-  fun `records with different form codes group into separate category summaries`() {
+  fun `mother and child registration records merge into one Registration category`() {
+    // The actual point of the merge: a Mother Registration draft and a Children Register draft
+    // must land in the SAME summary with combined counts, not two cards.
+    val records = listOf(
+      record("m1", EnrollmentSyncStatus.SYNCED, formCode = "MOTHER_REGISTRATION"),
+      record("m2", EnrollmentSyncStatus.SYNCED, formCode = "MOTHER_REGISTRATION"),
+      record("m3", EnrollmentSyncStatus.PENDING, formCode = "MOTHER_REGISTRATION"),
+      record("c1", EnrollmentSyncStatus.SYNCED, formCode = "CHILD_REGISTRATION"),
+    )
+
+    val categories = groupUploadRecordsByCategory(records)
+
+    assertEquals(1, categories.size)
+    val summary = categories.single()
+    assertEquals("REGISTRATION", summary.formCode)
+    assertEquals(3, summary.syncedCount)
+    assertEquals(4, summary.totalCount)
+  }
+
+  @Test
+  fun `a form code outside the registration family still gets its own category`() {
     val records = listOf(
       record("a", EnrollmentSyncStatus.SYNCED, formCode = "MOTHER_REGISTRATION"),
       record("b", EnrollmentSyncStatus.PENDING, formCode = "REFERRAL_FORM"),
@@ -75,7 +96,7 @@ class FormUploadStatusPresentationTest {
     val categories = groupUploadRecordsByCategory(records)
 
     assertEquals(2, categories.size)
-    assertEquals(setOf("MOTHER_REGISTRATION", "REFERRAL_FORM"), categories.map { it.formCode }.toSet())
+    assertEquals(setOf("REGISTRATION", "REFERRAL_FORM"), categories.map { it.formCode }.toSet())
   }
 
   // --- categoryIconKind: the approved priority rule --------------------------------------------
@@ -126,6 +147,21 @@ class FormUploadStatusPresentationTest {
   @Test
   fun `failure wins even when everything else is untouched`() {
     val kind = categoryIconKind(listOf(EnrollmentSyncStatus.PENDING, EnrollmentSyncStatus.FAILED))
+    assertEquals(UploadStatusIconKind.NEEDS_ATTENTION, kind)
+  }
+
+  @Test
+  fun `a failure in the child queue alone still marks the merged Registration category as needing attention`() {
+    // The pre-merge rule ("a failure anywhere in the category wins") must still hold once mother
+    // and child records share a category — a child-side failure must not be hidden by mother
+    // successes.
+    val kind = categoryIconKind(
+      listOf(
+        EnrollmentSyncStatus.SYNCED, // mother
+        EnrollmentSyncStatus.SYNCED, // mother
+        EnrollmentSyncStatus.FAILED, // child
+      ),
+    )
     assertEquals(UploadStatusIconKind.NEEDS_ATTENTION, kind)
   }
 

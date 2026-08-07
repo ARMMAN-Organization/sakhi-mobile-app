@@ -16,11 +16,13 @@ import org.armman.sakhi.data.enrollment.DuplicateOutcome
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.DynamicFormSubmitResult
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormCrossFieldRule
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
 import org.armman.sakhi.data.forms.FormGeographyUnit
 import org.armman.sakhi.data.forms.FormObstetricRuleset
 import org.armman.sakhi.data.forms.FormUploadRecord
+import org.armman.sakhi.data.forms.FormVisibleWhen
 import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.FormsRepository
 import org.armman.sakhi.data.forms.GeographyFieldOptionsResolver
@@ -28,6 +30,7 @@ import org.armman.sakhi.data.forms.LMP_DATE_QUESTION_CODE
 import org.armman.sakhi.data.forms.REGISTRATION_DATE_QUESTION_CODE
 import org.armman.sakhi.data.forms.REGISTRATION_DATE_QUESTION_CODE_CORRECTED
 import org.armman.sakhi.data.forms.SubmitErrorCopy
+import org.armman.sakhi.data.forms.TdDoseQuestionCodes
 import org.armman.sakhi.data.geography.GeographyRepository
 import org.armman.sakhi.data.geography.GeographyUnit
 import org.armman.sakhi.data.geography.SakhiAssignment
@@ -155,13 +158,14 @@ class DynamicMotherRegistrationViewModelTest {
     draftRepository: FakeDraftRepository = FakeDraftRepository(),
     geography: List<FormGeographyUnit>? = null,
     projectName: String? = null,
+    validationJson: List<FormCrossFieldRule> = emptyList(),
   ): DynamicMotherRegistrationViewModel {
     val version = FormVersion(
       id = "v6",
       formDefinitionId = "def-1",
       versionNo = "v6",
       schemaJson = fields,
-      validationJson = emptyList(),
+      validationJson = validationJson,
       effectiveFrom = "2026-07-21T00:00:00Z",
       effectiveTo = null,
       status = "PUBLISHED",
@@ -208,6 +212,23 @@ class DynamicMotherRegistrationViewModelTest {
     val codes = vm.visibleFields().map { it.questionCode }
 
     assertFalse(codes.contains("beneficiary_id"))
+    assertTrue(codes.contains("mobile_number"))
+  }
+
+  @Test
+  fun `unique_id and project_name are never in visibleFields`() = runTest {
+    val vm = viewModel(
+      listOf(
+        field("unique_id", section = "Personal Info", inputType = "text", computedFrom = "UNIQUE_ID"),
+        field("project_name", section = "Personal Info", inputType = "select"),
+        field("mobile_number", section = "Personal Info"),
+      ),
+    )
+
+    val codes = vm.visibleFields().map { it.questionCode }
+
+    assertFalse(codes.contains("unique_id"))
+    assertFalse(codes.contains("project_name"))
     assertTrue(codes.contains("mobile_number"))
   }
 
@@ -364,6 +385,113 @@ class DynamicMotherRegistrationViewModelTest {
       vm.registrationDate,
     ).toString()
     assertEquals(expectedAge, vm.uiState.value.answers.valueOf("age_of_the_beneficiary"))
+  }
+
+  @Test
+  fun `trimester_of_preganancy auto-fills from LMP instead of accepting typed digits`() = runTest {
+    // Live schema declares this as a plain input_type "text" field with no computedFrom (see
+    // TRIMESTER_QUESTION_CODE's doc) — production data shows Sakhis typing raw digits ("666",
+    // "55665") into it. This is the reported bug: it should derive from LMP like EDD/gestational
+    // age, not be Sakhi-entered at all.
+    val vm = viewModel(
+      listOf(
+        field("lmp_date", section = "Personal Info", inputType = "date"),
+        field("trimester_of_preganancy", section = "Health History", required = true, inputType = "text"),
+      ),
+    )
+
+    // registrationDate defaults to "today"; pick an LMP ~20 weeks back so it lands in the 2nd
+    // trimester (14-27w) regardless of what "today" resolves to in CI.
+    val lmp = vm.registrationDate.minusWeeks(20)
+    vm.setAnswer("lmp_date", lmp.toString())
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals("2", vm.uiState.value.answers.valueOf("trimester_of_preganancy"))
+  }
+
+  @Test
+  fun `dropping Gravida to 1 resets the now-hidden obstetric fields to zero`() = runTest {
+    // Reported bug: Still Births = "1" while Gravida = 2, then Gravida dropped to 1 (hiding
+    // Para/Living children/Abortions/Still births/Dead children). The stale "1" used to survive
+    // in FormAnswers and collide with FormObstetricRuleset's Gravida-total check with no field
+    // left on screen to fix. See FormHiddenFieldReset.
+    // `gte` is inclusive, so the block is gated at 2 — that is what makes 2 -> 1 hide it.
+    val gravidaGate = FormVisibleWhen(field = "gravida_total_number_of_pregnancies", value = "2", operator = "gte")
+    val vm = viewModel(
+      listOf(
+        field("gravida_total_number_of_pregnancies", section = "Health History", inputType = "number"),
+        FormFieldSchema(
+          label = "Still Births",
+          required = true,
+          inputTypeRaw = "number",
+          questionCode = FormObstetricRuleset.STILL_BIRTHS,
+          section = "Health History",
+          visibleWhen = gravidaGate,
+        ),
+      ),
+    )
+
+    vm.setAnswer("gravida_total_number_of_pregnancies", "2")
+    vm.setAnswer(FormObstetricRuleset.STILL_BIRTHS, "1")
+    assertEquals("1", vm.uiState.value.answers.valueOf(FormObstetricRuleset.STILL_BIRTHS))
+
+    vm.setAnswer("gravida_total_number_of_pregnancies", "1")
+
+    assertEquals("0", vm.uiState.value.answers.valueOf(FormObstetricRuleset.STILL_BIRTHS))
+    // The field is hidden now, but no longer flagged with a stale error either.
+    assertTrue(vm.visibleFields().none { it.questionCode == FormObstetricRuleset.STILL_BIRTHS })
+  }
+
+  @Test
+  fun `checking Td-1 reveals its date field, which then blocks submit until answered`() = runTest {
+    // Q44 end-to-end: the multiselect gates the date field's visibility via the new `contains`
+    // operator, and once visible the date field is conditionally required even though the schema
+    // itself declares it required:false (TdDoseQuestionCodes).
+    val tdDoseField = FormFieldSchema(
+      label = "Has the women received Td dose ?",
+      required = true,
+      inputTypeRaw = "multiselect_date",
+      questionCode = TdDoseQuestionCodes.TD_DOSE_QUESTION_CODE,
+      section = "Health History",
+    )
+    val td1DateField = FormFieldSchema(
+      label = "Td-1 date",
+      required = false,
+      inputTypeRaw = "date",
+      questionCode = TdDoseQuestionCodes.TD_1_DATE_QUESTION_CODE,
+      section = "Health History",
+      visibleWhen = FormVisibleWhen(
+        field = TdDoseQuestionCodes.TD_DOSE_QUESTION_CODE,
+        value = TdDoseQuestionCodes.TD_1_DATE_QUESTION_CODE,
+        operator = "contains",
+      ),
+    )
+    val vm = viewModel(listOf(tdDoseField, td1DateField))
+
+    // Not checked yet: the date field is hidden and doesn't block submit on its own.
+    assertTrue(vm.visibleFields().none { it.questionCode == TdDoseQuestionCodes.TD_1_DATE_QUESTION_CODE })
+
+    vm.setMultiAnswer(TdDoseQuestionCodes.TD_DOSE_QUESTION_CODE, listOf(TdDoseQuestionCodes.TD_1_DATE_QUESTION_CODE))
+    dispatcher.scheduler.advanceUntilIdle()
+
+    // Now visible, and blocks submit until a date is entered even though required:false.
+    assertTrue(vm.visibleFields().any { it.questionCode == TdDoseQuestionCodes.TD_1_DATE_QUESTION_CODE })
+    assertFalse(vm.isReadyToSubmit())
+
+    vm.setAnswer(TdDoseQuestionCodes.TD_1_DATE_QUESTION_CODE, "2026-07-01")
+    dispatcher.scheduler.advanceUntilIdle()
+    assertTrue(vm.isReadyToSubmit())
+
+    // Unchecking Td-1 hides the date field again AND clears the stale answer (FormHiddenFieldReset
+    // already covers this generically, but Td dose is the new case that exercises it).
+    vm.setMultiAnswer(TdDoseQuestionCodes.TD_DOSE_QUESTION_CODE, emptyList())
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertTrue(vm.visibleFields().none { it.questionCode == TdDoseQuestionCodes.TD_1_DATE_QUESTION_CODE })
+    assertNull(vm.uiState.value.answers.valueOf(TdDoseQuestionCodes.TD_1_DATE_QUESTION_CODE))
+    // The Td-dose question itself is required (row 44: "Mandatory") and is now blank again, so
+    // submit is blocked on THAT — not on the (correctly cleared, now-hidden) date field.
+    assertFalse(vm.isReadyToSubmit())
   }
 
   @Test
@@ -536,6 +664,80 @@ class DynamicMotherRegistrationViewModelTest {
 
     // unique_id's computedFrom formula is unconfirmed (returns null) — it must not permanently
     // block submission just because it's marked required.
+    assertTrue(vm.isReadyToSubmit())
+  }
+
+  // --- CR-037: date_of_birth / age_of_the_beneficiary split -------------------------------------
+
+  private fun ageFields() = listOf(
+    field("date_of_birth", section = "Personal Info", required = false, inputType = "date"),
+    field(
+      "age_of_the_beneficiary",
+      section = "Personal Info",
+      required = false,
+      inputType = "number",
+      computedFrom = "AGE_FROM_DOB",
+    ),
+  )
+
+  private val anyOfRequiredAgeRule = FormCrossFieldRule(
+    rule = "ANY_OF_REQUIRED",
+    fields = listOf("date_of_birth", "age_of_the_beneficiary"),
+  )
+
+  @Test
+  fun `CR-037 isReadyToSubmit blocks when neither date_of_birth nor age is answered`() = runTest {
+    val vm = viewModel(
+      ageFields() + field("mobile_number", section = "Personal Info", required = false),
+      validationJson = listOf(anyOfRequiredAgeRule),
+    )
+
+    assertFalse(vm.isReadyToSubmit())
+  }
+
+  @Test
+  fun `CR-037 isReadyToSubmit passes once only age_of_the_beneficiary is typed directly`() = runTest {
+    val vm = viewModel(ageFields(), validationJson = listOf(anyOfRequiredAgeRule))
+
+    vm.setAnswer("age_of_the_beneficiary", "25")
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertTrue(vm.isReadyToSubmit())
+    // Nothing derives DOB from age, so it legitimately stays blank.
+    assertNull(vm.uiState.value.answers.valueOf("date_of_birth"))
+  }
+
+  @Test
+  fun `CR-037 a manually-typed age survives an unrelated answer change when DOB is blank`() = runTest {
+    // Regression guard: recomputeDerivedFields runs on every setAnswer call. Before this fix, its
+    // generic computedFrom loop would recompute AGE_FROM_DOB from the (blank) date_of_birth answer,
+    // get null back, and overwrite the Sakhi's typed age with nothing — on every keystroke anywhere
+    // else in the form.
+    val vm = viewModel(
+      ageFields() + field("mobile_number", section = "Personal Info", required = false),
+      validationJson = listOf(anyOfRequiredAgeRule),
+    )
+
+    vm.setAnswer("age_of_the_beneficiary", "30")
+    dispatcher.scheduler.advanceUntilIdle()
+    vm.setAnswer("mobile_number", "9876543210")
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals("30", vm.uiState.value.answers.valueOf("age_of_the_beneficiary"))
+  }
+
+  @Test
+  fun `CR-037 answering date_of_birth computes and takes over age_of_the_beneficiary`() = runTest {
+    val vm = viewModel(ageFields(), validationJson = listOf(anyOfRequiredAgeRule))
+
+    // A manually-typed age, then DOB is answered afterwards — the derived value must win, per
+    // AGE_FROM_DOB_QUESTION_CODES' doc (this field is backend/derivation-owned once DOB exists).
+    vm.setAnswer("age_of_the_beneficiary", "99")
+    dispatcher.scheduler.advanceUntilIdle()
+    vm.setAnswer("date_of_birth", vm.registrationDate.minusYears(25).toString())
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals("25", vm.uiState.value.answers.valueOf("age_of_the_beneficiary"))
     assertTrue(vm.isReadyToSubmit())
   }
 

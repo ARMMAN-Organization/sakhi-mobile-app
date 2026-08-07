@@ -140,9 +140,7 @@ class EnrollmentApiMapperTest {
     assertTrue(result.isSuccess)
     val dto = result.getOrThrow()
 
-    assertEquals("Jane", dto.pii.firstName)
-    assertEquals(null, dto.pii.middleName) // blank middleName is sent as null, not ""
-    assertEquals("Doe", dto.pii.lastName)
+    assertEquals("Jane Doe", dto.pii.fullName)
     assertEquals("9876543210", dto.pii.phone)
     assertEquals("1998-05-14", dto.pii.dateOfBirth)
     assertEquals("FEMALE", dto.pii.sex)
@@ -295,13 +293,13 @@ class EnrollmentApiMapperTest {
   }
 
   @Test
-  fun `blank optional name and address fields are omitted as null, not empty strings`() = runTest {
+  fun `a blank middle name is skipped in the joined fullName, not left as a double space`() = runTest {
     sessionStore.saveSession(session)
     val record = validRecord().copy(middleName = "")
 
     val dto = mapper.toCreateBeneficiaryRequest(record).getOrThrow()
 
-    assertEquals(null, dto.pii.middleName) // blank middleName is sent as null, not ""
+    assertEquals("Jane Doe", dto.pii.fullName)
   }
 
   @Test

@@ -15,6 +15,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
@@ -344,10 +346,18 @@ private fun LmpKnownRow(lmpKnown: Boolean, onLmpKnown: (Boolean) -> Unit) {
 
 @Composable
 private fun RadioOption(label: String, selected: Boolean, onClick: () -> Unit) {
+  val focusManager = LocalFocusManager.current
+  val keyboardController = LocalSoftwareKeyboardController.current
   Row(
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing),
-    modifier = Modifier.clickable(onClick = onClick),
+    modifier = Modifier.clickable {
+      // A still-focused AppTextField above (e.g. Address) otherwise keeps the keyboard able to
+      // reappear even though this Yes/No radio isn't a text input — see FormFields.SelectableRow.
+      focusManager.clearFocus()
+      keyboardController?.hide()
+      onClick()
+    },
   ) {
     Icon(
       painter = painterResource(

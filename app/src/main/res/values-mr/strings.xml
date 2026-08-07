@@ -17,8 +17,7 @@
   <!-- Forms Uploaded sync-status modal -->
   <string name="home_upload_modal_title">%1$d/%2$d फॉर्म अपलोड झाले</string>
   <string name="home_upload_modal_empty">अद्याप कोणताही फॉर्म सबमिट केलेला नाही.</string>
-  <string name="home_upload_modal_form_label">माता नोंदणी</string>
-  <string name="home_upload_modal_child_form_label">बाल नोंदणी</string>
+  <string name="home_upload_modal_registration_form_label">नोंदणी</string>
   <string name="home_upload_modal_category_forms">%1$d/%2$d फॉर्म</string>
   <string name="home_upload_status_synced">अपलोड झाले</string>
   <string name="home_upload_status_pending">प्रलंबित</string>
@@ -255,6 +254,8 @@
   <string name="enrollment_error_lmp_future">LMP भविष्यातील तारीख असू शकत नाही</string>
   <string name="enrollment_error_lmp_recent">LMP नोंदणीच्या ३० दिवसांपेक्षा जास्त आधीची असावी</string>
   <string name="enrollment_error_lmp_old">LMP नोंदणीच्या २४० दिवसांच्या आतील असावी</string>
+  <string name="enrollment_error_anc1_date_not_after_lmp">ANC-1 ची तारीख LMP नंतरची असावी</string>
+  <string name="enrollment_error_anc1_date_too_late">ANC-1 ची तारीख नोंदणीच्या तारखेपासून ५ दिवसांपेक्षा जास्त असू शकत नाही</string>
   <string name="enrollment_error_name_chars">फक्त अक्षरे आणि रिकाम्या जागांना परवानगी आहे</string>
   <string name="enrollment_error_age_range">वय १० ते ५० वर्षांदरम्यान असावे</string>
   <string name="enrollment_error_mobile">वैध १० अंकी मोबाईल क्रमांक भरा</string>

@@ -19,6 +19,9 @@ data class BeneficiaryPiiDto(
   val stateId: String?,
   val districtId: String?,
   val talukaId: String?,
+  /** Rows 21/22 (CR-032) — only present on the detail response, never on the list row. */
+  val address: String? = null,
+  val mobileNumber: String? = null,
 )
 
 /** One row of `GET /beneficiaries`. Only the properties CR-031 reads are modelled — Gson leaves
@@ -46,9 +49,48 @@ data class ConsentRecordDto(
   val consentDate: String?,
 )
 
+/**
+ * One already-resolved lookup inside `socioDemographics` (CR-032) — `beneficiary-service` looks the
+ * `*LookupId` up server-side and reports back its own `categoryCode`/`valueCode`/`label`. The app
+ * never reads [valueCode] directly: it is upper-snake-case in `beneficiary-service`'s convention and
+ * never matches the CHILD_REGISTRATION form schema's own lower-snake-case `value_code` byte-for-byte
+ * (confirmed against the schema for all 8 fields this DTO covers). [label] is what
+ * [org.armman.sakhi.data.lookup.LookupLabelMatcher] matches against the form schema's own option
+ * labels instead.
+ */
+data class ResolvedLookupDto(
+  val categoryCode: String?,
+  val valueCode: String?,
+  val label: String?,
+)
+
+/**
+ * `socioDemographics` block of `GET /beneficiaries/:id` (CR-032) — rows 23–34 of the mother's
+ * socio-demographic details. Every property is independently nullable: a Sakhi may not have
+ * answered every question at the mother's own registration.
+ */
+data class SocioDemographicsDto(
+  val phoneOwner: ResolvedLookupDto?,
+  val mobileNetworkAvailability: ResolvedLookupDto?,
+  val educationLevel: ResolvedLookupDto?,
+  val partnerEducationLevel: ResolvedLookupDto?,
+  val partnerOccupation: ResolvedLookupDto?,
+  val migrationPattern: ResolvedLookupDto?,
+  val monthlyIncome: ResolvedLookupDto?,
+  val religion: ResolvedLookupDto?,
+  val socialCategory: ResolvedLookupDto?,
+  val yearsInVillage: Int?,
+  val familyMembersCount: Int?,
+  val childrenUnder5Count: Int?,
+)
+
 data class BeneficiaryDetailDto(
   val id: String?,
   val consentRecords: List<ConsentRecordDto>?,
+  /** Only [BeneficiaryPiiDto.address]/[BeneficiaryPiiDto.mobileNumber] are read from here — every
+   * other `pii` property CR-031 needs already comes from the list row. */
+  val pii: BeneficiaryPiiDto? = null,
+  val socioDemographics: SocioDemographicsDto? = null,
 )
 
 data class BeneficiaryDetailResponseDto(
