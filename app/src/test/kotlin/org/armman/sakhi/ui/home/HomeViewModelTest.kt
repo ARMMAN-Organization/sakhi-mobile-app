@@ -1,5 +1,6 @@
 package org.armman.sakhi.ui.home
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -220,6 +221,18 @@ class HomeViewModelTest {
     dispatcher.scheduler.advanceUntilIdle()
 
     assertEquals(HomeUiState.Error, viewModel.uiState.value)
+  }
+
+  @Test
+  fun `a cancelled load propagates instead of resolving to Error`() = runTest(dispatcher) {
+    // CancellationException is an Exception subclass, so a bare `catch (e: Exception)` would
+    // swallow it and paint HomeUiState.Error on a screen the Sakhi is navigating away from,
+    // breaking structured concurrency. It must be rethrown, leaving the state as it was.
+    repository.error = CancellationException("scope cancelled")
+    val viewModel = viewModel()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(HomeUiState.Loading, viewModel.uiState.value)
   }
 
   @Test

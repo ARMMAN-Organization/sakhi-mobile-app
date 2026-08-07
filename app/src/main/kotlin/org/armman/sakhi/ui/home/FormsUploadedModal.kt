@@ -187,7 +187,15 @@ private fun UploadCategoryCard(summary: FormCategorySummary) {
 }
 
 /** Renders the icon for [kind] — see [categoryIconKind] for how a category's records aggregate
- * into this. */
+ * into this.
+ *
+ * KNOWN DESIGN DEVIATION (tracked, not silent — per the design-fidelity checklist): PENDING and
+ * SYNCING use the Material [Icons.Filled.Refresh] vector rather than a design `ic_*` drawable,
+ * unlike SYNCED/NEEDS_ATTENTION which use `ic_check_circle`/`ic_warning_circle`. The Revamp icon
+ * set ships no sync/refresh/loop drawable today, so this is a deliberate stand-in; swap both arms
+ * for the real asset when design publishes one. Tint and size already follow the design tokens, so
+ * the replacement is drawable-only.
+ */
 @Composable
 private fun StatusIcon(kind: UploadStatusIconKind) {
   when (kind) {

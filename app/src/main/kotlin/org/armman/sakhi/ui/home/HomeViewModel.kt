@@ -3,6 +3,7 @@ package org.armman.sakhi.ui.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -127,6 +128,11 @@ class HomeViewModel @Inject constructor(
     viewModelScope.launch {
       _uiState.value = try {
         HomeUiState.Success(dashboardRepository.getSummary())
+      } catch (e: CancellationException) {
+        // Cancellation is not a failure: it means this coroutine's scope is going away (the Sakhi
+        // navigated off the dashboard mid-load). Swallowing it into HomeUiState.Error would both
+        // break structured concurrency and paint a spurious error on a screen that is leaving.
+        throw e
       } catch (e: Exception) {
         // Generic error state for the UI; technical detail must not leak to users.
         HomeUiState.Error
