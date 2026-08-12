@@ -353,27 +353,39 @@ class FormDateRulesetTest {
   }
 
   @Test
-  fun `lmp at both window bounds is accepted`() {
+  fun `lmp at the near window bound is accepted`() {
     assertNull(violationForLmp(registrationDate.minusDays(FormDateRuleset.LMP_MIN_DAYS_BEFORE_REGISTRATION)))
-    assertNull(violationForLmp(registrationDate.minusDays(FormDateRuleset.LMP_MAX_DAYS_BEFORE_REGISTRATION)))
+    // The far bound (LMP_MAX_DAYS_BEFORE_REGISTRATION, 239 days / ~34 weeks) is no longer accepted
+    // on its own: it is well beyond GESTATIONAL_AGE_CEILING_WEEKS (24 weeks), so it now reports
+    // GESTATIONAL_AGE_BEYOND_ENROLLMENT_WINDOW instead of null — see the "gestational age ceiling"
+    // section below for that behavior.
   }
 
   @Test
-  fun `lmp one day outside each window bound is rejected`() {
+  fun `lmp one day past the near window bound is rejected`() {
     val tooRecent = registrationDate.minusDays(FormDateRuleset.LMP_MIN_DAYS_BEFORE_REGISTRATION - 1)
-    val tooOld = registrationDate.minusDays(FormDateRuleset.LMP_MAX_DAYS_BEFORE_REGISTRATION + 1)
-
     assertEquals(FormDateRuleset.Violation.LMP_TOO_RECENT, violationForLmp(tooRecent))
-    assertEquals(FormDateRuleset.Violation.LMP_TOO_OLD, violationForLmp(tooOld))
+  }
+
+  @Test
+  fun `lmp one day past the far window bound now reports the gestational age ceiling, not LMP_TOO_OLD`() {
+    // At 240 days (~34 weeks) this is both "too old" for data-sanity AND beyond the 24-week
+    // enrollment ceiling — GESTATIONAL_AGE_BEYOND_ENROLLMENT_WINDOW is the more specific, more
+    // useful reason, so it takes priority (see violationFor's LMP branch ordering).
+    val tooOld = registrationDate.minusDays(FormDateRuleset.LMP_MAX_DAYS_BEFORE_REGISTRATION + 1)
+    assertEquals(FormDateRuleset.Violation.GESTATIONAL_AGE_BEYOND_ENROLLMENT_WINDOW, violationForLmp(tooOld))
   }
 
   @Test
   fun `lmp window is measured from the answered registration date`() {
     val answeredRegistration = registrationDate.minusDays(10)
-    // Exactly on the oldest allowed bound relative to the ANSWERED registration date. Measured
-    // against today instead it would be 249 days back — past the 239-day limit — so this only
-    // passes if the answered registration date is the reference point.
-    val lmp = answeredRegistration.minusDays(FormDateRuleset.LMP_MAX_DAYS_BEFORE_REGISTRATION)
+    // Exactly on the gestational-age ceiling (24 weeks = 168 days) relative to the ANSWERED
+    // registration date. Measured against today instead it would be 178 days back — past the
+    // 168-day ceiling — so this only passes if the answered registration date is the reference
+    // point. (Rescaled from the old LMP_MAX_DAYS_BEFORE_REGISTRATION-based boundary: that one is
+    // now beyond the ceiling either way it's measured, so it could no longer isolate this behavior.)
+    val ceilingDays = FormDateRuleset.GESTATIONAL_AGE_CEILING_WEEKS * 7
+    val lmp = answeredRegistration.minusDays(ceilingDays)
 
     val violation = FormDateRuleset.violationFor(
       LMP_DATE_QUESTION_CODE,
@@ -386,13 +398,17 @@ class FormDateRulesetTest {
 
     assertNull(violation)
     // Guard the premise: without the answered registration date, the same LMP is out of window.
-    assertEquals(FormDateRuleset.Violation.LMP_TOO_OLD, violationForLmp(lmp))
+    assertEquals(
+      FormDateRuleset.Violation.GESTATIONAL_AGE_BEYOND_ENROLLMENT_WINDOW,
+      violationForLmp(lmp),
+    )
   }
 
   @Test
   fun `a future registration date does not widen the lmp window`() {
     // Guards against one bad answer loosening another: an LMP 250 days before *today* is out of
-    // window and must stay out even though the (invalid) registration date would allow it.
+    // window and must stay out even though the (invalid) registration date would allow it. Reports
+    // the gestational-age ceiling rather than LMP_TOO_OLD — same priority as every other case here.
     val violation = FormDateRuleset.violationFor(
       LMP_DATE_QUESTION_CODE,
       answers(
@@ -402,7 +418,48 @@ class FormDateRulesetTest {
       registrationDate,
     )
 
-    assertEquals(FormDateRuleset.Violation.LMP_TOO_OLD, violation)
+    assertEquals(FormDateRuleset.Violation.GESTATIONAL_AGE_BEYOND_ENROLLMENT_WINDOW, violation)
+  }
+
+  // --- Gestational-age enrollment ceiling: 0-6 months (24 weeks) at registration ---------------
+  // Reported bug: "Application allows registration of a pregnant woman beyond the permitted 0-6
+  // months pregnancy enrollment period." (LMP 11-Dec-2025, registration 07-Aug-2026, ~34 weeks.)
+
+  @Test
+  fun `GA-1 gestational age at exactly the 24-week ceiling is accepted`() {
+    val lmp = registrationDate.minusDays(FormDateRuleset.GESTATIONAL_AGE_CEILING_WEEKS * 7)
+    assertNull(violationForLmp(lmp))
+  }
+
+  @Test
+  fun `GA-2 gestational age one week past the ceiling is rejected`() {
+    val lmp = registrationDate.minusDays((FormDateRuleset.GESTATIONAL_AGE_CEILING_WEEKS + 1) * 7)
+    assertEquals(FormDateRuleset.Violation.GESTATIONAL_AGE_BEYOND_ENROLLMENT_WINDOW, violationForLmp(lmp))
+  }
+
+  @Test
+  fun `GA-3 the reported repro - LMP 11-Dec-2025 registered 07-Aug-2026 (about 34 weeks) is rejected`() {
+    val reportedRegistrationDate = LocalDate.of(2026, 8, 7)
+    val lmp = LocalDate.of(2025, 12, 11)
+
+    val violation = FormDateRuleset.violationFor(
+      LMP_DATE_QUESTION_CODE,
+      answers(LMP_DATE_QUESTION_CODE to lmp.toString()),
+      reportedRegistrationDate,
+    )
+
+    assertEquals(FormDateRuleset.Violation.GESTATIONAL_AGE_BEYOND_ENROLLMENT_WINDOW, violation)
+  }
+
+  @Test
+  fun `GA-4 allDatesValid rejects a form whose lmp is beyond the gestational age ceiling`() {
+    val fields = listOf(dateField(LMP_DATE_QUESTION_CODE))
+    val tooFarAlong = answers(
+      LMP_DATE_QUESTION_CODE to
+        registrationDate.minusDays((FormDateRuleset.GESTATIONAL_AGE_CEILING_WEEKS + 1) * 7).toString(),
+    )
+
+    assertFalse(FormDateRuleset.allDatesValid(fields, tooFarAlong, registrationDate))
   }
 
   // --- ANC1 completion date (row 42): strictly after LMP, <=5 days after registration ----------

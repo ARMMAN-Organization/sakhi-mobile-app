@@ -96,9 +96,16 @@ const val TRIMESTER_QUESTION_CODE = "trimester_of_preganancy"
  * `number` field, `mother_age` — plain, `numericRange 10..50`, no `computedFrom` — and the spec's
  * "either DOB or age" requirement is enforced entirely by a schema `ANY_OF_REQUIRED` rule over
  * `["mother_date_of_birth", "mother_age"]` (handled generically by [FormCrossFieldValidator], same
- * mechanism as CR-037's mother-form pair — no per-field code needed for that part). Unlike
- * [AGE_FROM_DOB_QUESTION_CODES], `mother_age` is never derived/read-only: both fields stay
- * independently Sakhi-editable at all times. See
+ * mechanism as CR-037's mother-form pair — no per-field code needed for that part).
+ *
+ * Per the reported bug "Age field is editable even when Mother DOB is already fetched using
+ * Beneficiary ID" (2026-08-09), `mother_age` is no longer unconditionally free-typed: unlike
+ * [AGE_FROM_DOB_QUESTION_CODES] it still has no `computedFrom` (CR-039's schema is unchanged,
+ * and it stays independently Sakhi-editable on the DIRECT path, per CR-039's "either DOB or
+ * age" design), but [org.armman.sakhi.data.motherlink.MotherPrefill.apply] now derives and
+ * writes it whenever a registered mother is linked, and the host screen renders it read-only
+ * for as long as it stays prefilled — see
+ * [org.armman.sakhi.data.motherlink.MotherPrefillQuestionCodes.MOTHER_AGE]'s doc. See also
  * `docs/backend-requests/CR-039-child-mother-age-dob-field-regression.md`.
  *
  * The value is the code the PUBLISHED schema uses, verified against the live `active-version`

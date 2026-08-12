@@ -2,6 +2,7 @@ package org.armman.sakhi.data.beneficiary
 
 import kotlinx.coroutines.test.runTest
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
+import org.armman.sakhi.data.childregistration.FakeChildFormDraftDao
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.DynamicFormDraftEntity
 import org.armman.sakhi.data.forms.DynamicFormDraftPayload
@@ -38,6 +39,7 @@ class LocalEnrolmentBaselineRiskTest {
     secureStore = FakeSecureKeyValueStore()
     source = LocalEnrolmentBeneficiarySource(
       draftDao,
+      FakeChildFormDraftDao(),
       secureStore,
       RoomVisitScheduleRepository(FakeVisitScheduleDao()),
       FakeFormsRepository(geography = emptyList()),
@@ -96,8 +98,18 @@ class LocalEnrolmentBaselineRiskTest {
     assertEquals(RiskLevel.HIGH, byId["local-2"])
   }
 
+  /**
+   * CHILD_REGISTRATION never actually lands in `dynamic_form_drafts` in production —
+   * `RoomChildFormDraftRepository` writes exclusively to its own `child_registration_drafts` table
+   * (see [LocalEnrolmentBeneficiarySource]'s class doc for the bug this used to hide: a formCode
+   * check here made it *look* like children were deliberately excluded from this list, when the
+   * real reason no child ever appeared was that this DAO can never see one). What this test
+   * actually guards, now that both stores are read: the mother-side query still only accepts its
+   * own formCode, so a row that shouldn't be in this table doesn't leak onto the list even if one
+   * somehow ended up here.
+   */
   @Test
-  fun `H52 child registration drafts are still filtered out`() = runTest {
+  fun `H52 a foreign formCode in the mother table is not treated as a mother`() = runTest {
     save("local-1", FormAnswers(singleValues = baseAnswers()), formCode = "CHILD_REGISTRATION")
 
     assertTrue(source.getLocalBeneficiaries(TODAY).isEmpty())

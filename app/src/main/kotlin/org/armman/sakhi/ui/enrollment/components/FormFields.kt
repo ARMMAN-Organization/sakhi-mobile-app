@@ -285,9 +285,13 @@ fun AppDateField(
   required: Boolean = false,
   minDate: LocalDate? = null,
   maxDate: LocalDate? = null,
+  /** Every other date field in the app shares the default "dd MMM yyyy" — pass a different
+   * pattern only for a field that's been explicitly asked to look different (e.g. the Visit
+   * Form's "Date of visit", which wants dd-mm-yyyy; bharath, 2026-08-07). */
+  displayPattern: String = "dd MMM yyyy",
 ) {
   val context = LocalContext.current
-  val formatter = remember { DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.getDefault()) }
+  val formatter = remember(displayPattern) { DateTimeFormatter.ofPattern(displayPattern, Locale.getDefault()) }
   val focusManager = LocalFocusManager.current
   val keyboardController = LocalSoftwareKeyboardController.current
   val openPicker = {
@@ -625,14 +629,17 @@ private fun SelectableRow(
   }
 }
 
-/** Read-only derived value (EDD, gestational age) in the field style. */
+/** Read-only derived value (EDD, gestational age) in the field style. [required] shows the red
+ * `*` marker next to the label — used by `GeographyField` for a single-option geography field,
+ * which is still mandatory even though there's nothing left for the Sakhi to pick. */
 @Composable
 fun AppReadOnlyField(
   label: String,
   value: String,
   modifier: Modifier = Modifier,
+  required: Boolean = false,
 ) {
-  FieldFrame(label = label, errorText = null, modifier = modifier) {
+  FieldFrame(label = label, errorText = null, modifier = modifier, required = required) {
     Box(
       contentAlignment = Alignment.CenterStart,
       modifier = Modifier

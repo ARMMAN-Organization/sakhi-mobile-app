@@ -18,6 +18,7 @@
   <string name="home_upload_modal_title">%1$d/%2$d फॉर्म अपलोड झाले</string>
   <string name="home_upload_modal_empty">अद्याप कोणताही फॉर्म सबमिट केलेला नाही.</string>
   <string name="home_upload_modal_registration_form_label">नोंदणी</string>
+  <string name="home_upload_modal_visit_form_label">भेट फॉर्म</string>
   <string name="home_upload_modal_category_forms">%1$d/%2$d फॉर्म</string>
   <string name="home_upload_status_synced">अपलोड झाले</string>
   <string name="home_upload_status_pending">प्रलंबित</string>
@@ -86,6 +87,7 @@
   <string name="beneficiaries_filter_pada">पाडा</string>
   <string name="beneficiaries_filter_risk">जोखीम</string>
   <string name="beneficiaries_empty">सध्याच्या फिल्टरशी जुळणारे लाभार्थी नाहीत.</string>
+  <string name="beneficiaries_empty_no_filters">कोणतेही लाभार्थी आढळले नाहीत.</string>
   <string name="beneficiaries_error_load">लाभार्थी लोड होऊ शकले नाहीत. कृपया पुन्हा प्रयत्न करा.</string>
 
   <!-- Visit Tracker -->
@@ -187,6 +189,7 @@
   <string name="enrollment_consent_play_video">स्वागत व्हिडिओ चालवा</string>
   <string name="enrollment_consent_retake_photo">संमती फॉर्मचा फोटो पुन्हा काढा</string>
   <string name="enrollment_consent_photo_captured">फोटो घेतला आहे</string>
+  <string name="enrollment_consent_photo_preview">कॅप्चर केलेल्या संमती फोटोचे पूर्वावलोकन</string>
   <string name="enrollment_consent_refused">संमती मिळाली नाही — नोंदणी पुढे जाऊ शकत नाही.</string>
   <string name="enrollment_consent_refused_toast">लाभार्थीच्या संमतीशिवाय आम्ही नोंदणी पुढे करू शकत नाही.</string>
   <string name="enrollment_next_personal_info">वैयक्तिक माहिती</string>
@@ -231,13 +234,13 @@
   <string name="enrollment_pi_household_placeholder">संख्या लिहा (२–१५)</string>
   <string name="enrollment_pi_children_under5">कुटुंबातील ५ वर्षांखालील मुले</string>
   <string name="enrollment_pi_children_placeholder">संख्या लिहा</string>
-  <string name="enrollment_pi_state">राज्याचे नाव</string>
-  <string name="enrollment_pi_district">जिल्ह्याचे नाव</string>
-  <string name="enrollment_pi_block">तालुक्याचे नाव</string>
-  <string name="enrollment_pi_village">महसुली गाव/ग्रामपंचायतीचे नाव</string>
-  <string name="enrollment_pi_pada">लाभार्थीच्या पाड्याचे नाव</string>
-  <string name="enrollment_pi_phc">लाभार्थीच्या PHC चे नाव</string>
-  <string name="enrollment_pi_sub_centre">उपकेंद्राचे नाव</string>
+  <string name="enrollment_pi_state">राज्याचे नाव *</string>
+  <string name="enrollment_pi_district">जिल्ह्याचे नाव *</string>
+  <string name="enrollment_pi_block">तालुक्याचे नाव *</string>
+  <string name="enrollment_pi_village">महसुली गाव/ग्रामपंचायतीचे नाव *</string>
+  <string name="enrollment_pi_pada">लाभार्थीच्या पाड्याचे नाव *</string>
+  <string name="enrollment_pi_phc">लाभार्थीच्या PHC चे नाव *</string>
+  <string name="enrollment_pi_sub_centre">उपकेंद्राचे नाव *</string>
   <string name="enrollment_pi_lmp_known">महिलेला तिची LMP माहीत आहे का?</string>
   <string name="enrollment_pi_yes">होय</string>
   <string name="enrollment_pi_no">नाही</string>
@@ -254,6 +257,8 @@
   <string name="enrollment_error_lmp_future">LMP भविष्यातील तारीख असू शकत नाही</string>
   <string name="enrollment_error_lmp_recent">LMP नोंदणीच्या ३० दिवसांपेक्षा जास्त आधीची असावी</string>
   <string name="enrollment_error_lmp_old">LMP नोंदणीच्या २४० दिवसांच्या आतील असावी</string>
+  <!-- MR translation flagged for native QA -->
+  <string name="enrollment_error_gestational_age_ceiling">ही गर्भधारणा ६ महिन्यांपेक्षा (२४ आठवडे) जास्त आहे आणि नोंदणी करता येणार नाही</string>
   <string name="enrollment_error_anc1_date_not_after_lmp">ANC-1 ची तारीख LMP नंतरची असावी</string>
   <string name="enrollment_error_anc1_date_too_late">ANC-1 ची तारीख नोंदणीच्या तारखेपासून ५ दिवसांपेक्षा जास्त असू शकत नाही</string>
   <string name="enrollment_error_name_chars">फक्त अक्षरे आणि रिकाम्या जागांना परवानगी आहे</string>
@@ -369,6 +374,8 @@
   <string name="visit_form_next_health_info">आरोग्य माहिती</string>
   <string name="visit_form_next_referral">संदर्भ</string>
   <string name="visit_form_submit">सबमिट करा</string>
+  <string name="visit_form_submitted">भेट यशस्वीरित्या सबमिट झाली</string>
+  <string name="visit_form_queued_offline">भेट सेव्ह झाली. पुढील Data Upload वेळी ती स्वयंचलितपणे अपलोड होईल.</string>
   <string name="visit_form_exit_title">भेट फॉर्म सोडायचा?</string>
   <string name="visit_form_exit_message">या भेटीत आंशिक जतन नाही — आता सोडल्यास सर्व नोंदी गमावल्या जातील.</string>
   <string name="visit_form_exit_cancel">थांबा</string>

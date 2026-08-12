@@ -29,7 +29,6 @@ data class VisitScheduleUploadDto(
 data class BulkVisitScheduleRequestDto(
   val beneficiaryId: String,
   val generatedByRuleVersionId: String,
-  val generatedAt: String,
   val schedules: List<VisitScheduleUploadDto>,
 )
 

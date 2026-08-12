@@ -38,7 +38,7 @@ private object QuestionCode {
   const val NAME_OF_THE_CHILD = "name_of_the_child"
   const val SEX_OF_CHILD = "sex_of_child"
   const val CHILD_LENGTH_CM = "child_length_at_birth_in_cm"
-  const val CHILD_WEIGHT_KG = "child_weight_at_birth_in_kg"
+  const val CHILD_WEIGHT_KG = ChildRegistrationQuestionCodes.CHILD_WEIGHT_AT_BIRTH_KG
   const val TERM_OF_DELIVERY = "term_of_delivery"
   const val MOBILE_NUMBER = "mobile_number"
   const val ADDRESS = "enter_the_beneficiary_address"

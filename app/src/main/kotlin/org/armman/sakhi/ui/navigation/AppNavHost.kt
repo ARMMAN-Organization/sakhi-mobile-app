@@ -16,7 +16,7 @@ import org.armman.sakhi.ui.home.HomeScreen
 import org.armman.sakhi.ui.login.LoginScreen
 import org.armman.sakhi.ui.previsithealthhistory.PreVisitHealthHistoryScreen
 import org.armman.sakhi.ui.profile.ProfileScreen
-import org.armman.sakhi.ui.visitform.VisitFormScreen
+import org.armman.sakhi.ui.visitform.DynamicVisitFormScreen
 import org.armman.sakhi.ui.visittracker.PadaSelectionScreen
 import org.armman.sakhi.ui.visittracker.PadaVisitsScreen
 
@@ -170,6 +170,13 @@ fun AppNavHost() {
             popUpTo(Routes.ENROLLMENT) { inclusive = true }
           }
         },
+        // "See Visit Form" on the success screen → the child just enrolled. Same destination and
+        // sub-graph-clearing behavior as the mother-registration path's onStartVisitForm.
+        onStartVisitForm = { beneficiaryId ->
+          navController.navigate(Routes.beneficiaryProfile(beneficiaryId)) {
+            popUpTo(Routes.ENROLLMENT) { inclusive = true }
+          }
+        },
         // Consent refused: same exit as a completed registration. Clearing the sub-graph matters
         // more here — system back must not re-enter a form the beneficiary declined.
         onConsentRefused = {
@@ -229,7 +236,7 @@ fun AppNavHost() {
         navArgument("label") { type = NavType.StringType },
       ),
     ) {
-      VisitFormScreen(
+      DynamicVisitFormScreen(
         onBack = { navController.popBackStack() },
         onProfile = { navController.navigate(Routes.PROFILE) },
       )

@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.combine
 import org.armman.sakhi.data.childregistration.ChildFormDraftRepository
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.FormUploadRecord
+import org.armman.sakhi.data.visitform.VisitFormDraftRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -19,6 +20,7 @@ import javax.inject.Singleton
  * Merged here:
  *  - Mother Registration drafts (CR-018)
  *  - Children Register drafts (CR-020)
+ *  - ANC Visit Form drafts (CR-026b)
  *
  * Deliberately **not** merged: the legacy `enrollment_drafts` queue. Its rows carry no `formCode`
  * (see `EnrollmentDraftEntity`), so surfacing them would mean inventing a category label for a
@@ -35,22 +37,24 @@ interface UploadRecordsSource {
 class CombinedUploadRecordsSource @Inject constructor(
   private val dynamicFormDraftRepository: DynamicFormDraftRepository,
   private val childFormDraftRepository: ChildFormDraftRepository,
+  private val visitFormDraftRepository: VisitFormDraftRepository,
 ) : UploadRecordsSource {
 
   /**
-   * [combine] rather than [kotlinx.coroutines.flow.merge]: the UI needs the *union* of both queues
-   * on every emission, not whichever one changed most recently. Both upstreams are Room-backed and
-   * emit their current contents immediately on collection, so combine produces its first value
-   * without waiting for a write on either side.
+   * [combine] rather than [kotlinx.coroutines.flow.merge]: the UI needs the *union* of all three
+   * queues on every emission, not whichever one changed most recently. Every upstream is
+   * Room-backed and emits its current contents immediately on collection, so combine produces its
+   * first value without waiting for a write on any side.
    *
-   * Sorted newest-first to match each repository's own contract, since combining two independently
+   * Sorted newest-first to match each repository's own contract, since combining independently
    * ordered lists doesn't preserve it.
    */
   override fun observeAll(): Flow<List<FormUploadRecord>> =
     combine(
       dynamicFormDraftRepository.observeUploadRecords(),
       childFormDraftRepository.observeUploadRecords(),
-    ) { motherRecords, childRecords ->
-      (motherRecords + childRecords).sortedByDescending { it.createdAtEpochMillis }
+      visitFormDraftRepository.observeUploadRecords(),
+    ) { motherRecords, childRecords, visitRecords ->
+      (motherRecords + childRecords + visitRecords).sortedByDescending { it.createdAtEpochMillis }
     }
 }

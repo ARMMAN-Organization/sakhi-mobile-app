@@ -21,6 +21,24 @@ import javax.inject.Singleton
  * A double-tapped Submit, a retried coroutine, or a flow re-entered after process death must not
  * produce a second series. Guarded per family via [VisitScheduleRepository.hasScheduleOfType],
  * which counts retired rows too — a lapsed ANC series still means ANC has been generated.
+ *
+ * ### GoRules (CR-032), behind one flag
+ * Each `generate…Series`/`generate…Visit` private helper below tries [goRulesAdapter] first when
+ * [GoRulesScheduleFeatureFlag.ENABLED] is on, falling back to the existing Kotlin generator
+ * (still [HardcodedRuleSource]-driven) when the adapter returns null — "no cached rule set yet",
+ * "the pack rejected the request", or the flag being off all take the same fallback path. Nothing
+ * below changes when the flag is off; [goRulesAdapter] defaults to null so every existing test
+ * constructor call keeps compiling unchanged.
+ *
+ * [onHighRiskDetected] is the one exception: per [GoRulesScheduleAdapter.hrVisit]'s own contract, a
+ * null there already means "no HR row, full stop" (covers both "no cached rule" and "the pack
+ * decided against one") — so that path does not fall back to the Kotlin HR generators when the flag
+ * is on. Everything else here always has a Kotlin fallback path.
+ *
+ * [onLmpOrEddApproved] is intentionally left out of this wiring for now — it wasn't part of the
+ * agreed CR-032 coordinator scope. It keeps calling [AncScheduleGenerator] directly even when the
+ * flag is on, so a Supervisor-approved LMP/EDD correction always regenerates via Hardcoded today.
+ * Worth revisiting for symmetry once the Step 1 ngrok trial lands.
  */
 @Singleton
 class VisitScheduleCoordinator @Inject constructor(
@@ -30,6 +48,7 @@ class VisitScheduleCoordinator @Inject constructor(
   private val nnGenerator: NnScheduleGenerator,
   private val incGenerator: IncScheduleGenerator,
   private val ccvGenerator: CcvScheduleGenerator,
+  private val goRulesAdapter: GoRulesScheduleAdapter? = null,
 ) {
 
   /**
@@ -43,7 +62,7 @@ class VisitScheduleCoordinator @Inject constructor(
   suspend fun onMotherEnrolled(context: ScheduleContext): Int {
     if (repository.hasScheduleOfType(context.localBeneficiaryId, VisitCodeType.ANC)) return 0
 
-    val visits = ancGenerator.generateSeries(context)
+    val visits = generateAncSeries(context)
     repository.saveGenerated(visits)
     return visits.size
   }
@@ -63,7 +82,7 @@ class VisitScheduleCoordinator @Inject constructor(
     }
 
     if (!repository.hasScheduleOfType(context.localBeneficiaryId, VisitCodeType.INC)) {
-      val inc = incGenerator.generateSeries(context)
+      val inc = generateIncSeries(context)
       repository.saveGenerated(inc)
       generated += inc.size
     }
@@ -91,7 +110,7 @@ class VisitScheduleCoordinator @Inject constructor(
       if (repository.hasScheduleOfType(context.localBeneficiaryId, VisitCodeType.PP)) {
         0
       } else {
-        val pp = ppGenerator.generateSeries(context)
+        val pp = generatePpSeries(context)
         repository.saveGenerated(pp)
         pp.size
       }
@@ -128,12 +147,7 @@ class VisitScheduleCoordinator @Inject constructor(
     val existing = repository.getForBeneficiary(context.localBeneficiaryId)
       .count { it.visitType == hrType }
 
-    val visit = when (hrType) {
-      VisitCodeType.ANC_HR ->
-        ancGenerator.generateHrVisit(context, triggeringVisit, actualCompletionDate, existing)
-      else ->
-        incGenerator.generateHrVisit(context, triggeringVisit, actualCompletionDate, existing)
-    } ?: return null
+    val visit = generateHrVisit(context, triggeringVisit, actualCompletionDate, existing, hrType) ?: return null
 
     repository.saveGenerated(listOf(visit))
     return visit
@@ -156,11 +170,7 @@ class VisitScheduleCoordinator @Inject constructor(
     val incVisits = repository.getForBeneficiary(context.localBeneficiaryId)
     val transitionDate = incGenerator.ccvTransitionDate(dob, incVisits)
 
-    val visits = ccvGenerator.generateSeries(
-      context = context,
-      transitionDate = transitionDate,
-      riskState = ccvGenerator.determineRiskState(incOutcomes),
-    )
+    val visits = generateCcvSeries(context, transitionDate, incOutcomes)
     repository.saveGenerated(visits)
     return visits.size
   }
@@ -175,6 +185,8 @@ class VisitScheduleCoordinator @Inject constructor(
    * Not idempotent by design: each approved change is a distinct clinical event, and a second
    * approval legitimately supersedes the schedule the first one produced. Callers must gate on the
    * approval, not on this method.
+   *
+   * Not wired to [goRulesAdapter] — see this class's doc. Always the Kotlin generator.
    */
   suspend fun onLmpOrEddApproved(context: ScheduleContext): RegenerationResult {
     requireNotNull(context.edd) { "Regenerating an ANC schedule requires the corrected EDD" }
@@ -190,9 +202,81 @@ class VisitScheduleCoordinator @Inject constructor(
     if (!context.hasDeliveryDetails) return 0
     if (repository.hasScheduleOfType(context.localBeneficiaryId, VisitCodeType.NN)) return 0
 
-    val visits = nnGenerator.generateSeries(context)
+    val visits = generateNnSeries(context)
     repository.saveGenerated(visits)
     return visits.size
+  }
+
+  // -----------------------------------------------------------------------------------------------
+  // GoRules-first, Hardcoded-fallback helpers (CR-032). One per family, matching
+  // GoRulesScheduleAdapter's per-pack methods.
+  // -----------------------------------------------------------------------------------------------
+
+  private suspend fun generateAncSeries(context: ScheduleContext): List<VisitScheduleEntity> {
+    if (GoRulesScheduleFeatureFlag.ENABLED) {
+      goRulesAdapter?.ancSeries(context)?.let { return it }
+    }
+    return ancGenerator.generateSeries(context)
+  }
+
+  private suspend fun generatePpSeries(context: ScheduleContext): List<VisitScheduleEntity> {
+    if (GoRulesScheduleFeatureFlag.ENABLED) {
+      goRulesAdapter?.ppSeries(context)?.let { return it }
+    }
+    return ppGenerator.generateSeries(context)
+  }
+
+  private suspend fun generateNnSeries(context: ScheduleContext): List<VisitScheduleEntity> {
+    if (GoRulesScheduleFeatureFlag.ENABLED) {
+      goRulesAdapter?.nnSeries(context)?.let { return it }
+    }
+    return nnGenerator.generateSeries(context)
+  }
+
+  private suspend fun generateIncSeries(context: ScheduleContext): List<VisitScheduleEntity> {
+    if (GoRulesScheduleFeatureFlag.ENABLED) {
+      goRulesAdapter?.incSeries(context)?.let { return it }
+    }
+    return incGenerator.generateSeries(context)
+  }
+
+  private suspend fun generateCcvSeries(
+    context: ScheduleContext,
+    transitionDate: LocalDate,
+    incOutcomes: List<IncVisitOutcome>,
+  ): List<VisitScheduleEntity> {
+    if (GoRulesScheduleFeatureFlag.ENABLED) {
+      goRulesAdapter?.ccvSeries(context, transitionDate, incOutcomes)?.let { return it }
+    }
+    return ccvGenerator.generateSeries(
+      context = context,
+      transitionDate = transitionDate,
+      riskState = ccvGenerator.determineRiskState(incOutcomes),
+    )
+  }
+
+  /**
+   * Unlike the `generate…Series` helpers above, a null from [GoRulesScheduleAdapter.hrVisit] is
+   * NOT treated as "fall back to Hardcoded" — by that method's own contract, null already means
+   * "no HR row, full stop" (it covers both "no cached rule" and "the pack decided against one").
+   * So when the flag is on, this method trusts the adapter's answer completely.
+   */
+  private suspend fun generateHrVisit(
+    context: ScheduleContext,
+    triggeringVisit: VisitScheduleEntity,
+    actualCompletionDate: LocalDate,
+    existingHrCount: Int,
+    hrType: VisitCodeType,
+  ): VisitScheduleEntity? {
+    if (GoRulesScheduleFeatureFlag.ENABLED) {
+      return goRulesAdapter?.hrVisit(context, triggeringVisit, actualCompletionDate, existingHrCount)
+    }
+    return when (hrType) {
+      VisitCodeType.ANC_HR ->
+        ancGenerator.generateHrVisit(context, triggeringVisit, actualCompletionDate, existingHrCount)
+      else ->
+        incGenerator.generateHrVisit(context, triggeringVisit, actualCompletionDate, existingHrCount)
+    }
   }
 
   private val ScheduleContext.hasDeliveryDetails: Boolean

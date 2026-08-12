@@ -19,6 +19,13 @@ interface VisitScheduleRepository {
   /** Every row for a beneficiary, including superseded and cancelled. Audit and debugging. */
   suspend fun getForBeneficiary(localBeneficiaryId: String): List<VisitScheduleEntity>
 
+  /** The one row for this visit, or null if [localScheduleUuid] doesn't match any generated
+   * schedule. [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator] uses this to
+   * resolve the server-side `scheduleId`/`beneficiaryId` `POST /visits` needs — the visit-form
+   * nav argument IS a [VisitScheduleEntity.localScheduleUuid], not a separate id space (see
+   * [org.armman.sakhi.data.beneficiaryprofile.ProfileVisitMapper]). */
+  suspend fun getByLocalScheduleUuid(localScheduleUuid: String): VisitScheduleEntity?
+
   /** What the Sakhi should currently see — excludes superseded and cancelled rows. */
   suspend fun getActiveForBeneficiary(localBeneficiaryId: String): List<VisitScheduleEntity>
 

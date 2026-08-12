@@ -42,6 +42,28 @@ class FormUploadStatusPresentationTest {
     assertEquals(categoryLabelRes("MOTHER_REGISTRATION"), categoryLabelRes("SOME_FUTURE_FORM"))
   }
 
+  @Test
+  fun `the CR-026b visit form gets its own label, distinct from Registration`() {
+    // Unlike Mother+Child registration, a visit draft must not fold into the Registration card —
+    // a Sakhi can have visit drafts pending with no registration drafts pending, or vice versa.
+    assertNotEquals(categoryLabelRes("MOTHER_REGISTRATION"), categoryLabelRes("ANC_VISIT"))
+  }
+
+  @Test
+  fun `visit form records group into their own category, separate from registration records`() {
+    val summaries = groupUploadRecordsByCategory(
+      listOf(
+        record("m1", EnrollmentSyncStatus.SYNCED, formCode = "MOTHER_REGISTRATION"),
+        record("v1", EnrollmentSyncStatus.PENDING, formCode = "ANC_VISIT"),
+      ),
+    )
+
+    assertEquals(2, summaries.size)
+    val visitSummary = summaries.single { it.formCode == "ANC_VISIT" }
+    assertEquals(0, visitSummary.syncedCount)
+    assertEquals(1, visitSummary.totalCount)
+  }
+
   // --- groupUploadRecordsByCategory ------------------------------------------------------------
 
   @Test

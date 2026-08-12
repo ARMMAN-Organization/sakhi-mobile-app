@@ -34,4 +34,9 @@ object ChildRegistrationQuestionCodes {
    * [MOTHER_DOB_QUESTION_CODE] (the mother's DOB, also collected here) and from
    * [DOB_QUESTION_CODE] (the beneficiary's DOB on the mother-enrollment form). */
   const val DATE_OF_BIRTH_OF_INFANT = "date_of_birth_of_infant"
+
+  /** The infant's weight at birth in kilograms. Shared so the beneficiary profile screen can read
+   * a child's own weight instead of [org.armman.sakhi.data.beneficiaryprofile
+   * .ScheduleBackedBeneficiaryProfileRepository]'s mother-only `weight_kg` code. */
+  const val CHILD_WEIGHT_AT_BIRTH_KG = "child_weight_at_birth_in_kg"
 }

@@ -22,6 +22,9 @@ class RoomVisitScheduleRepository @Inject constructor(
   override suspend fun getForBeneficiary(localBeneficiaryId: String): List<VisitScheduleEntity> =
     dao.getForBeneficiary(localBeneficiaryId)
 
+  override suspend fun getByLocalScheduleUuid(localScheduleUuid: String): VisitScheduleEntity? =
+    dao.getByLocalUuid(localScheduleUuid)
+
   override suspend fun getActiveForBeneficiary(
     localBeneficiaryId: String,
   ): List<VisitScheduleEntity> = dao.getActiveForBeneficiary(localBeneficiaryId)

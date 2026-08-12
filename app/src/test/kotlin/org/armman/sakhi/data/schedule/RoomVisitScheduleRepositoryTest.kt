@@ -37,6 +37,21 @@ class RoomVisitScheduleRepositoryTest {
     assertNull(stored.serverScheduleId)
   }
 
+  @Test
+  fun `getByLocalScheduleUuid returns the matching row`() = runTest {
+    repository.saveGenerated(listOf(schedule("s1", visitCode = "ANC3", sequenceNo = 3)))
+
+    val found = repository.getByLocalScheduleUuid("s1")
+
+    assertNotNull(found)
+    assertEquals("ANC3", found!!.visitCode)
+  }
+
+  @Test
+  fun `getByLocalScheduleUuid returns null for an unknown uuid`() = runTest {
+    assertNull(repository.getByLocalScheduleUuid("does-not-exist"))
+  }
+
   // DB-2
   @Test
   fun `localScheduleUuid is the primary key so a re-save replaces rather than duplicates`() =

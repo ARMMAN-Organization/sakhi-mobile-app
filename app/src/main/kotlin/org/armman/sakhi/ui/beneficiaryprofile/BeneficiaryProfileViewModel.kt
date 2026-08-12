@@ -22,9 +22,10 @@ data class BeneficiaryProfileUiState(
   /**
    * Whether Start Visit can actually open a form for this beneficiary.
    *
-   * False for a Sakhi's own enrolment until CR-026: the Visit Form is still backed by seeded data
-   * that only recognises its own ids, and navigating anyway lands her on an error screen. The
-   * screen shows the "coming soon" message instead.
+   * False only when [VisitFormRepository.canStartVisit] itself fails or the id is blank — a
+   * Sakhi's own enrolment now resolves via [org.armman.sakhi.data.visitform.StaticVisitFormRepository]'s
+   * synthetic-context fallback (CR-026 interim). The screen shows the "coming soon" message for
+   * the false case.
    */
   val canStartVisit: Boolean = false,
 )
@@ -45,7 +46,15 @@ class BeneficiaryProfileViewModel @Inject constructor(
     loadProfile()
   }
 
-  /** Loads (or reloads after an error) the beneficiary detail for this id. */
+  /**
+   * Loads (or reloads after an error) the beneficiary detail for this id.
+   *
+   * Also called from [BeneficiaryProfileScreen]'s `LaunchedEffect(Unit)` on every fresh entry into
+   * composition, not just here in init — this ViewModel is retained on its NavBackStackEntry, so
+   * an init-only load would show stale data (e.g. a visit still "Open" right after its own Submit
+   * flow popped back to this exact screen instance) on every return visit, not just the first. The
+   * one redundant reload this causes on first entry is a cheap, idempotent price for that.
+   */
   fun loadProfile() {
     _uiState.update { it.copy(isLoading = true, hasError = false) }
     viewModelScope.launch {

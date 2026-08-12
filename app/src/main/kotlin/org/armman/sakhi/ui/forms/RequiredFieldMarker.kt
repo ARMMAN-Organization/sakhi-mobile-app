@@ -4,6 +4,7 @@ import org.armman.sakhi.data.forms.AGE_FROM_DOB_QUESTION_CODES
 import org.armman.sakhi.data.forms.FormFieldInputType
 import org.armman.sakhi.data.forms.FormFieldSchema
 import org.armman.sakhi.data.forms.TdDoseQuestionCodes
+import org.armman.sakhi.data.forms.VaccinationAtBirthQuestionCodes
 
 /**
  * Decides whether a dynamic-form field shows the red `*` required marker next to its label.
@@ -14,9 +15,10 @@ import org.armman.sakhi.data.forms.TdDoseQuestionCodes
  * The marker is a *user affordance*: it means "you must fill this in before Next/Submit enables".
  * So it is shown only where the Sakhi can actually act:
  * - [FormFieldSchema.required] must be true, OR the field is one of
- *   [TdDoseQuestionCodes.CONDITIONALLY_REQUIRED_DATE_QUESTION_CODES] (schema says `required: false`
- *   because they're only mandatory once their checkbox is checked — and this marker only ever
- *   sees them rendered when that's already true, per [org.armman.sakhi.data.forms
+ *   [TdDoseQuestionCodes.CONDITIONALLY_REQUIRED_DATE_QUESTION_CODES] or
+ *   [VaccinationAtBirthQuestionCodes.CONDITIONALLY_REQUIRED_DATE_QUESTION_CODES] (schema says
+ *   `required: false` because they're only mandatory once their checkbox is checked — and this
+ *   marker only ever sees them rendered when that's already true, per [org.armman.sakhi.data.forms
  *   .FormVisibilityEvaluator]'s `contains` gating). Either way this must match the ViewModel's
  *   `fieldsAnsweredAndInRange` gate exactly, so the marker never disagrees with what actually
  *   blocks submission.
@@ -32,8 +34,9 @@ import org.armman.sakhi.data.forms.TdDoseQuestionCodes
  *   line, not a labelled field.
  *
  * Geography fields are *not* excluded here: whether they render read-only or as a dropdown depends
- * on how many options the backend returns at runtime, so that split is applied at the call site
- * (`GeographyField`) — only the dropdown form receives the marker.
+ * on how many options the backend returns at runtime (see `GeographyField`), but both forms show
+ * the marker when required — the field is mandatory either way, the single-option case just has
+ * nothing left for the Sakhi to pick.
  */
 object RequiredFieldMarker {
 
@@ -46,7 +49,8 @@ object RequiredFieldMarker {
   /** True when [field]'s label should be suffixed with the red `*`. */
   fun isShownFor(field: FormFieldSchema): Boolean {
     val effectivelyRequired = field.required ||
-      field.questionCode in TdDoseQuestionCodes.CONDITIONALLY_REQUIRED_DATE_QUESTION_CODES
+      field.questionCode in TdDoseQuestionCodes.CONDITIONALLY_REQUIRED_DATE_QUESTION_CODES ||
+      field.questionCode in VaccinationAtBirthQuestionCodes.CONDITIONALLY_REQUIRED_DATE_QUESTION_CODES
     if (!effectivelyRequired) return false
     if (field.computedFrom != null) return false
     if (field.questionCode in AGE_FROM_DOB_QUESTION_CODES) return false

@@ -1,5 +1,6 @@
 package org.armman.sakhi.ui.forms
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -44,11 +45,20 @@ import org.armman.sakhi.data.forms.newLocalSubmissionUuid
 import org.armman.sakhi.data.enrollment.DuplicateOutcome
 import org.armman.sakhi.data.lookup.LookupRepository
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 import javax.inject.Inject
 
 /** The one dynamic form CR-018 covers so far. */
 private const val FORM_CODE = "MOTHER_REGISTRATION"
+
+/** Shared with the other temporary "SakhiSync" diagnostics added this session
+ * (see FormVisibilityEvaluator.kt). */
+private const val TAG = "SakhiSync"
+
+/** Summary-tab-only display format for `date` fields — see [DynamicMotherRegistrationViewModel
+ * .formatSummaryDate]'s doc for why this doesn't touch the stored (ISO) value. */
+private val SUMMARY_DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("dd-MM-yyyy")
 
 /** Consent gate: the `did_we_receive_consent` radio answered "no" is a hard stop per the SRS /
  * form spec ("If No → stop form") — the backend also 422s on it. Answering "no" aborts the
@@ -244,6 +254,13 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
   }
 
   fun setAnswer(questionCode: String, value: String?) {
+    // Temporary diagnostic for the "Gravida alert / Last-Pregnancy block doesn't appear when 2 is
+    // entered directly, only after 1 is entered then changed to 2" report. Logs the exact value
+    // this function receives for every Gravida keystroke, so a repro shows whether a direct "2"
+    // ever reaches the ViewModel at all (vs. a TextField/IME timing issue that never calls this).
+    if (questionCode == FormObstetricRuleset.GRAVIDA) {
+      Log.d(TAG, "setAnswer(GRAVIDA): received value='$value'")
+    }
     val fields = _uiState.value.version?.schemaJson.orEmpty()
     _uiState.update {
       val previousAnswers = it.answers
@@ -255,6 +272,17 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
       it.copy(
         answers = FormHiddenFieldReset.apply(fields, previousAnswers, updatedAnswers),
         fieldErrors = it.fieldErrors - questionCode - newlyHidden,
+      )
+    }
+    if (questionCode == FormObstetricRuleset.GRAVIDA) {
+      val postUpdateAnswers = _uiState.value.answers
+      val gravidaGatedVisible = fields
+        .filter { it.visibleWhen?.field == FormObstetricRuleset.GRAVIDA }
+        .map { it.questionCode to FormVisibilityEvaluator.isVisible(it, postUpdateAnswers) }
+      Log.d(
+        TAG,
+        "setAnswer(GRAVIDA): stored answers.gravida='${postUpdateAnswers.valueOf(FormObstetricRuleset.GRAVIDA)}' " +
+          "gravida-gated fields visibility=$gravidaGatedVisible",
       )
     }
     recomputeDerivedFields()
@@ -532,11 +560,24 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
         val code = state.answers.valueOf(field.questionCode)
         if (code.isNullOrBlank()) null else optionsFor(field).firstOrNull { it.valueCode == code }?.label ?: code
       }
-      // text / text_geo / number / date / computed read-only — the stored value is already display-ready.
+      // Reported bug: the Summary tab was printing the stored ISO answer (e.g. "2026-08-07")
+      // verbatim instead of the dd-MM-yyyy the review card should read. Only this display string
+      // changes — [FormAnswers] still holds the ISO value everywhere else (editing, computed
+      // fields, cross-field/date-rule checks, the submission payload).
+      FormFieldInputType.DATE -> state.answers.valueOf(field.questionCode)?.let(::formatSummaryDate)
+      // text / text_geo / number / computed read-only — the stored value is already display-ready.
       else -> state.answers.valueOf(field.questionCode)
     }
     return value?.takeIf { it.isNotBlank() }?.let { SummaryRow(label = field.label, value = it) }
   }
+
+  /**
+   * Reformats an ISO (`yyyy-MM-dd`) date answer to `dd-MM-yyyy` for the Summary tab only. Falls
+   * back to the raw stored value if it isn't a parseable ISO date, so a malformed answer still
+   * shows something on the review card rather than blanking the row or crashing it.
+   */
+  private fun formatSummaryDate(raw: String): String =
+    runCatching { LocalDate.parse(raw).format(SUMMARY_DATE_FORMATTER) }.getOrDefault(raw)
 
   /**
    * Saves the draft locally (via [DynamicFormDraftRepository], Room + encrypted store), then —

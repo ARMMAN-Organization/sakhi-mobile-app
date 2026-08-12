@@ -149,7 +149,7 @@ class CcvScheduleGenerator @Inject constructor(
       windowEndDate = window.end,
       anchorType = AnchorType.CCV_TRANSITION,
       anchorDate = transitionDate,
-      generatedByRuleVersion = rules.ruleVersion,
+      generatedByRuleVersion = rules.ruleVersion(visitType),
       escalationPolicy = rules.escalationPolicy(visitType),
       createdAtEpochMillis = createdAtMillis,
     )

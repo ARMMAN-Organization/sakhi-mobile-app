@@ -6,6 +6,8 @@ import org.armman.sakhi.data.forms.FormGeographyUnit
 import org.armman.sakhi.data.forms.GeographyQuestionCodes
 import org.armman.sakhi.data.forms.MOTHER_DOB_QUESTION_CODE
 import org.armman.sakhi.data.lookup.LookupLabelMatcher
+import java.time.LocalDate
+import java.time.temporal.ChronoUnit
 
 /**
  * Child-enrollment question codes this prefill writes. Kept here rather than in the ViewModel so the
@@ -21,6 +23,23 @@ object MotherPrefillQuestionCodes {
    * must always target the same field. Two independent literals is precisely how the picker bounds
    * and this prefill silently drifted apart from the published schema. */
   const val MOTHER_DATE_OF_BIRTH = MOTHER_DOB_QUESTION_CODE
+
+  /**
+   * The mother's age, CHILD_REGISTRATION's sibling field to [MOTHER_DATE_OF_BIRTH] (CR-039).
+   * Per CR-039 this field is, by design, independently Sakhi-editable on the DIRECT path (spec's
+   * "either DOB or age" fallback) — see [MOTHER_DOB_QUESTION_CODE]'s own doc.
+   *
+   * However, once a registered mother is linked via [MotherPrefill.apply], her real DOB is known,
+   * so leaving this field manually editable let the Sakhi type an age that contradicts the
+   * prefilled DOB (reported bug: "Age field is editable even when Mother DOB is already fetched
+   * using Beneficiary ID"). [MotherPrefill.apply] now also derives and writes this field from
+   * [LinkedMother.dateOfBirth] whenever it's able to, and includes it in [Result.prefilledCodes] so
+   * the host screen can render it read-only for exactly as long as it stays prefilled — the same
+   * mechanism [DID_WE_RECEIVE_CONSENT] and every other prefilled field already use for the "From
+   * mother's record" hint, reused here (via `readOnlyQuestionCodes`) to also lock the field shut.
+   */
+  const val MOTHER_AGE = "mother_age"
+
   const val DID_WE_RECEIVE_CONSENT = "did_we_receive_consent"
 
   // Rows 21–34 (CR-032) — confirmed against the live CHILD_REGISTRATION schema's `question_code`s
@@ -109,6 +128,12 @@ object MotherPrefill {
     geography: List<FormGeographyUnit>,
     socioDemographics: MotherSocioDemographics? = null,
     formSchema: List<FormFieldSchema> = emptyList(),
+    /** The child registration's own "today" — the same reference point
+     * [org.armman.sakhi.data.forms.FormComputedFieldEvaluator] uses for every other DOB-derived
+     * age. Defaulted to [LocalDate.now] only so existing callers/tests that don't care about
+     * [MotherPrefillQuestionCodes.MOTHER_AGE] don't all need updating; the real ViewModel call site
+     * always passes its own `registrationDate` explicitly. */
+    registrationDate: LocalDate = LocalDate.now(),
   ): Result {
     var next = answers
     val written = mutableSetOf<String>()
@@ -122,6 +147,13 @@ object MotherPrefill {
     write(MotherPrefillQuestionCodes.MOTHER_BENEFICIARY_ID, mother.id)
     write(MotherPrefillQuestionCodes.CAREGIVER_NAME, mother.fullName)
     write(MotherPrefillQuestionCodes.MOTHER_DATE_OF_BIRTH, mother.dateOfBirth?.toString())
+    // Derived, not typed — see MOTHER_AGE's doc for why this field must stop being freely
+    // Sakhi-editable once the mother's real DOB is known. `write` already skips null/blank, so a
+    // mother with no usable DOB (MAP-06) simply leaves mother_age untouched and still editable.
+    write(
+      MotherPrefillQuestionCodes.MOTHER_AGE,
+      mother.dateOfBirth?.let { dob -> ChronoUnit.YEARS.between(dob, registrationDate).toString() },
+    )
 
     geographyPairs(mother).forEach { (questionCode, unitId) ->
       // `?.takeIf` (not `.takeIf`): a mother missing a level has a null id there, and the safe call

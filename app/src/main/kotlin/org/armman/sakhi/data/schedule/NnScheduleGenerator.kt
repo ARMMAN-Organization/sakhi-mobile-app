@@ -136,7 +136,7 @@ class NnScheduleGenerator @Inject constructor(
       windowEndDate = window.end,
       anchorType = AnchorType.DELIVERY_DATE,
       anchorDate = deliveryDate,
-      generatedByRuleVersion = rules.ruleVersion,
+      generatedByRuleVersion = rules.ruleVersion(VisitCodeType.NN),
       escalationPolicy = rules.escalationPolicy(VisitCodeType.NN),
       createdAtEpochMillis = createdAtMillis,
     )

@@ -83,7 +83,7 @@ class IncScheduleGenerator @Inject constructor(
             windowEndDate = window.end,
             anchorType = anchorType,
             anchorDate = anchorDate,
-            generatedByRuleVersion = rules.ruleVersion,
+            generatedByRuleVersion = rules.ruleVersion(VisitCodeType.INC),
             escalationPolicy = rules.escalationPolicy(VisitCodeType.INC),
             createdAtEpochMillis = createdAtMillis,
           ),
@@ -128,7 +128,7 @@ class IncScheduleGenerator @Inject constructor(
       anchorType = AnchorType.ACTUAL_VISIT,
       anchorDate = actualCompletionDate,
       anchorVisitLocalUuid = triggeringVisit.localScheduleUuid,
-      generatedByRuleVersion = rules.ruleVersion,
+      generatedByRuleVersion = rules.ruleVersion(VisitCodeType.INC_HR),
       escalationPolicy = rules.escalationPolicy(VisitCodeType.INC_HR),
       createdAtEpochMillis = createdAt.toEpochMilli(),
     )

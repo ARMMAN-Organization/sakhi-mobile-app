@@ -96,7 +96,13 @@ class ChildRegistrationSubmissionCoordinator @Inject constructor(
     localSubmissionUuid: String,
     answers: FormAnswers,
     fallbackRegistrationDate: LocalDate,
-  ): Result<Unit> = runCatching {
+    // Returns the server-assigned beneficiary id on success — RoomChildFormDraftRepository's sync
+    // executor needs it to record ChildFormDraftEntity.remoteBeneficiaryId (mirrors
+    // DynamicFormSubmissionCoordinator.submit's identical contract for the mother flow). It used to
+    // be discarded entirely, which left every child draft's remoteBeneficiaryId permanently null —
+    // making a synced child indistinguishable from an unsynced one to anything trying to match a
+    // local row against the server's beneficiary list.
+  ): Result<String> = runCatching {
     val beneficiaryRequest = mapper.toCreateBeneficiaryRequest(localCaseUuid, answers, fallbackRegistrationDate)
       .getOrElse { throw ChildRegistrationSubmissionException.MappingFailed(it) }
 
@@ -136,5 +142,7 @@ class ChildRegistrationSubmissionCoordinator @Inject constructor(
         violations = apiError.violations,
       )
     }
+
+    serverBeneficiaryId
   }
 }

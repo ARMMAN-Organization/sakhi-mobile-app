@@ -32,8 +32,21 @@ class HardcodedRuleSourceTest {
    */
   @Test
   fun `rule version matches the uuid the backend seeded`() {
-    assertEquals("22222222-2222-4222-8222-222222222222", rules.ruleVersion)
-    assertEquals(HardcodedRuleSource.SEEDED_RULE_VERSION_ID, rules.ruleVersion)
+    assertEquals("22222222-2222-4222-8222-222222222222", rules.ruleVersion(VisitCodeType.ANC))
+    assertEquals(HardcodedRuleSource.SEEDED_RULE_VERSION_ID, rules.ruleVersion(VisitCodeType.ANC))
+  }
+
+  /**
+   * M2 has one Kotlin file behind every family, so the version stamp does not yet vary by
+   * [VisitCodeType] — unlike `GoRulesRuleSource` (CR-032), which returns a different version per
+   * independently-published rule set. Pinned here so a future change that starts differentiating
+   * by family is a deliberate decision, not an accidental drift.
+   */
+  @Test
+  fun `rule version is the same constant for every visit type in M2`() {
+    VisitCodeType.entries.forEach { visitType ->
+      assertEquals(HardcodedRuleSource.SEEDED_RULE_VERSION_ID, rules.ruleVersion(visitType))
+    }
   }
 
   // ---- ANC count, FR-S-3.1: ((EDD − registration) / 30) + 1, uncapped -------------------------

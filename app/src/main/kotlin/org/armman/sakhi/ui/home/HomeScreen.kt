@@ -1,5 +1,6 @@
 package org.armman.sakhi.ui.home
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,10 +15,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -54,6 +57,17 @@ fun HomeScreen(
   val uploadModalState by viewModel.uploadModalState.collectAsStateWithLifecycle()
   val pendingUploadCount by viewModel.pendingUploadCount.collectAsStateWithLifecycle()
   val duplicateReview by viewModel.duplicateReview.collectAsStateWithLifecycle()
+
+  // Offline Data Upload tap (bharath, 2026-08-08) - see HomeViewModel.onDataUploadClicked's doc.
+  val context = LocalContext.current
+  val offlineUploadMessage = stringResource(R.string.home_data_upload_offline)
+  LaunchedEffect(viewModel) {
+    viewModel.events.collect { event ->
+      when (event) {
+        HomeEvent.OfflineUploadBlocked -> Toast.makeText(context, offlineUploadMessage, Toast.LENGTH_SHORT).show()
+      }
+    }
+  }
 
   Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {

@@ -56,6 +56,7 @@ private const val PATH_DIRECT = "child_directly_mother_not_registered_in_the_pro
 private const val MOTHER_BENEFICIARY_ID = "mother_beneficiary_id"
 private const val CAREGIVER_NAME = "caregiver_name_first_name_middle_name_last_name"
 private const val MOTHER_DATE_OF_BIRTH = "mother_date_of_birth"
+private const val MOTHER_AGE = "mother_age"
 private const val DATE_OF_BIRTH_OF_INFANT = "date_of_birth_of_infant"
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -359,6 +360,71 @@ class DynamicChildRegistrationViewModelTest {
     assertNull(answers.valueOf(MOTHER_DATE_OF_BIRTH))
     assertNull(vm.uiState.value.selectedMotherId)
     assertTrue(vm.uiState.value.motherPrefilledCodes.isEmpty())
+  }
+
+  // Regression coverage for "Age field is editable even when Mother DOB is already fetched using
+  // Beneficiary ID" — selecting a registered mother must derive mother_age from her DOB and lock
+  // it shut for as long as that derived value stands, exactly like every other prefilled field.
+  @Test
+  fun `ML-11 selecting a mother derives and locks mother_age`() = runTest {
+    val fields = motherLinkFields() + field(MOTHER_AGE, section = "Personal Info", inputType = "number", required = false)
+    val vm = viewModel(
+      fields,
+      geography = motherLinkGeography(),
+      motherLinkRepository = FakeMotherLinkRepository(listOf(sampleMother())),
+    )
+    vm.setAnswer(WHO_ARE_YOU_REGISTERING, PATH_REGISTERED_MOTHER)
+    dispatcher.scheduler.advanceUntilIdle()
+
+    vm.selectMother(sampleMother())
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val expectedAge = java.time.temporal.ChronoUnit.YEARS.between(LocalDate.of(2001, 7, 29), vm.registrationDate)
+    assertEquals(expectedAge.toString(), vm.uiState.value.answers.valueOf(MOTHER_AGE))
+    assertTrue(vm.isPrefilledFromMother(MOTHER_AGE))
+  }
+
+  // A Sakhi who overrides the derived age has taken ownership of it — same rule as every other
+  // prefilled field (ML-6) — so the field must unlock, not stay stuck read-only forever.
+  @Test
+  fun `ML-12 editing mother_age drops the lock`() = runTest {
+    val fields = motherLinkFields() + field(MOTHER_AGE, section = "Personal Info", inputType = "number", required = false)
+    val vm = viewModel(
+      fields,
+      geography = motherLinkGeography(),
+      motherLinkRepository = FakeMotherLinkRepository(listOf(sampleMother())),
+    )
+    vm.setAnswer(WHO_ARE_YOU_REGISTERING, PATH_REGISTERED_MOTHER)
+    dispatcher.scheduler.advanceUntilIdle()
+    vm.selectMother(sampleMother())
+    dispatcher.scheduler.advanceUntilIdle()
+
+    vm.setAnswer(MOTHER_AGE, "40")
+
+    assertEquals("40", vm.uiState.value.answers.valueOf(MOTHER_AGE))
+    assertFalse(vm.isPrefilledFromMother(MOTHER_AGE))
+  }
+
+  // Switching off the registered-mother path must not leave a stale, still-locked age behind —
+  // it reverts to blank and freely editable, same as every other untouched prefilled field (ML-7).
+  @Test
+  fun `ML-13 switching to the direct path clears and unlocks mother_age`() = runTest {
+    val fields = motherLinkFields() + field(MOTHER_AGE, section = "Personal Info", inputType = "number", required = false)
+    val vm = viewModel(
+      fields,
+      geography = motherLinkGeography(),
+      motherLinkRepository = FakeMotherLinkRepository(listOf(sampleMother())),
+    )
+    vm.setAnswer(WHO_ARE_YOU_REGISTERING, PATH_REGISTERED_MOTHER)
+    dispatcher.scheduler.advanceUntilIdle()
+    vm.selectMother(sampleMother())
+    dispatcher.scheduler.advanceUntilIdle()
+
+    vm.setAnswer(WHO_ARE_YOU_REGISTERING, PATH_DIRECT)
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertNull(vm.uiState.value.answers.valueOf(MOTHER_AGE))
+    assertFalse(vm.isPrefilledFromMother(MOTHER_AGE))
   }
 
   // VM-12 — CR-031 must not regress the CR-020 direct-path fallback.

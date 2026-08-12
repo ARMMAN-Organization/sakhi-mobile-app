@@ -1,0 +1,40 @@
+package org.armman.sakhi.data.visitform
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
+
+/**
+ * Room-persisted sync *metadata* for one visit-form submission — the CR-026b twin of
+ * [org.armman.sakhi.data.forms.DynamicFormDraftEntity], same split rationale: no PII here, the
+ * actual [org.armman.sakhi.data.forms.FormAnswers] payload lives in the encrypted
+ * [org.armman.sakhi.data.auth.session.SecureKeyValueStore] instead (see
+ * [visitFormDraftPayloadKey]). Reuses [EnrollmentSyncStatus] rather than declaring a parallel
+ * enum — DUPLICATE_CONFLICT is unused here (visit submissions have no duplicate-detection
+ * concept), everything else means the same thing it does for the other three queues.
+ *
+ * [localScheduleUuid] is the natural key — it's already how [VisitFormSubmissionCoordinator]
+ * looks up the schedule row, and a beneficiary can have many visits, so (unlike the other three
+ * queues, keyed by beneficiary) the visit itself has to be the key here.
+ */
+@Entity(tableName = "visit_form_drafts")
+data class VisitFormDraftEntity(
+  @PrimaryKey val localScheduleUuid: String,
+  val formCode: String,
+  /** The form version the Sakhi actually answered against — sent as-is on sync, not re-resolved
+   * against whatever's active by the time the sync runs. Same rationale as the other queues. */
+  val formVersionId: String,
+  val visitDateIso: String,
+  val syncStatus: EnrollmentSyncStatus,
+  val createdAtEpochMillis: Long,
+  val lastAttemptAtEpochMillis: Long?,
+  val retryCount: Int,
+  /**
+   * Set the moment `POST /visits` succeeds, before the form-submission call is even attempted —
+   * see [VisitFormSubmissionCoordinator.submit]'s `onVisitCreated` param. A retry that finds this
+   * already set skips straight to step 2 instead of creating a second visit instance for the same
+   * visit. Null until step 1 succeeds; terminal once set (never cleared).
+   */
+  val serverVisitId: String?,
+  val lastErrorMessage: String?,
+)

@@ -28,11 +28,11 @@ class ScheduleRuleSourceSeamTest {
   fun `rule version comes from the rule source, not from a constant in the caller`() {
     val source: ScheduleRuleSource = FakeRuleSource(ruleVersion = "test-v9")
 
-    assertEquals("test-v9", source.ruleVersion)
+    assertEquals("test-v9", source.ruleVersion(VisitCodeType.ANC))
     assertNotEquals(
       "A fake must be able to differ from the production source, or the seam is decorative",
-      HardcodedRuleSource().ruleVersion,
-      source.ruleVersion,
+      HardcodedRuleSource().ruleVersion(VisitCodeType.ANC),
+      source.ruleVersion(VisitCodeType.ANC),
     )
   }
 
@@ -125,7 +125,7 @@ class ScheduleRuleSourceSeamTest {
     val implementations: List<ScheduleRuleSource> = listOf(HardcodedRuleSource(), FakeRuleSource())
 
     implementations.forEach { source ->
-      assertTrue("ruleVersion must not be blank", source.ruleVersion.isNotBlank())
+      assertTrue("ruleVersion must not be blank", source.ruleVersion(VisitCodeType.ANC).isNotBlank())
       assertTrue("HR offset must be positive", source.hrOffsetDays(VisitCodeType.ANC) > 0)
       assertTrue("ANC interval must be positive", source.intervalDays(VisitCodeType.ANC) > 0)
       assertTrue("ANC1 is never fixed-range", !source.usesFixedRangeWindow(VisitCodeType.ANC, 1))

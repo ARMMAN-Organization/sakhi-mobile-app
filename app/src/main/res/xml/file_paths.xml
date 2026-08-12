@@ -16,6 +16,12 @@
   <files-path
     name="dynamic_form_captures"
     path="dynamic-form/" />
+  <!-- CR-016b ANC Visit Form's "Upload sonography report image" field — see
+       DynamicVisitFormScreen.onCaptureImage. Missing this entry crashed the app the instant the
+       camera launched (the exact failure mode this file's own top comment warns about). -->
+  <files-path
+    name="dynamic_visit_form_captures"
+    path="dynamic-visit-form/" />
   <!-- CR-020 Children Register — see DynamicChildRegistrationScreen.onCaptureImage. -->
   <files-path
     name="child_registration_captures"

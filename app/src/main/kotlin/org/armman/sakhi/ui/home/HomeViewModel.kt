@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -11,8 +13,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import org.armman.sakhi.data.dashboard.DashboardRepository
 import org.armman.sakhi.data.dashboard.DashboardSummary
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
@@ -58,16 +62,29 @@ data class DuplicateReview(
 
 private const val SUBSCRIPTION_TIMEOUT_MS = 5_000L
 
+/** One-shot Home events the screen reacts to (currently just the offline Data Upload toast) —
+ * same "Channel + receiveAsFlow" shape as [org.armman.sakhi.ui.visitform.DynamicVisitFormEvent]. */
+sealed interface HomeEvent {
+  /** The Sakhi tapped Data Upload while offline (bharath, 2026-08-08) — nothing was queued or
+   * shown; see [HomeViewModel.onDataUploadClicked]'s doc for why the sync call and modal are
+   * skipped entirely rather than started and left to fail. */
+  data object OfflineUploadBlocked : HomeEvent
+}
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
   private val dashboardRepository: DashboardRepository,
   private val uploadRecordsSource: UploadRecordsSource,
   private val manualSyncTrigger: ManualSyncTrigger,
   private val dynamicFormDraftRepository: DynamicFormDraftRepository,
+  private val connectivityChecker: ConnectivityChecker,
 ) : ViewModel() {
 
   private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
   val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
+  private val _events = Channel<HomeEvent>(Channel.BUFFERED)
+  val events: Flow<HomeEvent> = _events.receiveAsFlow()
 
   /** Live draft list across every surfaced offline queue — re-emits as the sync worker advances
    * statuses, which is what makes both the badge and the open modal update during an upload
@@ -152,8 +169,18 @@ class HomeViewModel @Inject constructor(
    *
    * Sync starts before the modal is shown so the first frame the Sakhi sees already reflects work
    * in progress rather than a stale PENDING list.
+   *
+   * Offline guard (bharath, 2026-08-08): a one-shot [ConnectivityChecker.isOnline] check gates
+   * both of those steps. Offline, [manualSyncTrigger] is never called and the modal never opens —
+   * previously both happened unconditionally, so an offline tap showed the same "uploading"
+   * progress modal as a real attempt, with nothing to actually show progress on. Online behaviour
+   * (including the WorkManager retry-as-you-go semantics described above) is unchanged.
    */
   fun onDataUploadClicked() {
+    if (!connectivityChecker.isOnline()) {
+      _events.trySend(HomeEvent.OfflineUploadBlocked)
+      return
+    }
     manualSyncTrigger.syncAllQueues()
     _modalVisible.value = true
   }

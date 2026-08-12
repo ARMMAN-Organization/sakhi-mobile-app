@@ -30,11 +30,17 @@ interface ScheduleRuleSource {
    * Identifies the rule set that produced a schedule; stamped on every generated row as
    * [VisitScheduleEntity.generatedByRuleVersion].
    *
+   * Takes [visitType] because M3's GoRules packages are versioned **per rule set** — ANC, PP, NN,
+   * INC, CCV and HR each publish independently, so "the current version" is only meaningful once
+   * you say which family you mean. [HardcodedRuleSource] returns the same constant for every
+   * [VisitCodeType] because M2 is one Kotlin file; `GoRulesRuleSource` returns the version of
+   * whichever rule set actually produced this value.
+   *
    * Must match a published `rule_versions.rule_version_id` on the server — the bulk upload rejects
    * an unknown version with `UNKNOWN_RULE_VERSION` (CR-023 §5.1). Load-bearing for M3: it is how
    * v1-generated schedules are told apart from v2 and left alone.
    */
-  val ruleVersion: String
+  fun ruleVersion(visitType: VisitCodeType): String
 
   /** Days between consecutive visits of a family — 30 for ANC, INC and the PP chain. */
   fun intervalDays(visitType: VisitCodeType): Int

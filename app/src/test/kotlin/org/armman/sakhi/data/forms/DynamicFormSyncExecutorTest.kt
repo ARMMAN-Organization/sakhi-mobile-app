@@ -13,6 +13,7 @@ import org.armman.sakhi.data.enrollment.DuplicateOutcome
 import org.armman.sakhi.data.enrollment.EnrollmentSyncOutcome
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
+import org.armman.sakhi.data.schedule.FakeVisitScheduleSyncScheduler
 import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.junit.Assert.assertEquals
@@ -31,6 +32,7 @@ class DynamicFormSyncExecutorTest {
   private lateinit var secureStore: FakeSecureKeyValueStore
   private lateinit var enrollmentApi: FakeEnrollmentApi
   private lateinit var formSubmissionApi: FakeFormSubmissionApi
+  private lateinit var visitScheduleSyncScheduler: FakeVisitScheduleSyncScheduler
   private lateinit var executor: DynamicFormSyncExecutor
 
   private val session = UserSession(
@@ -56,11 +58,13 @@ class DynamicFormSyncExecutorTest {
     val mapper = DynamicFormSubmissionMapper(sessionStore, FakeLookupRepository())
     val coordinator = DynamicFormSubmissionCoordinator(enrollmentApi, formSubmissionApi, mapper)
     scheduleDao = FakeVisitScheduleDao()
+    visitScheduleSyncScheduler = FakeVisitScheduleSyncScheduler()
     executor = DynamicFormSyncExecutor(
       dao,
       secureStore,
       coordinator,
       RoomVisitScheduleRepository(scheduleDao),
+      visitScheduleSyncScheduler,
     )
   }
 
@@ -185,6 +189,9 @@ class DynamicFormSyncExecutorTest {
 
     assertEquals(EnrollmentSyncOutcome.COMPLETED, outcome)
     assertEquals(EnrollmentSyncStatus.SYNCED, dao.getByLocalBeneficiaryId("local-1")?.syncStatus)
+    // The server-assigned id must survive onto the draft — the offline-first beneficiary list
+    // (Phase 2) matches a local-synced row against its remote counterpart using this field.
+    assertEquals("server-beneficiary-1", dao.getByLocalBeneficiaryId("local-1")?.remoteBeneficiaryId)
   }
 
   @Test

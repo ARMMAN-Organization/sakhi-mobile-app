@@ -142,7 +142,7 @@ class RemoteMotherLinkRepository @Inject constructor(
         .takeIf { it.isSuccessful }
         ?.body()
         ?.takeIf { it.success }
-        ?.data
+        ?.items
     } catch (e: Exception) {
       null
     } ?: return null

@@ -3,12 +3,21 @@ package org.armman.sakhi.data.beneficiaryprofile
 import kotlinx.coroutines.test.runTest
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.beneficiary.LocalEnrolmentBeneficiarySource
+import org.armman.sakhi.data.childregistration.ChildFormDraftEntity
+import org.armman.sakhi.data.childregistration.ChildFormDraftPayload
+import org.armman.sakhi.data.childregistration.FakeChildFormDraftDao
+import org.armman.sakhi.data.childregistration.childFormDraftGson
+import org.armman.sakhi.data.childregistration.childFormDraftPayloadKey
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.DynamicFormDraftEntity
 import org.armman.sakhi.data.forms.DynamicFormDraftPayload
 import org.armman.sakhi.data.forms.FakeDynamicFormDraftDao
 import org.armman.sakhi.data.forms.FakeFormsRepository
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormFieldOption
+import org.armman.sakhi.data.forms.FormFieldSchema
+import org.armman.sakhi.data.forms.FormVersion
+import org.armman.sakhi.data.forms.MotherRegistrationQuestionCodes
 import org.armman.sakhi.data.forms.dynamicFormDraftGson
 import org.armman.sakhi.data.forms.dynamicFormDraftPayloadKey
 import org.armman.sakhi.data.schedule.AncScheduleGenerator
@@ -31,9 +40,11 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
   private lateinit var schedules: RoomVisitScheduleRepository
   private lateinit var generator: AncScheduleGenerator
   private lateinit var draftDao: FakeDynamicFormDraftDao
+  private lateinit var childDraftDao: FakeChildFormDraftDao
   private lateinit var secureStore: FakeSecureKeyValueStore
   private lateinit var localEnrolments: LocalEnrolmentBeneficiarySource
   private lateinit var repository: ScheduleBackedBeneficiaryProfileRepository
+  private lateinit var formsRepository: FakeFormsRepository
 
   private val lmp = LocalDate.of(2026, 1, 1)
   private val edd = LocalDate.of(2026, 10, 8)
@@ -44,8 +55,16 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
     schedules = RoomVisitScheduleRepository(dao)
     generator = AncScheduleGenerator(HardcodedRuleSource())
     draftDao = FakeDynamicFormDraftDao()
+    childDraftDao = FakeChildFormDraftDao()
     secureStore = FakeSecureKeyValueStore()
-    localEnrolments = LocalEnrolmentBeneficiarySource(draftDao, secureStore, schedules, FakeFormsRepository())
+    formsRepository = FakeFormsRepository()
+    localEnrolments = LocalEnrolmentBeneficiarySource(
+      draftDao,
+      childDraftDao,
+      secureStore,
+      schedules,
+      formsRepository,
+    )
     repository = ScheduleBackedBeneficiaryProfileRepository(
       staticProfiles = StaticBeneficiaryProfileRepository(),
       scheduleRepository = schedules,
@@ -94,6 +113,90 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
     saveLocalEnrolment(localId, firstName = "Asha", lastName = "Jadhav")
 
     assertEquals("", repository.getBeneficiary(localId).husbandName)
+  }
+
+  /**
+   * The reported bug: `diagnoses` was never populated for a locally enrolled mother, so the
+   * profile's Diagnosis chips never appeared even when Q58/Q60 were answered. Also exercises the
+   * label lookup (raw `value_code`s must not leak onto the card) and the exclusion/inclusion rules
+   * — a "no known condition" answer and a "no" sickle cell result must NOT appear as diagnoses.
+   */
+  @Test
+  fun `diagnoses resolves real Q58 conditions and a positive Q60 sickle cell result to their labels`() = runTest {
+    formsRepository.version = motherVersionWithDiagnosisOptions()
+    val localId = "local-uuid-5"
+    saveLocalEnrolment(
+      localId,
+      firstName = "Reema",
+      lastName = "Powra",
+      multiValues = mapOf(
+        MotherRegistrationQuestionCodes.SELF_MEDICAL_CONDITIONS to listOf(
+          "hypertension_high_bp",
+          // A "none" answer alongside a real one must still be dropped, not just when it's alone.
+          "no_known_medical_condition",
+        ),
+      ),
+      extraSingleValues = mapOf(
+        MotherRegistrationQuestionCodes.SICKLE_CELL_STATUS to "sickle_cell_disease_scd",
+      ),
+    )
+
+    assertEquals(
+      listOf("Hypertension (High BP)", "Sickle Cell Disease (SCD)"),
+      repository.getBeneficiary(localId).diagnoses,
+    )
+  }
+
+  /**
+   * "No known condition" (Q58) and a negative/uncertain sickle cell result (Q60) both carry no
+   * risk per [org.armman.sakhi.data.enrollment.EnrollmentRiskAssessment] — this asserts the profile
+   * agrees, so the Diagnosis row correctly stays hidden instead of showing a false chip.
+   */
+  @Test
+  fun `diagnoses is empty when only non-condition answers are given`() = runTest {
+    formsRepository.version = motherVersionWithDiagnosisOptions()
+    val localId = "local-uuid-6"
+    saveLocalEnrolment(
+      localId,
+      firstName = "Kiran",
+      lastName = "Deshmukh",
+      multiValues = mapOf(
+        MotherRegistrationQuestionCodes.SELF_MEDICAL_CONDITIONS to listOf("no_known_medical_condition"),
+      ),
+      extraSingleValues = mapOf(
+        MotherRegistrationQuestionCodes.SICKLE_CELL_STATUS to "tested_and_result_is_normal",
+      ),
+    )
+
+    assertTrue(repository.getBeneficiary(localId).diagnoses.isEmpty())
+  }
+
+  /**
+   * The bug this test guards: [ScheduleBackedBeneficiaryProfileRepository] used to read DOB/weight
+   * via MOTHER_REGISTRATION's `date_of_birth`/`weight_kg` codes for every beneficiary, including
+   * children — whose form stores them under `date_of_birth_of_infant`/
+   * `child_weight_at_birth_in_kg`. Every child's profile showed both fields blank.
+   */
+  @Test
+  fun `a child's profile reads DOB and weight from the child form's own question codes`() = runTest {
+    val localId = "local-child-1"
+    saveLocalChildEnrolment(localId, name = "Aarav Sharma", dob = "2026-05-01", weightKg = "3.2")
+
+    val profile = repository.getBeneficiary(localId)
+
+    assertEquals("1 May 2026", profile.dob)
+    assertEquals("3.2 kg", profile.weight)
+  }
+
+  @Test
+  fun `a child's profile does not read the mother form's DOB or weight codes`() = runTest {
+    val localId = "local-child-2"
+    saveLocalChildEnrolment(localId, name = "Isha Patil", dob = null, weightKg = null)
+
+    val profile = repository.getBeneficiary(localId)
+
+    assertEquals("", profile.dob.orEmpty())
+    assertEquals("", profile.weight.orEmpty())
   }
 
   @Test
@@ -230,6 +333,8 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
     firstName: String,
     lastName: String,
     husbandsName: String? = null,
+    extraSingleValues: Map<String, String> = emptyMap(),
+    multiValues: Map<String, List<String>> = emptyMap(),
   ) {
     draftDao.upsert(
       DynamicFormDraftEntity(
@@ -257,6 +362,52 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
               put("mobile_number", "9876543210")
               // Optional since PR #105 — omitted entirely when unanswered, as the real form does.
               husbandsName?.let { put("husbands_name", it) }
+              putAll(extraSingleValues)
+            },
+            multiValues = multiValues,
+          ),
+          registrationDateIso = lmp.toString(),
+        ),
+      ),
+    )
+  }
+
+  /**
+   * Writes a CHILD_REGISTRATION draft into its OWN table/payload store — the way
+   * [org.armman.sakhi.data.childregistration.RoomChildFormDraftRepository] actually persists a
+   * submission. CHILD_REGISTRATION never lands in [draftDao]/`dynamicFormDraftPayloadKey`
+   * (the mother store); see [LocalEnrolmentBeneficiarySource]'s class doc.
+   */
+  private suspend fun saveLocalChildEnrolment(
+    id: String,
+    name: String,
+    dob: String?,
+    weightKg: String?,
+  ) {
+    childDraftDao.upsert(
+      ChildFormDraftEntity(
+        localBeneficiaryId = id,
+        formCode = "CHILD_REGISTRATION",
+        formVersionId = "version-1",
+        localSubmissionUuid = "submission-$id",
+        syncStatus = EnrollmentSyncStatus.PENDING,
+        createdAtEpochMillis = 1_754_265_600_000L,
+        lastAttemptAtEpochMillis = null,
+        retryCount = 0,
+        remoteBeneficiaryId = null,
+        remoteSubmissionId = null,
+        lastErrorMessage = null,
+      ),
+    )
+    secureStore.putString(
+      childFormDraftPayloadKey(id),
+      childFormDraftGson.toJson(
+        ChildFormDraftPayload(
+          answers = FormAnswers(
+            singleValues = buildMap {
+              put("name_of_the_child", name)
+              dob?.let { put("date_of_birth_of_infant", it) }
+              weightKg?.let { put("child_weight_at_birth_in_kg", it) }
             },
           ),
           registrationDateIso = lmp.toString(),
@@ -277,6 +428,42 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
     )
     schedules.saveGenerated(visits)
   }
+
+  /** A minimal MOTHER_REGISTRATION version carrying just the two diagnosis fields' real option
+   * labels (mirrors the live schema captured in api-calls-live.jsonl) — enough to exercise
+   * [org.armman.sakhi.data.beneficiary.LocalEnrolmentBeneficiarySource.diagnosisLabels]'s
+   * code-to-label lookup without needing the whole schema. */
+  private fun motherVersionWithDiagnosisOptions() = FormVersion(
+    id = "version-1",
+    formDefinitionId = "definition-1",
+    versionNo = "v1",
+    schemaJson = listOf(
+      FormFieldSchema(
+        label = "Have you ever been diagnosed with or treated for any of the following medical conditions?",
+        required = true,
+        inputTypeRaw = "multiselect",
+        questionCode = MotherRegistrationQuestionCodes.SELF_MEDICAL_CONDITIONS,
+        options = listOf(
+          FormFieldOption(label = "No known medical condition", sortOrder = 0, valueCode = "no_known_medical_condition"),
+          FormFieldOption(label = "Hypertension (High BP)", sortOrder = 1, valueCode = "hypertension_high_bp"),
+        ),
+      ),
+      FormFieldSchema(
+        label = "Have you been detected with Sickle Cell disease or Sickle Cell Trait (SCT)?",
+        required = true,
+        inputTypeRaw = "select",
+        questionCode = MotherRegistrationQuestionCodes.SICKLE_CELL_STATUS,
+        options = listOf(
+          FormFieldOption(label = "Tested and result is normal", sortOrder = 0, valueCode = "tested_and_result_is_normal"),
+          FormFieldOption(label = "Sickle Cell Disease (SCD)", sortOrder = 1, valueCode = "sickle_cell_disease_scd"),
+        ),
+      ),
+    ),
+    validationJson = emptyList(),
+    effectiveFrom = "2026-01-01",
+    effectiveTo = null,
+    status = "PUBLISHED",
+  )
 
   private companion object {
     /** Ids that exist in the static profile records, so the delegate resolves. */

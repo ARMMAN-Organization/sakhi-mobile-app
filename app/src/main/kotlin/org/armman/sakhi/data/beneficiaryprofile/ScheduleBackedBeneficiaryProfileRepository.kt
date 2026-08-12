@@ -1,7 +1,9 @@
 package org.armman.sakhi.data.beneficiaryprofile
 
 import org.armman.sakhi.data.beneficiary.Beneficiary
+import org.armman.sakhi.data.beneficiary.BeneficiaryType
 import org.armman.sakhi.data.beneficiary.LocalEnrolmentBeneficiarySource
+import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.GeographyQuestionCodes
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
@@ -48,6 +50,12 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
         // Geography answers are ids; the names come from the same place the form's own dropdown
         // reads them (the active version's geography array), served from cache when offline.
         village = answers?.let { with(localEnrolments) { it.resolveGeography(VILLAGE_QUESTION) } },
+        // diagnosisLabels() is suspend (it may resolve codes via FormsRepository), so it has to be
+        // computed here in the suspend caller, not inside the plain toProfile() below — calling a
+        // suspend function through toProfile()'s non-suspend `let`/`with` doesn't compile ("should
+        // be called only from a coroutine or another suspend function"). Mirrors how `village` just
+        // above is already computed in this same suspend scope for the same reason.
+        diagnoses = answers?.let { with(localEnrolments) { it.diagnosisLabels() } }.orEmpty(),
       )
     }
       // Propagates NoSuchElementException for a genuinely unknown id, per the interface contract.
@@ -72,13 +80,16 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
    * `husbands_name` text question, so it is blank for anyone enrolled before that and for anyone
    * who simply leaves it unanswered.
    *
-   * `lastVisitStats` and `diagnoses` stay empty: both come from a completed visit's clinical
-   * outcome, which lives in the visit form (CR-026).
+   * `lastVisitStats` stays empty: it comes from a completed visit's clinical outcome, which lives
+   * in the visit form (CR-026). `diagnoses`, unlike `lastVisitStats`, IS captured at enrollment
+   * time (Health History, Q58/Q60) — see [LocalEnrolmentBeneficiarySource.diagnosisLabels] for the
+   * reported-bug fix that started reading it back out here.
    */
   private fun Beneficiary.toProfile(
     id: String,
     answers: FormAnswers?,
     village: String?,
+    diagnoses: List<String>,
   ) = BeneficiaryProfile(
     id = id,
     name = name,
@@ -92,9 +103,30 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
     riskLevel = riskLevel,
     lmp = answers?.displayDate(QuestionCode.LMP_DATE),
     edd = answers?.displayDate(QuestionCode.EDD),
-    dob = answers?.displayDate(QuestionCode.DATE_OF_BIRTH),
-    weight = answers?.displayValue(QuestionCode.WEIGHT_KG)?.let { "$it kg" },
+    // CHILD_REGISTRATION stores the infant's own DOB/weight under different question codes than
+    // MOTHER_REGISTRATION's `date_of_birth`/`weight_kg` (used below for a MOTHER profile). Reading
+    // the mother's codes for a child left both fields permanently blank on every child's profile.
+    dob = answers?.displayDate(dobQuestionCode),
+    weight = answers?.displayValue(weightQuestionCode)?.let { "$it kg" },
+    // CHILD_REGISTRATION has neither question this reads, so a child's profile always gets an
+    // empty list here — matching every other MOTHER_REGISTRATION-only field above. Computed by the
+    // suspend caller (getBeneficiary) and passed straight through — see the call site's comment.
+    diagnoses = diagnoses,
   )
+
+  private val Beneficiary.dobQuestionCode: String
+    get() = if (type == BeneficiaryType.INFANT) {
+      ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT
+    } else {
+      QuestionCode.DATE_OF_BIRTH
+    }
+
+  private val Beneficiary.weightQuestionCode: String
+    get() = if (type == BeneficiaryType.INFANT) {
+      ChildRegistrationQuestionCodes.CHILD_WEIGHT_AT_BIRTH_KG
+    } else {
+      QuestionCode.WEIGHT_KG
+    }
 
   private fun FormAnswers.displayValue(questionCode: String): String? =
     valueOf(questionCode)?.trim()?.takeIf { it.isNotBlank() }

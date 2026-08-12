@@ -13,13 +13,12 @@ interface VisitFormRepository {
   /**
    * Whether a Visit Form can be opened for this beneficiary at all.
    *
-   * Exists because [getVisitContext] throws for an id it does not recognise, and since CR-022g the
-   * app has beneficiaries it will not recognise: a Sakhi's own enrolments carry generated UUIDs,
-   * while the static implementation only knows its seeded ids. Without this check, tapping Start
-   * Visit on a real enrolment drops her on an error screen.
+   * Exists because [getVisitContext] can still throw for a genuinely unknown id (neither seeded
+   * nor a real enrolment) — the screen uses this to fail closed on a blank/missing id rather than
+   * navigate into an error state. Since CR-026 interim, a Sakhi's own real enrolment (generated
+   * UUID) resolves via a synthetic fallback context, so this no longer blocks her.
    *
-   * Goes away with CR-026, when the Visit Form is backed by real data and every beneficiary
-   * qualifies.
+   * Goes away entirely with CR-026, when the Visit Form is backed by real data.
    */
   suspend fun canStartVisit(beneficiaryId: String): Boolean
 }

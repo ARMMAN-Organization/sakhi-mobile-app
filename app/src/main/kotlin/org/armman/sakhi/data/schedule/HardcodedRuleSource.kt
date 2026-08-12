@@ -29,7 +29,7 @@ class HardcodedRuleSource @Inject constructor() : ScheduleRuleSource {
    * `UNKNOWN_RULE_VERSION`. Placeholder until backend supplies it — `HardcodedRuleSourceTest`
    * asserts on it so the swap is not forgotten.
    */
-  override val ruleVersion: String = SEEDED_RULE_VERSION_ID
+  override fun ruleVersion(visitType: VisitCodeType): String = SEEDED_RULE_VERSION_ID
 
   override fun intervalDays(visitType: VisitCodeType): Int = when (visitType) {
     VisitCodeType.ANC -> Anc.INTERVAL_DAYS

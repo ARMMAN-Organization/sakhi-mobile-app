@@ -209,7 +209,7 @@ class CcvScheduleGeneratorTest {
   fun `every row carries the rule version, a unique id and GENERATED status`() {
     val visits = series(CcvRiskState.NEVER_AT_HR)
 
-    assertTrue(visits.all { it.generatedByRuleVersion == HardcodedRuleSource().ruleVersion })
+    assertTrue(visits.all { it.generatedByRuleVersion == HardcodedRuleSource().ruleVersion(VisitCodeType.CCV) })
     assertEquals(visits.size, visits.map { it.localScheduleUuid }.distinct().size)
     assertTrue(visits.all { it.status == VisitScheduleStatus.GENERATED })
   }

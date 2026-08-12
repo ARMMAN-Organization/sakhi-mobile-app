@@ -1,10 +1,13 @@
 package org.armman.sakhi.di
 
+import com.google.gson.GsonBuilder
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import okhttp3.OkHttpClient
+import org.armman.sakhi.BuildConfig
 import org.armman.sakhi.data.schedule.HardcodedRuleSource
 import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
 import org.armman.sakhi.data.schedule.ScheduleRuleSource
@@ -13,6 +16,7 @@ import org.armman.sakhi.data.schedule.VisitScheduleApi
 import org.armman.sakhi.data.schedule.VisitScheduleSyncScheduler
 import org.armman.sakhi.data.schedule.WorkManagerVisitScheduleSyncScheduler
 import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
 import javax.inject.Singleton
 
 /**
@@ -45,9 +49,25 @@ abstract class ScheduleModule {
   ): VisitScheduleSyncScheduler
 
   companion object {
+    /**
+     * Deliberately its own [Retrofit] instance rather than reusing the app-wide one from
+     * `NetworkModule` — this is the only endpoint that needs `serializeNulls()`. The backend's
+     * `POST /visit-schedules/bulk` Zod schema requires `anchorVisitLocalUuid` present as a key
+     * (nullable, but not optional) on every schedule row; the app-wide Gson instance omits null
+     * fields entirely, which the backend rejects with a 400 "Required" error (confirmed on a real
+     * device). Scoping this to just this API avoids changing null-handling for every other
+     * endpoint, several of which rely on the default omit-null behavior.
+     */
     @Provides
     @Singleton
-    fun provideVisitScheduleApi(retrofit: Retrofit): VisitScheduleApi =
-      retrofit.create(VisitScheduleApi::class.java)
+    fun provideVisitScheduleApi(client: OkHttpClient): VisitScheduleApi {
+      val nullSerializingGson = GsonBuilder().serializeNulls().create()
+      val retrofit = Retrofit.Builder()
+        .baseUrl(BuildConfig.API_BASE_URL)
+        .client(client)
+        .addConverterFactory(GsonConverterFactory.create(nullSerializingGson))
+        .build()
+      return retrofit.create(VisitScheduleApi::class.java)
+    }
   }
 }

@@ -192,7 +192,7 @@ class NnScheduleGeneratorTest {
   fun `every row carries the rule version, a unique id and GENERATED status`() {
     val visits = seriesForFormFilledOn(delivery)
 
-    assertTrue(visits.all { it.generatedByRuleVersion == HardcodedRuleSource().ruleVersion })
+    assertTrue(visits.all { it.generatedByRuleVersion == HardcodedRuleSource().ruleVersion(VisitCodeType.NN) })
     assertEquals(visits.size, visits.map { it.localScheduleUuid }.distinct().size)
     assertTrue(visits.all { it.status == VisitScheduleStatus.GENERATED })
   }

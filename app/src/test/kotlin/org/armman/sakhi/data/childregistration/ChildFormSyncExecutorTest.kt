@@ -137,6 +137,10 @@ class ChildFormSyncExecutorTest {
     assertEquals("server-beneficiary-1", formSubmissionApi.lastRequest?.beneficiaryId)
     // beneficiary_id injected from the server response into formData.
     assertEquals("server-beneficiary-1", formSubmissionApi.lastRequest?.formData?.get("beneficiary_id"))
+    // The server-assigned id must survive onto the draft — ChildRegistrationSubmissionCoordinator
+    // now returns it (Result<String>, was Result<Unit>) precisely so this can be persisted and
+    // later used by the offline-first beneficiary list to match a synced child against her remote row.
+    assertEquals("server-beneficiary-1", dao.getByLocalBeneficiaryId("local-1")?.remoteBeneficiaryId)
   }
 
   @Test

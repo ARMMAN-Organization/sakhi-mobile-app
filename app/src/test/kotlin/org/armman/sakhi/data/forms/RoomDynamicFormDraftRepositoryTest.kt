@@ -16,6 +16,7 @@ import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.armman.sakhi.data.schedule.AncScheduleGenerator
 import org.armman.sakhi.data.schedule.CcvScheduleGenerator
 import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
+import org.armman.sakhi.data.schedule.FakeVisitScheduleSyncScheduler
 import org.armman.sakhi.data.schedule.HardcodedRuleSource
 import org.armman.sakhi.data.schedule.IncScheduleGenerator
 import org.armman.sakhi.data.schedule.MotherEnrolmentScheduleTrigger
@@ -23,7 +24,9 @@ import org.armman.sakhi.data.schedule.NnScheduleGenerator
 import org.armman.sakhi.data.schedule.PpScheduleGenerator
 import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
 import org.armman.sakhi.data.schedule.VisitCodeType
+import org.armman.sakhi.data.schedule.FakeVisitScheduleApi
 import org.armman.sakhi.data.schedule.VisitScheduleCoordinator
+import org.armman.sakhi.data.schedule.VisitScheduleSyncExecutor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -45,6 +48,7 @@ class RoomDynamicFormDraftRepositoryTest {
   private lateinit var formSubmissionApi: FakeFormSubmissionApi
   private lateinit var syncExecutor: DynamicFormSyncExecutor
   private lateinit var scheduleDao: FakeVisitScheduleDao
+  private lateinit var visitScheduleApi: FakeVisitScheduleApi
   private lateinit var repository: RoomDynamicFormDraftRepository
   private lateinit var lookupRepository: FakeLookupRepository
 
@@ -80,8 +84,10 @@ class RoomDynamicFormDraftRepositoryTest {
     // scheduling engine meet.
     scheduleDao = FakeVisitScheduleDao()
     val scheduleRepository = RoomVisitScheduleRepository(scheduleDao)
-    syncExecutor = DynamicFormSyncExecutor(dao, secureStore, coordinator, scheduleRepository)
+    syncExecutor = DynamicFormSyncExecutor(dao, secureStore, coordinator, scheduleRepository, FakeVisitScheduleSyncScheduler())
     val rules = HardcodedRuleSource()
+    visitScheduleApi = FakeVisitScheduleApi()
+    val visitScheduleSyncExecutor = VisitScheduleSyncExecutor(scheduleRepository, visitScheduleApi)
     val scheduleTrigger = MotherEnrolmentScheduleTrigger(
       coordinator = VisitScheduleCoordinator(
         repository = scheduleRepository,
@@ -99,6 +105,7 @@ class RoomDynamicFormDraftRepositoryTest {
       connectivityChecker,
       syncExecutor,
       scheduleTrigger,
+      visitScheduleSyncExecutor,
     )
   }
 
@@ -217,6 +224,9 @@ class RoomDynamicFormDraftRepositoryTest {
 
     assertEquals(DynamicFormSubmitResult.Synced, result)
     assertEquals(EnrollmentSyncStatus.SYNCED, dao.getByLocalBeneficiaryId("local-1")?.syncStatus)
+    // submitDraft's online path delegates straight to syncExecutor.runOne — the server-assigned id
+    // must come through here too, not just via the background run() sweep.
+    assertEquals("server-beneficiary-1", dao.getByLocalBeneficiaryId("local-1")?.remoteBeneficiaryId)
   }
 
   @Test
@@ -513,6 +523,58 @@ class RoomDynamicFormDraftRepositoryTest {
     assertTrue(
       "Every row must carry the server beneficiary id, or it can never upload",
       stored.all { it.serverBeneficiaryId == "server-beneficiary-1" },
+    )
+  }
+
+  /**
+   * The point of this fix: while online, the Sakhi should never need a manual Data Upload tap
+   * just to make a just-generated schedule sync-eligible AND actually synced — submitDraft now
+   * pushes it up itself, in the same call, the moment the beneficiary sync succeeds.
+   */
+  @Test
+  fun `submitDraft online success also syncs the freshly generated schedule immediately`() = runTest {
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    repository.submitDraft(
+      localBeneficiaryId = "local-1",
+      formCode = "MOTHER_REGISTRATION",
+      formVersionId = "version-1",
+      localSubmissionUuid = "submission-1",
+      answers = answers,
+      registrationDate = LocalDate.of(2026, 5, 20),
+    )
+
+    assertTrue("The schedule upload must have actually been attempted", visitScheduleApi.requests.isNotEmpty())
+    val stored = scheduleDao.getForBeneficiary("local-1")
+    assertTrue(
+      "No manual Data Upload tap happened, yet every row must already carry a server schedule id",
+      stored.all { it.serverScheduleId != null },
+    )
+  }
+
+  /** A failed immediate schedule upload must not turn a successful enrolment into a reported failure
+   * — it just leaves the schedule for the next manual Data Upload, exactly as before this fix. */
+  @Test
+  fun `a failed immediate schedule sync does not affect the reported submit result`() = runTest {
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+    visitScheduleApi.throwIoException = true
+
+    val result = repository.submitDraft(
+      localBeneficiaryId = "local-1",
+      formCode = "MOTHER_REGISTRATION",
+      formVersionId = "version-1",
+      localSubmissionUuid = "submission-1",
+      answers = answers,
+      registrationDate = LocalDate.of(2026, 5, 20),
+    )
+
+    assertEquals(DynamicFormSubmitResult.Synced, result)
+    val stored = scheduleDao.getForBeneficiary("local-1")
+    assertTrue(
+      "Left unsynced for the next Data Upload, not lost",
+      stored.all { it.serverScheduleId == null },
     )
   }
 

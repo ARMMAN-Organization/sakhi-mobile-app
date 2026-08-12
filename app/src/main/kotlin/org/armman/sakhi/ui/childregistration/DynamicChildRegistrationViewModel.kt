@@ -23,6 +23,7 @@ import org.armman.sakhi.data.forms.FormDateRuleset
 import org.armman.sakhi.data.forms.FormFieldInputType
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
+import org.armman.sakhi.data.forms.FormHiddenFieldReset
 import org.armman.sakhi.data.forms.FormNumericRangeValidator
 import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.FormVisibilityEvaluator
@@ -30,6 +31,7 @@ import org.armman.sakhi.data.forms.FormsRepository
 import org.armman.sakhi.data.forms.GeographyFieldOptionsResolver
 import org.armman.sakhi.data.forms.GeographyQuestionCodes
 import org.armman.sakhi.data.forms.RegistrationDatePrefill
+import org.armman.sakhi.data.forms.VaccinationAtBirthQuestionCodes
 import org.armman.sakhi.data.forms.newLocalSubmissionUuid
 import org.armman.sakhi.data.lookup.LookupRepository
 import org.armman.sakhi.data.motherlink.LinkedMother
@@ -254,10 +256,16 @@ class DynamicChildRegistrationViewModel @Inject constructor(
   }
 
   fun setAnswer(questionCode: String, value: String?) {
+    val fields = _uiState.value.version?.schemaJson.orEmpty()
     val previousPath = _uiState.value.answers.valueOf(WHO_ARE_YOU_REGISTERING)
     _uiState.update {
+      val previousAnswers = it.answers
+      val updatedAnswers = previousAnswers.withSingleValue(questionCode, value)
+      // A field this answer just hid (e.g. unchecking a vaccine hides its own date field) must not
+      // leave its old value sitting in FormAnswers — see FormHiddenFieldReset's doc for the bug
+      // that causes. Mirrors the mother flow's setAnswer.
       it.copy(
-        answers = it.answers.withSingleValue(questionCode, value),
+        answers = FormHiddenFieldReset.apply(fields, previousAnswers, updatedAnswers),
         // The Sakhi has taken ownership of this field: drop the "From mother's record" hint and,
         // just as importantly, exempt the value from being cleared by a later path switch.
         motherPrefilledCodes = it.motherPrefilledCodes - questionCode,
@@ -340,6 +348,10 @@ class DynamicChildRegistrationViewModel @Inject constructor(
         geography = version.geography.orEmpty(),
         socioDemographics = socioDemographics,
         formSchema = version.schemaJson,
+        // So mother_age (see MotherPrefillQuestionCodes.MOTHER_AGE) is derived against the same
+        // "today" as every other computed field on this form, not MotherPrefill's own now()
+        // default.
+        registrationDate = registrationDate,
       )
       _uiState.update {
         it.copy(
@@ -376,7 +388,14 @@ class DynamicChildRegistrationViewModel @Inject constructor(
       _uiState.value.answers.valueOf(WHO_ARE_YOU_REGISTERING) == PATH_REGISTERED_MOTHER
 
   fun setMultiAnswer(questionCode: String, values: List<String>) {
-    _uiState.update { it.copy(answers = it.answers.withMultiValue(questionCode, values)) }
+    val fields = _uiState.value.version?.schemaJson.orEmpty()
+    _uiState.update {
+      val previousAnswers = it.answers
+      val updatedAnswers = previousAnswers.withMultiValue(questionCode, values)
+      // Unchecking a vaccine (or picking "None") hides its date field — clear that stale value
+      // the same way setAnswer does, so it never rides along in the submission payload.
+      it.copy(answers = FormHiddenFieldReset.apply(fields, previousAnswers, updatedAnswers))
+    }
     revalidate()
   }
 
@@ -538,7 +557,14 @@ class DynamicChildRegistrationViewModel @Inject constructor(
       // A computedFrom field is never Sakhi-entered — required-gating it would permanently block
       // submission whenever its formula isn't confirmed yet (e.g. unique_id) with nothing the Sakhi
       // could do. Skip it here; a missing derived value is a backend/data gap to chase separately.
-      if (!field.required || field.computedFrom != null) return@all true
+      //
+      // The vaccination-at-birth date fields are the one place `field.required` alone isn't the
+      // whole story — schema says `required: false` for all 4 (correct: each is only mandatory
+      // once its own checkbox is checked), so VaccinationAtBirthQuestionCodes adds them back in
+      // here. See that object's doc (mirrors TdDoseQuestionCodes on the mother flow).
+      val effectivelyRequired = field.required ||
+        field.questionCode in VaccinationAtBirthQuestionCodes.CONDITIONALLY_REQUIRED_DATE_QUESTION_CODES
+      if (!effectivelyRequired || field.computedFrom != null) return@all true
       when (field.inputType) {
         FormFieldInputType.MULTISELECT, FormFieldInputType.MULTISELECT_DATE ->
           state.answers.multiValueOf(field.questionCode).isNotEmpty()

@@ -1,5 +1,6 @@
 package org.armman.sakhi.data.motherlink
 
+import com.google.gson.Gson
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
@@ -29,6 +30,14 @@ class RemoteMotherLinkRepositoryTest {
     var listCallCount = 0
 
     override suspend fun list(caseType: String, status: String): Response<BeneficiaryListResponseDto> {
+      listCallCount++
+      return listResponse?.invoke() ?: throw IOException("offline")
+    }
+
+    // Not exercised by this file (My Beneficiaries' RemoteBeneficiaryRepositoryTest owns listAll
+    // coverage) but required to implement BeneficiaryApi — delegates to the same fake response so
+    // an accidental call here fails loudly instead of NPEing.
+    override suspend fun listAll(caseType: String?, status: String?): Response<BeneficiaryListResponseDto> {
       listCallCount++
       return listResponse?.invoke() ?: throw IOException("offline")
     }
@@ -71,8 +80,13 @@ class RemoteMotherLinkRepositoryTest {
     pii = pii,
   )
 
+  // BeneficiaryListResponseDto.data is a raw JsonElement (see its KDoc — the backend has shipped
+  // both a bare array and an `{ "items": [...] }` wrapper); tests build it via Gson.toJsonTree
+  // rather than a list literal so they exercise the exact same normalization real responses do.
   private fun ok(vararg rows: BeneficiaryListItemDto) =
-    Response.success(BeneficiaryListResponseDto(success = true, message = "OK", data = rows.toList()))
+    Response.success(
+      BeneficiaryListResponseDto(success = true, message = "OK", data = Gson().toJsonTree(rows.toList())),
+    )
 
   private fun repo(api: BeneficiaryApi, store: SecureKeyValueStore = InMemoryStore()) =
     RemoteMotherLinkRepository(api, store)
@@ -157,7 +171,13 @@ class RemoteMotherLinkRepositoryTest {
   fun `treats success false as a failure`() = runTest {
     val api = FakeBeneficiaryApi(
       listResponse = {
-        Response.success(BeneficiaryListResponseDto(success = false, message = "nope", data = emptyList()))
+        Response.success(
+          BeneficiaryListResponseDto(
+            success = false,
+            message = "nope",
+            data = Gson().toJsonTree(emptyList<BeneficiaryListItemDto>()),
+          ),
+        )
       },
     )
     assertNull(repo(api).getRegisteredMothers())

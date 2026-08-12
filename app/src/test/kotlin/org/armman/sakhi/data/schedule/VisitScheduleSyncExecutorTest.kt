@@ -26,7 +26,7 @@ class VisitScheduleSyncExecutorTest {
     dao = FakeVisitScheduleDao()
     repository = RoomVisitScheduleRepository(dao)
     api = FakeVisitScheduleApi()
-    executor = VisitScheduleSyncExecutor(repository, api, HardcodedRuleSource())
+    executor = VisitScheduleSyncExecutor(repository, api)
   }
 
   // SY-1
@@ -209,7 +209,10 @@ class VisitScheduleSyncExecutorTest {
     executor.run()
 
     val request = api.requests.single()
-    assertEquals(HardcodedRuleSource().ruleVersion, request.generatedByRuleVersionId)
+    // The row's own stamped version, not a fresh rule-source lookup — see
+    // VisitScheduleSyncExecutor.uploadBatch's comment for why re-deriving it at sync time would
+    // be wrong. schedule()'s default generatedByRuleVersion is "test-v1".
+    assertEquals("test-v1", request.generatedByRuleVersionId)
     assertEquals("srv-ben-1", request.beneficiaryId)
 
     val dto = request.schedules.single()
@@ -257,7 +260,7 @@ class VisitScheduleSyncExecutorTest {
 }
 
 /** Records what was sent and lets each test choose one failure mode. */
-private class FakeVisitScheduleApi : VisitScheduleApi {
+internal class FakeVisitScheduleApi : VisitScheduleApi {
 
   val requests = mutableListOf<BulkVisitScheduleRequestDto>()
 

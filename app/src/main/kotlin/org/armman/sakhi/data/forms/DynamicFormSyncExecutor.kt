@@ -1,11 +1,13 @@
 package org.armman.sakhi.data.forms
 
+import android.util.Log
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.enrollment.DuplicateOutcome
 import org.armman.sakhi.data.enrollment.EnrollmentMappingException
 import org.armman.sakhi.data.enrollment.EnrollmentSyncOutcome
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
+import org.armman.sakhi.data.schedule.VisitScheduleSyncScheduler
 import retrofit2.HttpException
 import java.io.IOException
 import java.time.Instant
@@ -14,6 +16,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val HTTP_CONFLICT = 409
+
+/** Temporary diagnostic tag for the online-enrollment-to-visit-submit chain (CR-026 debugging). */
+private const val TAG = "SakhiSync"
 
 /** Shown to the Sakhi when a submission can't proceed because a submit-critical lookup category
  * (CASE_TYPE/BENEFICIARY_TYPE) hasn't loaded — a transient, connectivity-driven state (see
@@ -61,6 +66,7 @@ class DynamicFormSyncExecutor @Inject constructor(
   private val secureStore: SecureKeyValueStore,
   private val coordinator: DynamicFormSubmissionCoordinator,
   private val visitScheduleRepository: VisitScheduleRepository,
+  private val visitScheduleSyncScheduler: VisitScheduleSyncScheduler,
 ) {
 
   /** Processes every PENDING draft — used by the background [DynamicFormSyncWorker]. Unchanged
@@ -104,11 +110,29 @@ class DynamicFormSyncExecutor @Inject constructor(
                 syncStatus = EnrollmentSyncStatus.SYNCED,
                 lastAttemptAtEpochMillis = Instant.now().toEpochMilli(),
                 lastErrorMessage = null,
+                remoteBeneficiaryId = serverBeneficiaryId,
               ),
             )
             linkScheduleToServerBeneficiary(draft.localBeneficiaryId, serverBeneficiaryId)
+            // Closes the cross-queue race documented on ManualSyncTrigger: the visit_schedules
+            // WorkManager job is independent and unordered, so if it already ran (and found nothing
+            // eligible) before this beneficiary was linked, nothing would ever re-check it within the
+            // same Data Upload tap. Re-enqueuing now (REPLACE-safe, idempotent per
+            // VisitScheduleSyncScheduler's own doc) picks this beneficiary's schedule up immediately
+            // instead of requiring a second tap.
+            visitScheduleSyncScheduler.syncNow()
           },
           onFailure = { error ->
+            // Temporary diagnostic for CR-026 debugging (background Data Upload path): this branch
+            // previously had NO logging at all, so a real backend rejection (400/409/422/500) of a
+            // beneficiary submission during a manual Data Upload was completely silent — the draft
+            // just went to FAILED with no trace of why. httpCodeOrNull()/message surface the real
+            // HTTP code + response body that markFailed() below stores on the draft.
+            Log.w(
+              TAG,
+              "DynamicFormSyncExecutor.run(" + draft.localBeneficiaryId + "): submit failed — " +
+                error::class.simpleName + ", httpCode=" + error.httpCodeOrNull() + ", message=" + error.message,
+            )
             when {
               error is DynamicFormSubmissionException.BeneficiaryCreationFailed && error.httpCode == HTTP_CONFLICT -> {
                 // SRS FR-S-2.4/2.5 — possible duplicate. Held for the Sakhi to confirm/discard,
@@ -193,9 +217,17 @@ class DynamicFormSyncExecutor @Inject constructor(
               syncStatus = EnrollmentSyncStatus.SYNCED,
               lastAttemptAtEpochMillis = Instant.now().toEpochMilli(),
               lastErrorMessage = null,
+              remoteBeneficiaryId = serverBeneficiaryId,
             ),
           )
           linkScheduleToServerBeneficiary(draft.localBeneficiaryId, serverBeneficiaryId)
+          // Closes the cross-queue race documented on ManualSyncTrigger: the visit_schedules
+          // WorkManager job is independent and unordered, so if it already ran (and found nothing
+          // eligible) before this beneficiary was linked, nothing would ever re-check it within the
+          // same Data Upload tap. Re-enqueuing now (REPLACE-safe, idempotent per
+          // VisitScheduleSyncScheduler's own doc) picks this beneficiary's schedule up immediately
+          // instead of requiring a second tap.
+          visitScheduleSyncScheduler.syncNow()
           DynamicFormSyncItemResult.Synced
         },
         onFailure = { error ->
@@ -331,6 +363,10 @@ class DynamicFormSyncExecutor @Inject constructor(
   ) {
     runCatching {
       visitScheduleRepository.attachServerBeneficiaryId(localBeneficiaryId, serverBeneficiaryId)
+    }.onFailure { error ->
+      Log.e(TAG, "linkScheduleToServerBeneficiary($localBeneficiaryId -> $serverBeneficiaryId) failed", error)
+    }.onSuccess {
+      Log.d(TAG, "linkScheduleToServerBeneficiary($localBeneficiaryId -> $serverBeneficiaryId) OK")
     }
   }
 

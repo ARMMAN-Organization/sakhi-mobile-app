@@ -82,6 +82,11 @@ dependencies {
   implementation(libs.coroutines.android)
   implementation(libs.androidx.security.crypto)
 
+  // GoRules local rule evaluation (CR-032 Milestone 3) — runs published ANC/PP/NN/INC/CCV/HR
+  // decision graphs fully on-device. Exact API surface unconfirmed until first Gradle sync;
+  // see data/rules/ZenRuleEvaluator.kt for the isolation seam if method names differ.
+  // implementation(libs.gorules.zen.engine) // TEMP disabled — isolating kapt metadata-2.1.0 crash
+
   // Local persistence for the enrollment offline queue (drafts + sync status).
   implementation(libs.room.runtime)
   implementation(libs.room.ktx)

@@ -17,3 +17,7 @@ captures/
 api-calls.jsonl
 api-calls-live.jsonl
 api-calls.log
+
+# Local scratch: one-off migration scripts and build/test logs kept out of the tree
+_to_delete/
+.claude-write-test

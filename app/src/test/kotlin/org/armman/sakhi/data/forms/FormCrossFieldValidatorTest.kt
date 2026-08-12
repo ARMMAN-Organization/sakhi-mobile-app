@@ -182,4 +182,44 @@ class FormCrossFieldValidatorTest {
     val rule = FormCrossFieldRule(rule = "SOME_FUTURE_RULE", fields = listOf("a", "b"))
     assertTrue(FormCrossFieldValidator.violatedRules(listOf(rule), FormAnswers()).isEmpty())
   }
+
+  // --- Supplemental children-under-5 <= family-members rule --------------------------------
+  //
+  // Both MOTHER_REGISTRATION and CHILD_REGISTRATION ship an EMPTY `validationJson`, so nothing in
+  // the backend-supplied `rules` list enforces spec rows 33/34. FormCrossFieldValidator injects
+  // this LTE itself (SUPPLEMENTAL_RULES) — these tests exercise it directly via an EMPTY input
+  // rule list, proving the check does not depend on the schema declaring it.
+
+  @Test
+  fun `supplemental rule flags children under 5 exceeding family members even with no schema rules`() {
+    val answers = FormAnswers(
+      singleValues = mapOf(
+        CHILDREN_UNDER_FIVE_QUESTION_CODE to "5",
+        FAMILY_MEMBERS_QUESTION_CODE to "2",
+      ),
+    )
+    assertEquals(1, FormCrossFieldValidator.violatedRules(emptyList(), answers).size)
+  }
+
+  @Test
+  fun `supplemental rule passes when children under 5 does not exceed family members`() {
+    val answers = FormAnswers(
+      singleValues = mapOf(
+        CHILDREN_UNDER_FIVE_QUESTION_CODE to "2",
+        FAMILY_MEMBERS_QUESTION_CODE to "5",
+      ),
+    )
+    assertTrue(FormCrossFieldValidator.violatedRules(emptyList(), answers).isEmpty())
+  }
+
+  @Test
+  fun `supplemental rule is not evaluable yet when only one side is answered`() {
+    val answers = FormAnswers(singleValues = mapOf(FAMILY_MEMBERS_QUESTION_CODE to "2"))
+    assertTrue(FormCrossFieldValidator.violatedRules(emptyList(), answers).isEmpty())
+  }
+
+  @Test
+  fun `supplemental rule stays inert for a form that has neither question code`() {
+    assertTrue(FormCrossFieldValidator.violatedRules(listOf(lteRule), FormAnswers()).isEmpty())
+  }
 }

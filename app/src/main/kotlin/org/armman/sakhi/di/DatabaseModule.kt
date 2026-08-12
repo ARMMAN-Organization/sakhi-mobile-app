@@ -13,6 +13,7 @@ import org.armman.sakhi.data.db.SakhiDatabase
 import org.armman.sakhi.data.enrollment.EnrollmentDraftDao
 import org.armman.sakhi.data.forms.DynamicFormDraftDao
 import org.armman.sakhi.data.schedule.VisitScheduleDao
+import org.armman.sakhi.data.visitform.VisitFormDraftDao
 import javax.inject.Singleton
 
 private const val DATABASE_NAME = "sakhi.db"
@@ -27,10 +28,11 @@ object DatabaseModule {
   fun provideSakhiDatabase(@ApplicationContext context: Context): SakhiDatabase =
     Room.databaseBuilder(context, SakhiDatabase::class.java, DATABASE_NAME)
       // CR-020: v2→v3 ships a real additive migration (adds child_registration_drafts) so queued
-      // drafts survive the upgrade. CR-022: v3→v4 likewise adds visit_schedules.
+      // drafts survive the upgrade. CR-022: v3→v4 likewise adds visit_schedules. CR-026b: v4→v5
+      // likewise adds visit_form_drafts.
       // fallbackToDestructiveMigration() is retained only as the last-resort net for the
       // pre-release v1 DB (see SakhiDatabase's doc).
-      .addMigrations(SakhiDatabase.MIGRATION_2_3, SakhiDatabase.MIGRATION_3_4)
+      .addMigrations(SakhiDatabase.MIGRATION_2_3, SakhiDatabase.MIGRATION_3_4, SakhiDatabase.MIGRATION_4_5)
       .fallbackToDestructiveMigration()
       .build()
 
@@ -53,6 +55,11 @@ object DatabaseModule {
   @Singleton
   fun provideVisitScheduleDao(database: SakhiDatabase): VisitScheduleDao =
     database.visitScheduleDao()
+
+  @Provides
+  @Singleton
+  fun provideVisitFormDraftDao(database: SakhiDatabase): VisitFormDraftDao =
+    database.visitFormDraftDao()
 
   @Provides
   @Singleton

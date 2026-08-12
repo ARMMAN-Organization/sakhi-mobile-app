@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -62,6 +63,12 @@ fun BeneficiaryProfileScreen(
   val state by viewModel.uiState.collectAsStateWithLifecycle()
   val isTablet = LocalConfiguration.current.screenWidthDp >= Dimens.TabletMinWidthDp
   val context = LocalContext.current
+
+  // Reruns on every fresh entry into composition, including a pop-back from Start Visit — so a
+  // visit just marked COMPLETED (or any other change made downstream) shows up immediately instead
+  // of the stale snapshot this retained ViewModel loaded the first time it was created. See
+  // BeneficiaryProfileViewModel's doc for why this isn't in its init{} instead.
+  LaunchedEffect(Unit) { viewModel.loadProfile() }
   val today = remember {
     LocalDate.now().format(DateTimeFormatter.ofPattern("EEE, d MMM", Locale.getDefault()))
   }

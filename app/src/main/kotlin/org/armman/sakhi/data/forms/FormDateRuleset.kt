@@ -73,9 +73,36 @@ object FormDateRuleset {
   /**
    * Spec row 7 states the registration-to-LMP difference must be strictly `>30` and `<240` days,
    * so the inclusive day window an LMP answer may sit in is 31..239 days before registration.
+   *
+   * This is a data-sanity bound only — it catches an implausible/mistyped LMP, not "is this
+   * pregnancy still enrollable". [GESTATIONAL_AGE_CEILING_WEEKS] below is the separate, stricter
+   * eligibility rule; a value can sit inside this window and still be rejected by that one.
    */
   const val LMP_MIN_DAYS_BEFORE_REGISTRATION = 31L
   const val LMP_MAX_DAYS_BEFORE_REGISTRATION = 239L
+
+  /**
+   * Inclusive ceiling, in whole weeks, on gestational age at registration — reported bug: "allows
+   * registration of a pregnant woman beyond the permitted 0-6 months pregnancy enrollment period."
+   * The `Registration_PW_D` form-spec tab's own title states the intended window directly
+   * ("ANC Enrollment form : 1 to 6 months of pregnancy"), and the same sheet treats "6 months" and
+   * "24 weeks" as equivalent (rows 46/48, re: prior pregnancies/losses "before 6 months (24
+   * weeks)") — there is no separate day-based figure anywhere in the spec, so 24 weeks is the
+   * number used here.
+   *
+   * Deliberately separate from [LMP_MAX_DAYS_BEFORE_REGISTRATION]: that constant is a much wider
+   * (34-week) data-sanity bound on the LMP date itself (is this a plausible date at all), while this
+   * one is the PRD's actual enrollment-eligibility cutoff (should this pregnancy be enrolled at
+   * all) — a value can pass the first and still fail this one, which is exactly the reported bug
+   * (LMP 239 days before registration sits inside the sanity window but is ~34 weeks pregnant).
+   *
+   * Uses the same whole-weeks floor as [FormComputedFieldEvaluator]'s `GESTATIONAL_AGE_AT_REGISTRATION`
+   * (`daysBetween / 7`) so the number shown on the form and the number this rule judges never
+   * disagree.
+   */
+  const val GESTATIONAL_AGE_CEILING_WEEKS = 24L
+
+  private const val DAYS_PER_WEEK = 7L
 
   /**
    * Spec row 42 ("If ANC1 completed, please record the date"): "Only accept date after LMP or +5
@@ -85,6 +112,19 @@ object FormDateRuleset {
    */
   const val ANC1_DATE_QUESTION_CODE = "if_anc1_completed_please_record_the_date"
   const val ANC1_DATE_MAX_DAYS_AFTER_REGISTRATION = 5L
+
+  /**
+   * ANC_VISIT's sonography-confirmed LMP edit (spec row 8, "Copy of ... ANC visit form.csv").
+   * Spec asks for two checks: not future, AND the registration-to-LMP gap must be 31..239 days —
+   * only the first is implemented (bharath, 2026-08-07). The second needs the beneficiary's ANC
+   * registration date, which isn't available anywhere client-side yet (checked BeneficiaryProfile
+   * and VisitContext directly — neither carries one); guessing a source risks blocking a real
+   * Sakhi on a check that's silently wrong. [org.armman.sakhi.ui.visitform
+   * .DynamicVisitFormViewModel] passes its own `visitDate` (today) as [boundsFor]'s
+   * `registrationDate` param for this question code, so "not future" here really means
+   * "not after today" — revisit once a real registration date is wired through.
+   */
+  const val LMP_DATE_EDIT_QUESTION_CODE = "lmp_date_edit"
 
   /**
    * Which rule a date answer breaks. Mapped to a localized message by the UI layer.
@@ -109,6 +149,12 @@ object FormDateRuleset {
     /** LMP is more than [LMP_MAX_DAYS_BEFORE_REGISTRATION] days before the registration date. */
     LMP_TOO_OLD,
 
+    /** Gestational age at registration (from LMP) exceeds [GESTATIONAL_AGE_CEILING_WEEKS] — the
+     * pregnancy is beyond the 0-6 month enrollment window. Checked ahead of [LMP_TOO_OLD] in
+     * [violationFor], so an LMP that is both "too old" for data-sanity AND beyond the enrollment
+     * window reports this — the more specific, PRD-accurate reason — rather than the generic one. */
+    GESTATIONAL_AGE_BEYOND_ENROLLMENT_WINDOW,
+
     /** Registration date is after today. */
     REGISTRATION_DATE_IN_FUTURE,
 
@@ -130,6 +176,15 @@ object FormDateRuleset {
     /** Td-Booster date is not strictly after the answered Td-2 date — spec row 44: "the TD
      * booster dose should be after the TD2 date". */
     TD_BOOSTER_NOT_AFTER_TD_2,
+
+    /** [LMP_DATE_EDIT_QUESTION_CODE] is after today — the registration-gap half of spec row 8 is
+     * deliberately not checked yet, see that constant's doc. */
+    LMP_DATE_EDIT_FUTURE,
+
+    /** One of the 4 vaccination-at-birth dose dates ([VaccinationAtBirthQuestionCodes]) is after
+     * the registration date — mirrors [TD_DATE_IN_FUTURE]: a vaccination cannot be dated after the
+     * day the Sakhi is filling out the form. */
+    VACCINATION_AT_BIRTH_DATE_IN_FUTURE,
   }
 
   /** Selectable range for a field's date picker — the prevention half of the rule. Null means the
@@ -174,6 +229,10 @@ object FormDateRuleset {
       // Matches BOTH published spellings — see REGISTRATION_DATE_QUESTION_CODES.
       in REGISTRATION_DATE_QUESTION_CODES -> Bounds(min = null, max = registrationDate)
 
+      // "Not future" only — see LMP_DATE_EDIT_QUESTION_CODE's doc for why the registration-gap
+      // check is deliberately left out.
+      LMP_DATE_EDIT_QUESTION_CODE -> Bounds(min = null, max = reference)
+
       // Spec row 44: "Should not accept a future date" on all three, plus "TD2 date should be
       // after TD1, and the TD booster dose should be after the TD2 date". Each lower bound comes
       // from the PREVIOUS dose's answered date (open/unbounded until that's answered — nothing to
@@ -189,6 +248,15 @@ object FormDateRuleset {
         min = td2DateAnswer(answers)?.plusDays(1),
         max = registrationDate,
       )
+
+      // Q49 "Vaccination taken at birth?" ([VaccinationAtBirthQuestionCodes]) — each of the 4
+      // per-vaccine dates must not be in the future, same as the Td-dose dates above. No lower
+      // bound: unlike Td-1/Td-2/Td-Booster these 4 have no defined ordering against each other.
+      VaccinationAtBirthQuestionCodes.BCG_DATE_QUESTION_CODE,
+      VaccinationAtBirthQuestionCodes.OPV_DATE_QUESTION_CODE,
+      VaccinationAtBirthQuestionCodes.HEPATITIS_B_DATE_QUESTION_CODE,
+      VaccinationAtBirthQuestionCodes.VITAMIN_K_DATE_QUESTION_CODE,
+      -> Bounds(min = null, max = registrationDate)
 
       // Measured against registrationDate rather than `reference` on purpose: the ViewModel's
       // eligibility gate counts days from the same registrationDate, and prevention must not be able
@@ -246,9 +314,14 @@ object FormDateRuleset {
 
       LMP_DATE_QUESTION_CODE -> {
         val daysBefore = ChronoUnit.DAYS.between(value, reference)
+        // Same floor-to-whole-weeks the GESTATIONAL_AGE_AT_REGISTRATION computed field uses, so
+        // this rule and the number displayed on the form always agree.
+        val gestationalAgeWeeks = daysBefore / DAYS_PER_WEEK
         when {
           daysBefore < 0 -> Violation.LMP_FUTURE
           daysBefore < LMP_MIN_DAYS_BEFORE_REGISTRATION -> Violation.LMP_TOO_RECENT
+          gestationalAgeWeeks > GESTATIONAL_AGE_CEILING_WEEKS ->
+            Violation.GESTATIONAL_AGE_BEYOND_ENROLLMENT_WINDOW
           daysBefore > LMP_MAX_DAYS_BEFORE_REGISTRATION -> Violation.LMP_TOO_OLD
           else -> null
         }
@@ -266,6 +339,8 @@ object FormDateRuleset {
 
       in REGISTRATION_DATE_QUESTION_CODES ->
         Violation.REGISTRATION_DATE_IN_FUTURE.takeIf { value.isAfter(registrationDate) }
+
+      LMP_DATE_EDIT_QUESTION_CODE -> Violation.LMP_DATE_EDIT_FUTURE.takeIf { value.isAfter(reference) }
 
       TdDoseQuestionCodes.TD_1_DATE_QUESTION_CODE ->
         Violation.TD_DATE_IN_FUTURE.takeIf { value.isAfter(registrationDate) }
@@ -287,6 +362,12 @@ object FormDateRuleset {
           else -> null
         }
       }
+
+      VaccinationAtBirthQuestionCodes.BCG_DATE_QUESTION_CODE,
+      VaccinationAtBirthQuestionCodes.OPV_DATE_QUESTION_CODE,
+      VaccinationAtBirthQuestionCodes.HEPATITIS_B_DATE_QUESTION_CODE,
+      VaccinationAtBirthQuestionCodes.VITAMIN_K_DATE_QUESTION_CODE,
+      -> Violation.VACCINATION_AT_BIRTH_DATE_IN_FUTURE.takeIf { value.isAfter(registrationDate) }
 
       // NOTE: DATE_OF_BIRTH_OF_INFANT is deliberately absent, even though `boundsFor` bounds it.
       // Its eligibility windows are detected by DynamicChildRegistrationViewModel, which has the

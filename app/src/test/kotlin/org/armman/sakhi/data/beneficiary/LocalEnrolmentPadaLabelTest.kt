@@ -2,6 +2,7 @@ package org.armman.sakhi.data.beneficiary
 
 import kotlinx.coroutines.test.runTest
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
+import org.armman.sakhi.data.childregistration.FakeChildFormDraftDao
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.DynamicFormDraftEntity
 import org.armman.sakhi.data.forms.DynamicFormDraftPayload
@@ -43,6 +44,7 @@ class LocalEnrolmentPadaLabelTest {
     )
     source = LocalEnrolmentBeneficiarySource(
       draftDao,
+      FakeChildFormDraftDao(),
       secureStore,
       RoomVisitScheduleRepository(FakeVisitScheduleDao()),
       forms,

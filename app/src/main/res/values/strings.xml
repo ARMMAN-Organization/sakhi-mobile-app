@@ -5,6 +5,7 @@
   <string name="home_welcome">Welcome, Arogya Sakhi</string>
   <string name="home_profile_content_description">Profile</string>
   <string name="home_data_upload">Data Upload</string>
+  <string name="home_data_upload_offline">You\'re offline — connect to the internet to upload</string>
   <string name="home_updated_on">Updated %1$s</string>
   <string name="home_active_visits">Active Visits</string>
   <string name="home_open">Open</string>
@@ -18,6 +19,7 @@
   <string name="home_upload_modal_title">%1$d/%2$d Forms Uploaded</string>
   <string name="home_upload_modal_empty">No forms submitted yet.</string>
   <string name="home_upload_modal_registration_form_label">Registration</string>
+  <string name="home_upload_modal_visit_form_label">Visit Form</string>
   <string name="home_upload_modal_category_forms">%1$d/%2$d Forms</string>
   <string name="home_upload_status_synced">Uploaded</string>
   <string name="home_upload_status_pending">Pending</string>
@@ -86,6 +88,9 @@
   <string name="beneficiaries_filter_pada">Pada</string>
   <string name="beneficiaries_filter_risk">Risk</string>
   <string name="beneficiaries_empty">No beneficiaries match the current filters.</string>
+  <!-- Shown instead of beneficiaries_empty when the tab is empty but no Pada/Risk filter is
+       selected — the filtered-results wording wrongly implied a filter was active. -->
+  <string name="beneficiaries_empty_no_filters">No beneficiaries found.</string>
   <string name="beneficiaries_error_load">We couldn\'t load your beneficiaries. Please try again.</string>
 
   <!-- Visit Tracker -->
@@ -190,6 +195,7 @@
   <string name="enrollment_consent_play_video">Play welcome video</string>
   <string name="enrollment_consent_retake_photo">Retake photo of consent form</string>
   <string name="enrollment_consent_photo_captured">Photo captured</string>
+  <string name="enrollment_consent_photo_preview">Preview of captured consent photo</string>
   <!-- Legacy static enrollment stepper (ConsentStep) only — the two live dynamic flows now toast
        and exit instead of showing an inline banner. -->
   <string name="enrollment_consent_refused">Consent was not received — the enrollment cannot continue.</string>
@@ -238,13 +244,13 @@
   <string name="enrollment_pi_household_placeholder"></string>
   <string name="enrollment_pi_children_under5">Children under 5 years in household</string>
   <string name="enrollment_pi_children_placeholder"></string>
-  <string name="enrollment_pi_state">Name of the State</string>
-  <string name="enrollment_pi_district">Name of District</string>
-  <string name="enrollment_pi_block">Name of Block/Taluka</string>
-  <string name="enrollment_pi_village">Name of the Revenue Village/Grampanchayat</string>
-  <string name="enrollment_pi_pada">Beneficiary Pada name</string>
-  <string name="enrollment_pi_phc">Beneficiary PHC name</string>
-  <string name="enrollment_pi_sub_centre">Name of Sub Center</string>
+  <string name="enrollment_pi_state">Name of the State *</string>
+  <string name="enrollment_pi_district">Name of District *</string>
+  <string name="enrollment_pi_block">Name of Block/Taluka *</string>
+  <string name="enrollment_pi_village">Name of the Revenue Village/Grampanchayat *</string>
+  <string name="enrollment_pi_pada">Beneficiary Pada name *</string>
+  <string name="enrollment_pi_phc">Beneficiary PHC name *</string>
+  <string name="enrollment_pi_sub_centre">Name of Sub Center *</string>
   <string name="enrollment_pi_lmp_known">Does the woman know her LMP?</string>
   <string name="enrollment_pi_yes">Yes</string>
   <string name="enrollment_pi_no">No</string>
@@ -261,6 +267,7 @@
   <string name="enrollment_error_lmp_future">LMP cannot be in the future</string>
   <string name="enrollment_error_lmp_recent">LMP must be more than 30 days before registration</string>
   <string name="enrollment_error_lmp_old">LMP must be less than 240 days before registration</string>
+  <string name="enrollment_error_gestational_age_ceiling">This pregnancy is beyond 6 months (24 weeks) and cannot be enrolled</string>
   <string name="enrollment_error_anc1_date_not_after_lmp">ANC-1 date must be after the LMP date</string>
   <string name="enrollment_error_anc1_date_too_late">ANC-1 date cannot be more than 5 days after the registration date</string>
   <string name="form_error_td_date_future">This date cannot be in the future</string>
@@ -387,6 +394,23 @@
   <string name="visit_form_next_health_info">Health Info</string>
   <string name="visit_form_next_referral">Referral</string>
   <string name="visit_form_submit">Submit</string>
+  <string name="visit_form_submitted">Visit submitted successfully</string>
+  <string name="visit_form_queued_offline">Visit saved. It will upload automatically on your next Data Upload.</string>
+  <string name="visit_form_referral_details_title">Please fill referral details</string>
+  <string name="visit_form_referral_date">Date</string>
+  <string name="visit_form_referral_facility">Referred Health Facility</string>
+  <string name="visit_form_referral_type">Type of Referral</string>
+  <string name="visit_form_referral_type_accompanied">Accompanied</string>
+  <string name="visit_form_referral_type_standard">Standard</string>
+  <string-array name="visit_form_referral_facility_options">
+    <item>Civil Hospital</item>
+    <item>Sub-district Hospital</item>
+    <item>Rural Hospital</item>
+    <item>Primary Health Centre</item>
+    <item>Subcentre</item>
+    <item>Pvt. Hospital</item>
+    <item>Other</item>
+  </string-array>
   <string name="visit_form_exit_title">Leave visit form?</string>
   <string name="visit_form_exit_message">This visit has no partial-save — all entries will be lost if you leave now.</string>
   <string name="visit_form_exit_cancel">Stay</string>
@@ -494,6 +518,7 @@
   <!-- ANC Visit Form — Summary tab (CR-016c) -->
   <string name="visit_form_vs_risk_identified">Risk Identified</string>
   <string name="visit_form_vs_no_conditions">No known conditions</string>
+  <string name="visit_form_vs_no_known_risks">No known risks identified</string>
   <string name="visit_form_vs_edit">Edit</string>
   <string name="visit_form_vs_tests_title">Tests</string>
   <string name="visit_form_vs_symptoms_title">Symptoms</string>

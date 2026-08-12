@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -47,6 +48,7 @@ import org.armman.sakhi.ui.components.AppTabRow
 import org.armman.sakhi.ui.components.BackHeader
 import org.armman.sakhi.ui.components.ConfirmationDialog
 import org.armman.sakhi.ui.components.PrimaryButton
+import org.armman.sakhi.ui.components.SecondaryButton
 import org.armman.sakhi.ui.components.StatusBanner
 import org.armman.sakhi.ui.components.StatusBannerVariant
 import org.armman.sakhi.ui.enrollment.steps.EnrollmentCompleteContent
@@ -319,6 +321,10 @@ private fun FormContent(
     }
 
     FormActionBar(
+      // First tab (Consent) has nothing to go back to within the form — the header's back arrow
+      // already exits it. Every later tab (including Summary) gets a Back pill, matching the
+      // static enrollment flow's per-step design this dynamic screen otherwise mirrors.
+      showBack = safeIndex > 0,
       showSubmit = isSummaryTab,
       nextLabel = tabs.getOrNull(safeIndex + 1),
       // Per-tab gate: the forward button unlocks only once THIS tab's required fields are filled;
@@ -326,6 +332,7 @@ private fun FormContent(
       canGoNext = currentSchemaSection?.let(viewModel::isSectionReady) ?: false,
       canSubmit = viewModel.isReadyToSubmit(),
       submissionState = state.submissionState,
+      onBack = { onTabSelected(safeIndex - 1) },
       onNext = { onTabSelected(safeIndex + 1) },
       onSubmit = { viewModel.submit() },
     )
@@ -455,15 +462,19 @@ private fun DynamicFormFieldList(
   }
 }
 
-/** Pinned bottom action bar: forward navigation ("Personal Info →", …, "Summary →") on the form
- * tabs, "Submit" on the Summary tab — matching the design's per-tab flow. Right-aligned pill. */
+/** Pinned bottom action bar: an outlined "Back" pill (every tab but the first) on the left,
+ * forward navigation ("Personal Info →", …, "Summary →") or "Submit" (Summary tab) on the right —
+ * matching the design's per-tab flow, and the same Back/forward pairing the static enrollment
+ * flow's [org.armman.sakhi.ui.enrollment.EnrollmentScreen] uses for its own steps. */
 @Composable
 private fun FormActionBar(
+  showBack: Boolean,
   showSubmit: Boolean,
   nextLabel: String?,
   canGoNext: Boolean,
   canSubmit: Boolean,
   submissionState: SubmissionState,
+  onBack: () -> Unit,
   onNext: () -> Unit,
   onSubmit: () -> Unit,
 ) {
@@ -473,7 +484,17 @@ private fun FormActionBar(
       .fillMaxWidth()
       .padding(horizontal = Dimens.ScreenPadding, vertical = Dimens.ItemSpacing),
   ) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+      if (showBack) {
+        SecondaryButton(
+          text = stringResource(R.string.enrollment_pi_back),
+          onClick = onBack,
+          leadingIcon = painterResource(R.drawable.ic_arrow_left),
+        )
+      }
+      // Fills all remaining width so the forward/submit button stays right-aligned whether or not
+      // a Back pill is showing — same trick the static flow's StepFooter uses.
+      Spacer(modifier = Modifier.weight(1f))
       if (showSubmit) {
         PrimaryButton(
           text = stringResource(R.string.enrollment_submit),

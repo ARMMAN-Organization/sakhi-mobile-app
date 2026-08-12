@@ -127,6 +127,44 @@ class MotherPrefillTest {
     )
     assertNull(result.answers.valueOf(MotherPrefillQuestionCodes.MOTHER_DATE_OF_BIRTH))
     assertEquals("Deepa T Test", result.answers.valueOf(MotherPrefillQuestionCodes.CAREGIVER_NAME))
+    // A DOB-less mother can't derive an age either — mother_age must stay untouched (and therefore
+    // still freely Sakhi-editable) rather than written as a wrong/blank value.
+    assertNull(result.answers.valueOf(MotherPrefillQuestionCodes.MOTHER_AGE))
+    assertFalse(MotherPrefillQuestionCodes.MOTHER_AGE in result.prefilledCodes)
+  }
+
+  // Regression test for "Age field is editable even when Mother DOB is already fetched using
+  // Beneficiary ID" — mother_age must be derived from the linked mother's DOB, not left blank for
+  // the Sakhi to fill in a conflicting value.
+  @Test
+  fun `derives mother_age from the linked mother's dob and the child registration date`() {
+    val result = MotherPrefill.apply(
+      FormAnswers(),
+      mother(dateOfBirth = LocalDate.of(2001, 7, 29)),
+      consent = null,
+      geography = geography,
+      registrationDate = LocalDate.of(2026, 8, 9),
+    )
+    assertEquals("25", result.answers.valueOf(MotherPrefillQuestionCodes.MOTHER_AGE))
+    assertTrue(MotherPrefillQuestionCodes.MOTHER_AGE in result.prefilledCodes)
+  }
+
+  // The Sakhi may have typed an age herself before switching to (or re-selecting on) the
+  // registered-mother path — an explicit mother selection must overwrite it, same as every other
+  // prefilled field (MAP-09).
+  @Test
+  fun `mother_age overwrites a previously typed value on selection`() {
+    val existing = FormAnswers().withSingleValue(MotherPrefillQuestionCodes.MOTHER_AGE, "99")
+
+    val result = MotherPrefill.apply(
+      existing,
+      mother(dateOfBirth = LocalDate.of(2001, 7, 29)),
+      consent = null,
+      geography = geography,
+      registrationDate = LocalDate.of(2026, 8, 9),
+    )
+
+    assertEquals("25", result.answers.valueOf(MotherPrefillQuestionCodes.MOTHER_AGE))
   }
 
   // MAP-07

@@ -200,7 +200,10 @@ private fun BeneficiaryList(
       item { MonthFilterRow(state, viewModel) }
     }
     if (beneficiaries.isEmpty()) {
-      item { EmptyState() }
+      // "No beneficiaries match the current filters" is only true once a Pada/Risk filter is
+      // actually selected -- reported bug: it showed unconditionally, so an empty tab with no
+      // filter applied at all still implied filtering was active.
+      item { EmptyState(hasActiveFilters = state.selectedPadas.isNotEmpty() || state.selectedRisks.isNotEmpty()) }
     }
     items(beneficiaries, key = { it.id }) { beneficiary ->
       BeneficiaryCard(
@@ -279,13 +282,19 @@ private fun LoadError(onRetry: () -> Unit) {
 }
 
 @Composable
-private fun EmptyState() {
+private fun EmptyState(hasActiveFilters: Boolean) {
   Box(
     contentAlignment = Alignment.Center,
     modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
   ) {
     Text(
-      text = stringResource(R.string.beneficiaries_empty),
+      // Reported bug: this always read "No beneficiaries match the current filters," even with
+      // no Pada/Risk filter selected -- wrongly implying filtering was active on a genuinely
+      // empty tab (or one emptied by search/month selection, neither of which is a Pada/Risk
+      // filter). Only the Pada/Risk-filtered case gets the filtered-results wording now.
+      text = stringResource(
+        if (hasActiveFilters) R.string.beneficiaries_empty else R.string.beneficiaries_empty_no_filters,
+      ),
       style = MaterialTheme.typography.bodyLarge,
       color = NeutralG200,
     )

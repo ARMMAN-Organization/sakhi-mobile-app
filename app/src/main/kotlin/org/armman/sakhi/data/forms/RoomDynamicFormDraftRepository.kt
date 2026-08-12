@@ -1,5 +1,6 @@
 package org.armman.sakhi.data.forms
 
+import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
@@ -7,6 +8,7 @@ import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import org.armman.sakhi.data.enrollment.DuplicateAcknowledgement
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.schedule.MotherEnrolmentScheduleTrigger
+import org.armman.sakhi.data.schedule.VisitScheduleSyncExecutor
 import java.time.Instant
 import java.time.LocalDate
 import javax.inject.Inject
@@ -18,6 +20,9 @@ import javax.inject.Singleton
  * place that branches on it.
  */
 private const val MOTHER_REGISTRATION_FORM_CODE = "MOTHER_REGISTRATION"
+
+/** Temporary diagnostic tag for the online-enrollment-to-visit-submit chain (CR-026 debugging). */
+private const val TAG = "SakhiSync"
 
 /**
  * Offline-first [DynamicFormDraftRepository]: sync metadata in Room ([DynamicFormDraftDao]),
@@ -39,6 +44,7 @@ class RoomDynamicFormDraftRepository @Inject constructor(
   private val connectivityChecker: ConnectivityChecker,
   private val syncExecutor: DynamicFormSyncExecutor,
   private val scheduleTrigger: MotherEnrolmentScheduleTrigger,
+  private val visitScheduleSyncExecutor: VisitScheduleSyncExecutor,
 ) : DynamicFormDraftRepository {
 
   override suspend fun saveDraft(
@@ -82,10 +88,25 @@ class RoomDynamicFormDraftRepository @Inject constructor(
     // NetworkType.CONNECTED constraint and fire by itself on reconnect, which is the auto-sync
     // SRS §3A.1 rules out.
     if (!connectivityChecker.isOnline()) {
+      Log.w(TAG, "submitDraft($localBeneficiaryId): isOnline()=false, queuing offline")
       return DynamicFormSubmitResult.QueuedOffline
     }
 
-    return syncExecutor.runOne(localBeneficiaryId).toSubmitResult()
+    val result = syncExecutor.runOne(localBeneficiaryId).toSubmitResult()
+    Log.d(TAG, "submitDraft($localBeneficiaryId): beneficiary sync result=$result")
+
+    // We already have a live connection right now, so push the freshly generated ANC schedule up
+    // immediately too — without this it would sit unsynced until the Sakhi's next manual Data
+    // Upload even though nothing is stopping it from going now (this is the online case only; SRS
+    // §3A.1's manual-trigger rule is unaffected offline). Best-effort: any failure here leaves the
+    // schedule PENDING for the next Data Upload exactly as before, and must never turn a
+    // successful beneficiary registration into a reported failure.
+    if (formCode == MOTHER_REGISTRATION_FORM_CODE && result == DynamicFormSubmitResult.Synced) {
+      val scheduleSyncOutcome = runCatching { visitScheduleSyncExecutor.run() }
+      Log.d(TAG, "submitDraft($localBeneficiaryId): immediate schedule sync outcome=$scheduleSyncOutcome")
+    }
+
+    return result
   }
 
   /**

@@ -200,7 +200,9 @@ private fun ActiveVisitsCard(summary: DashboardSummary, onSeeVisitTracker: () ->
         modifier = Modifier.weight(1f),
       )
       StatTile(
-        icon = painterResource(R.drawable.ic_referral),
+        // Design update: Pending Referral Follow-up now uses the users-round icon
+        // (design/icons/users-round.svg) instead of the old referral glyph.
+        icon = painterResource(R.drawable.ic_users_round),
         value = buildAnnotatedString { append(visits.pendingReferralCount.toString()) },
         caption = buildAnnotatedString { append(stringResource(R.string.home_pending_referral)) },
         modifier = Modifier.weight(1f),

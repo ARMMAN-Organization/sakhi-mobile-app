@@ -72,12 +72,13 @@ class ChildFormSyncExecutor @Inject constructor(
           fallbackRegistrationDate = parseRegistrationDate(payload.registrationDateIso),
         )
         result.fold(
-          onSuccess = {
+          onSuccess = { serverBeneficiaryId ->
             dao.upsert(
               draft.copy(
                 syncStatus = EnrollmentSyncStatus.SYNCED,
                 lastAttemptAtEpochMillis = Instant.now().toEpochMilli(),
                 lastErrorMessage = null,
+                remoteBeneficiaryId = serverBeneficiaryId,
               ),
             )
           },
@@ -154,12 +155,13 @@ class ChildFormSyncExecutor @Inject constructor(
         fallbackRegistrationDate = parseRegistrationDate(payload.registrationDateIso),
       )
       result.fold(
-        onSuccess = {
+        onSuccess = { serverBeneficiaryId ->
           dao.upsert(
             draft.copy(
               syncStatus = EnrollmentSyncStatus.SYNCED,
               lastAttemptAtEpochMillis = Instant.now().toEpochMilli(),
               lastErrorMessage = null,
+              remoteBeneficiaryId = serverBeneficiaryId,
             ),
           )
           ChildFormSyncItemResult.Synced

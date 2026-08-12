@@ -13,7 +13,9 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.flow.toList
 import org.armman.sakhi.data.childregistration.FakeChildFormSyncScheduler
+import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import org.armman.sakhi.data.dashboard.ActiveBeneficiaries
 import org.armman.sakhi.data.dashboard.ActiveVisits
 import org.armman.sakhi.data.dashboard.DashboardRepository
@@ -21,6 +23,7 @@ import org.armman.sakhi.data.dashboard.DashboardSummary
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.enrollment.FakeEnrollmentSyncScheduler
 import org.armman.sakhi.data.schedule.FakeVisitScheduleSyncScheduler
+import org.armman.sakhi.data.visitform.FakeVisitFormSyncScheduler
 import org.armman.sakhi.data.forms.FakeDynamicFormSyncScheduler
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.DynamicFormSubmitResult
@@ -98,6 +101,12 @@ class HomeViewModelTest {
       if (failObserve) flow { throw IOException("db read failed") } else recordsFlow
   }
 
+  /** Controllable fake, defaulting to online so every pre-existing test below (written before the
+   * offline guard existed) keeps exercising the online path unchanged. */
+  private class FakeConnectivityChecker(var online: Boolean = true) : ConnectivityChecker {
+    override fun isOnline(): Boolean = online
+  }
+
   /**
    * Only the two duplicate-resolution methods matter here — Home reads the draft list through
    * [UploadRecordsSource], and uses this repository purely to record the Sakhi's answer.
@@ -148,7 +157,9 @@ class HomeViewModelTest {
   private lateinit var childScheduler: FakeChildFormSyncScheduler
   private lateinit var enrollmentScheduler: FakeEnrollmentSyncScheduler
   private lateinit var visitScheduleScheduler: FakeVisitScheduleSyncScheduler
+  private lateinit var visitFormScheduler: FakeVisitFormSyncScheduler
   private lateinit var manualSyncTrigger: ManualSyncTrigger
+  private lateinit var connectivityChecker: FakeConnectivityChecker
 
   @Before
   fun setUp() {
@@ -160,6 +171,7 @@ class HomeViewModelTest {
     childScheduler = FakeChildFormSyncScheduler()
     enrollmentScheduler = FakeEnrollmentSyncScheduler()
     visitScheduleScheduler = FakeVisitScheduleSyncScheduler()
+    visitFormScheduler = FakeVisitFormSyncScheduler()
     // Real ManualSyncTrigger over fake schedulers: its whole job is the fan-out, so faking the
     // trigger itself would test nothing.
     manualSyncTrigger = ManualSyncTrigger(
@@ -167,7 +179,9 @@ class HomeViewModelTest {
       childScheduler,
       enrollmentScheduler,
       visitScheduleScheduler,
+      visitFormScheduler,
     )
+    connectivityChecker = FakeConnectivityChecker()
   }
 
   @After
@@ -176,7 +190,7 @@ class HomeViewModelTest {
   }
 
   private fun viewModel() =
-    HomeViewModel(repository, uploadRecordsSource, manualSyncTrigger, draftRepository)
+    HomeViewModel(repository, uploadRecordsSource, manualSyncTrigger, draftRepository, connectivityChecker)
 
   /** Keeps the WhileSubscribed StateFlows active for the duration of a test so their derived values
    * are computed (mirrors the screen collecting them). */
@@ -366,6 +380,38 @@ class HomeViewModelTest {
     assertEquals(2, dynamicScheduler.syncNowCallCount)
     assertEquals(2, childScheduler.syncNowCallCount)
     assertEquals(2, enrollmentScheduler.syncNowCallCount)
+  }
+
+  // --- Offline Data Upload tap (2026-08-08) ------------------------------------------------
+
+  @Test
+  fun `Data Upload tap while offline starts no sync and never opens the modal`() = runTest(dispatcher) {
+    connectivityChecker.online = false
+    val viewModel = viewModel()
+    observe(viewModel)
+
+    viewModel.onDataUploadClicked()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(0, dynamicScheduler.syncNowCallCount)
+    assertEquals(0, childScheduler.syncNowCallCount)
+    assertEquals(0, enrollmentScheduler.syncNowCallCount)
+    assertFalse(viewModel.uploadModalState.value.isVisible)
+  }
+
+  @Test
+  fun `Data Upload tap while offline emits OfflineUploadBlocked`() = runTest(dispatcher) {
+    connectivityChecker.online = false
+    val viewModel = viewModel()
+    observe(viewModel)
+
+    val events = mutableListOf<HomeEvent>()
+    backgroundScope.launch(dispatcher) { viewModel.events.toList(events) }
+
+    viewModel.onDataUploadClicked()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(listOf(HomeEvent.OfflineUploadBlocked), events)
   }
 
   @Test

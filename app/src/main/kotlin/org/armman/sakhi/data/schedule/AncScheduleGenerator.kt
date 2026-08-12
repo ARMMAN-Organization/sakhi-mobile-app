@@ -71,7 +71,7 @@ class AncScheduleGenerator @Inject constructor(
         windowEndDate = window.end,
         anchorType = AnchorType.REGISTRATION,
         anchorDate = context.registrationDate,
-        generatedByRuleVersion = rules.ruleVersion,
+        generatedByRuleVersion = rules.ruleVersion(VisitCodeType.ANC),
         escalationPolicy = rules.escalationPolicy(VisitCodeType.ANC),
         createdAtEpochMillis = createdAtMillis,
       )
@@ -127,7 +127,7 @@ class AncScheduleGenerator @Inject constructor(
       windowEndDate = window.end,
       anchorType = AnchorType.EDD,
       anchorDate = edd,
-      generatedByRuleVersion = rules.ruleVersion,
+      generatedByRuleVersion = rules.ruleVersion(VisitCodeType.ANC_POST_EDD),
       escalationPolicy = rules.escalationPolicy(VisitCodeType.ANC_POST_EDD),
       createdAtEpochMillis = createdAt.toEpochMilli(),
     )
@@ -176,7 +176,7 @@ class AncScheduleGenerator @Inject constructor(
       anchorType = AnchorType.ACTUAL_VISIT,
       anchorDate = actualCompletionDate,
       anchorVisitLocalUuid = triggeringVisit.localScheduleUuid,
-      generatedByRuleVersion = rules.ruleVersion,
+      generatedByRuleVersion = rules.ruleVersion(VisitCodeType.ANC_HR),
       escalationPolicy = rules.escalationPolicy(VisitCodeType.ANC_HR),
       createdAtEpochMillis = createdAt.toEpochMilli(),
     )

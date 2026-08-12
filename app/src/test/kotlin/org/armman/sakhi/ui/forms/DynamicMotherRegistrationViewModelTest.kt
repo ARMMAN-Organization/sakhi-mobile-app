@@ -233,6 +233,23 @@ class DynamicMotherRegistrationViewModelTest {
   }
 
   @Test
+  fun `registration_date is never in visibleFields, under either spelling`() = runTest {
+    val vm = viewModel(
+      listOf(
+        field(REGISTRATION_DATE_QUESTION_CODE, section = "Personal Info", inputType = "date"),
+        field(REGISTRATION_DATE_QUESTION_CODE_CORRECTED, section = "Personal Info", inputType = "date"),
+        field("mobile_number", section = "Personal Info"),
+      ),
+    )
+
+    val codes = vm.visibleFields().map { it.questionCode }
+
+    assertFalse(codes.contains(REGISTRATION_DATE_QUESTION_CODE))
+    assertFalse(codes.contains(REGISTRATION_DATE_QUESTION_CODE_CORRECTED))
+    assertTrue(codes.contains("mobile_number"))
+  }
+
+  @Test
   fun `sections group fields in schema order and hide beneficiary_id from its section`() = runTest {
     val vm = viewModel(
       listOf(
@@ -620,6 +637,31 @@ class DynamicMotherRegistrationViewModelTest {
     assertEquals("Test", rows.first { it.label == "first_name" }.value)
     assertEquals("Hindu", rows.first { it.label == "religion" }.value) // code resolved to label
     assertTrue(rows.none { it.label == "remarks" }) // blank field skipped
+  }
+
+  @Test
+  fun `buildSummary formats a date answer as dd-MM-yyyy, not the stored ISO value`() = runTest {
+    // Reported bug: the Summary tab printed the raw stored "2026-08-07" instead of "07-08-2026".
+    val vm = viewModel(
+      listOf(field("lmp_date", section = "Personal Info", required = false, inputType = "date")),
+    )
+    vm.setAnswer("lmp_date", "2026-08-07")
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val rows = vm.buildSummary("Completed", "Photo captured").single { it.title == "Personal Info" }.rows
+    assertEquals("07-08-2026", rows.single { it.label == "lmp_date" }.value)
+  }
+
+  @Test
+  fun `buildSummary falls back to the raw value for an unparseable date answer`() = runTest {
+    val vm = viewModel(
+      listOf(field("lmp_date", section = "Personal Info", required = false, inputType = "date")),
+    )
+    vm.setAnswer("lmp_date", "not-a-date")
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val rows = vm.buildSummary("Completed", "Photo captured").single { it.title == "Personal Info" }.rows
+    assertEquals("not-a-date", rows.single { it.label == "lmp_date" }.value)
   }
 
   @Test

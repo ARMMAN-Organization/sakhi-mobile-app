@@ -64,7 +64,7 @@ class PpScheduleGenerator @Inject constructor(
         windowEndDate = window.end,
         anchorType = AnchorType.DELIVERY_DATE,
         anchorDate = deliveryDate,
-        generatedByRuleVersion = rules.ruleVersion,
+        generatedByRuleVersion = rules.ruleVersion(VisitCodeType.PP),
         escalationPolicy = rules.escalationPolicy(VisitCodeType.PP),
         createdAtEpochMillis = createdAtMillis,
       )

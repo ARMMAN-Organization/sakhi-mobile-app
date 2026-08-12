@@ -100,7 +100,7 @@ class LoginViewModel @Inject constructor(
   @StringRes
   private fun LoginFailureReason.toMessageRes(): Int = when (this) {
     LoginFailureReason.INVALID_CREDENTIALS -> R.string.login_error_invalid_credentials
-    LoginFailureReason.VALIDATION_ERROR -> R.string.login_error_generic
+    LoginFailureReason.VALIDATION_ERROR -> R.string.login_error_invalid_credentials
     LoginFailureReason.NETWORK_ERROR -> R.string.login_error_network
     LoginFailureReason.WRONG_ROLE -> R.string.login_error_wrong_role
     LoginFailureReason.OFFLINE_NO_CACHE -> R.string.login_error_offline_no_cache

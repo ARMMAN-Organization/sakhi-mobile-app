@@ -156,6 +156,86 @@ class RemoteFormsRepositoryTest {
     )
   }
 
+  // --- FormVisibleWhenDeserializer: malformed backend content must not fail the whole parse ----
+
+  @Test
+  fun `a visibleWhen sent as a JSON array does not fail the whole schema parse`() = runTest {
+    // The real bug report: schemaJson[7]'s visibleWhen arrived as a JSON array instead of the
+    // documented single object (form-field.dto.ts). A bare reflective Gson parse throws
+    // "Expected BEGIN_OBJECT but was BEGIN_ARRAY" here, and because schemaJson deserializes as
+    // one array in a single pass, that took down the ENTIRE form — not just this one field.
+    val store = FakeSecureKeyValueStore()
+    val json = """
+      {"id":"version-vw","formDefinitionId":"def-1","versionNo":"v3",
+       "schemaJson":[
+         {"label":"Weight","required":true,"input_type":"number","question_code":"weight_kg"},
+         {"label":"Malformed field","required":false,"input_type":"text",
+          "question_code":"some_field","visibleWhen":[{"field":"x","operator":"eq","value":"1"}]}
+       ],
+       "validationJson":[],"effectiveFrom":"2026-07-20T00:00:00Z","status":"PUBLISHED"}
+    """.trimIndent()
+    store.putString("form_active_version_ANC_VISIT", json)
+
+    val offlineApi = FakeFormsApi().apply { exceptionToThrow = IOException("offline") }
+    val version = RemoteFormsRepository(offlineApi, store).getActiveVersion("ANC_VISIT")
+
+    // The whole form must still load — this is the actual bug: before the fix, this call threw
+    // and the Sakhi got "We couldn't load this visit's data" for the ENTIRE form.
+    assertEquals(2, version?.schemaJson?.size)
+    // The malformed field degrades to "never hidden" rather than crashing — the safe direction to
+    // fail (an extra visible field is recoverable; a form that won't open at all is not).
+    val malformedField = version?.schemaJson?.single { it.questionCode == "some_field" }
+    assertNull(malformedField?.visibleWhen)
+    // Every other field on the same form is completely unaffected.
+    val weightField = version?.schemaJson?.single { it.questionCode == "weight_kg" }
+    assertNull(weightField?.visibleWhen)
+  }
+
+  @Test
+  fun `a valid visibleWhen object still parses correctly alongside the tolerant adapter`() = runTest {
+    // Guards against the fix over-correcting: a well-formed visibleWhen must keep working exactly
+    // as before — this is the same case `a visibleWhen block parses from the wire shape` above
+    // covers on MOTHER_REGISTRATION, repeated here to confirm the new adapter didn't regress it.
+    val store = FakeSecureKeyValueStore()
+    val json = """
+      {"id":"version-vw2","formDefinitionId":"def-1","versionNo":"v4",
+       "schemaJson":[{"label":"Follow-up","required":false,"input_type":"radio",
+        "question_code":"follow_up",
+        "visibleWhen":{"field":"weight_kg","operator":"gte","value":50}}],
+       "validationJson":[],"effectiveFrom":"2026-07-20T00:00:00Z","status":"PUBLISHED"}
+    """.trimIndent()
+    store.putString("form_active_version_ANC_VISIT", json)
+
+    val offlineApi = FakeFormsApi().apply { exceptionToThrow = IOException("offline") }
+    val field = requireNotNull(
+      RemoteFormsRepository(offlineApi, store).getActiveVersion("ANC_VISIT"),
+    ).schemaJson.single()
+
+    val condition = requireNotNull(field.visibleWhen)
+    assertEquals("weight_kg", condition.field)
+    assertEquals("gte", condition.operator)
+    assertEquals("50", condition.value)
+  }
+
+  @Test
+  fun `a visibleWhen missing its required field or operator degrades to null rather than throwing`() = runTest {
+    val store = FakeSecureKeyValueStore()
+    val json = """
+      {"id":"version-vw3","formDefinitionId":"def-1","versionNo":"v5",
+       "schemaJson":[{"label":"Odd field","required":false,"input_type":"text",
+        "question_code":"odd_field","visibleWhen":{"value":"1"}}],
+       "validationJson":[],"effectiveFrom":"2026-07-20T00:00:00Z","status":"PUBLISHED"}
+    """.trimIndent()
+    store.putString("form_active_version_ANC_VISIT", json)
+
+    val offlineApi = FakeFormsApi().apply { exceptionToThrow = IOException("offline") }
+    val field = requireNotNull(
+      RemoteFormsRepository(offlineApi, store).getActiveVersion("ANC_VISIT"),
+    ).schemaJson.single()
+
+    assertNull(field.visibleWhen)
+  }
+
   @Test
   fun `a newer published version always replaces the cached one on next fetch`() = runTest {
     val store = FakeSecureKeyValueStore()

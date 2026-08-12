@@ -33,10 +33,32 @@
 # enrollment: EnrollmentApi (createBeneficiary) + EnrollmentSyncExecutor/RoomEnrollmentRepository.
 # lookup: LookupApi (getCategory) + RemoteLookupRepository.
 # childregistration: ChildFormDraftPayload via ChildFormSyncExecutor's gson.fromJson.
+# motherlink: BeneficiaryApi (GET /beneficiaries, /beneficiaries/:id) + its list/detail DTOs
+# (BeneficiaryListResponseDto, BeneficiaryListItemDto, BeneficiaryPiiDto, BeneficiaryDetailDto,
+# SocioDemographicsDto, etc.) reached only via Retrofit's erased Response<T> generic — this is the
+# package that was stripped and caused the release-only "Select mother" / "Connect to the internet
+# once to load your registered mothers" failure (RemoteMotherLinkRepository.fetchMothers() catches
+# the resulting Gson/cast exception and returns null, which reads exactly like an offline device).
 -keep class org.armman.sakhi.data.forms.** { *; }
 -keep class org.armman.sakhi.data.enrollment.** { *; }
 -keep class org.armman.sakhi.data.lookup.** { *; }
 -keep class org.armman.sakhi.data.childregistration.** { *; }
+-keep class org.armman.sakhi.data.motherlink.** { *; }
+
+# schedule: VisitScheduleApi (bulk upload) + BulkVisitScheduleRequestDto/ResponseDto/
+# VisitScheduleUploadResultDto + VisitScheduleEntity — reached only via Retrofit's erased
+# Response<T> generic or Room's reflection, never `new`d directly from app code that R8's
+# reachability analysis can see.
+# visitform: VisitApi/FormSubmissionApi request-response DTOs for the two-call visit submit
+# (CreateVisitInstanceRequestDto/ResponseDto, CreateSubmissionRequestDto) + VisitFormDraftEntity/
+# VisitFormDraftPayload (CR-026b, gson.fromJson'd from SecureKeyValueStore, same reflection
+# hazard as childregistration's ChildFormDraftPayload above).
+# Missing these two packages is what caused the release-only regression of the ORIGINAL
+# "beneficiary's data hasn't finished syncing yet" bug — the same NotYetSynced condition, but
+# now caused by R8 silently stripping fields off the schedule-sync/visit-submit DTOs (debug
+# builds have isMinifyEnabled = false, so this only ever shows up in a release build).
+-keep class org.armman.sakhi.data.schedule.** { *; }
+-keep class org.armman.sakhi.data.visitform.** { *; }
 
 # Retrofit's own recommended R8 rules. Retrofit builds each call's generic return type
 # (Response<LoginResponseDto>) from the service interface method's signature/annotations at

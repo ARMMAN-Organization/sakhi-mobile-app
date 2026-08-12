@@ -35,6 +35,12 @@ object FormMultiSelectExclusivity {
     TdDoseQuestionCodes.TD_DOSE_QUESTION_CODE to setOf(
       TdDoseQuestionCodes.NONE_RECEIVED_YET_VALUE_CODE,
     ),
+    // Q49 row 49 note (verbatim): "At least one option selected. If marked to any option other
+    // than 'None' then date is mandatory" — confirmed with the backend (CR-040) that "None" and
+    // any vaccine checkbox together is rejected server-side. Same one-sided shape as Q44 above.
+    VaccinationAtBirthQuestionCodes.VACCINATION_QUESTION_CODE to setOf(
+      VaccinationAtBirthQuestionCodes.NONE_VALUE_CODE,
+    ),
   )
 
   /**

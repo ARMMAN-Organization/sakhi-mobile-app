@@ -53,7 +53,7 @@ internal fun schedule(
  * cannot be written, the seam is decorative.
  */
 internal class FakeRuleSource(
-  override val ruleVersion: String = "test-v9",
+  private val ruleVersion: String = "test-v9",
   private val interval: Int = 10,
   private val count: Int = 3,
   private val windowDays: Int = 2,
@@ -71,6 +71,8 @@ internal class FakeRuleSource(
   private val eddOffset: Int = 200,
   private val perDetection: Boolean = true,
 ) : ScheduleRuleSource {
+  override fun ruleVersion(visitType: VisitCodeType) = ruleVersion
+
   override fun intervalDays(visitType: VisitCodeType) = interval
 
   override fun visitCount(visitType: VisitCodeType, context: ScheduleContext) = count

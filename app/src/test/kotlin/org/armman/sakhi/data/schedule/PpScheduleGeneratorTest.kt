@@ -127,7 +127,7 @@ class PpScheduleGeneratorTest {
   fun `every row carries the rule version, a unique id and GENERATED status`() {
     val visits = series()
 
-    assertTrue(visits.all { it.generatedByRuleVersion == HardcodedRuleSource().ruleVersion })
+    assertTrue(visits.all { it.generatedByRuleVersion == HardcodedRuleSource().ruleVersion(VisitCodeType.PP) })
     assertEquals(visits.size, visits.map { it.localScheduleUuid }.distinct().size)
     assertTrue(visits.all { it.status == VisitScheduleStatus.GENERATED })
   }

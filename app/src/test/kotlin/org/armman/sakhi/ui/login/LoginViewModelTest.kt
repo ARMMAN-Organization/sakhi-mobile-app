@@ -229,6 +229,23 @@ class LoginViewModelTest {
   }
 
   @Test
+  fun `validation error from server shows same message as invalid credentials`() = runTest(dispatcher) {
+    // A 400 from the API (e.g. username fails the allowed-characters check) must read the same
+    // as a 401 "wrong credentials" — the user typed something bad in either case, and there's no
+    // security or UX reason to give it a different (and unhelpfully generic) message.
+    repository.result = LoginResult.Failure(LoginFailureReason.VALIDATION_ERROR)
+    viewModel.onUsernameChanged("bad user@name")
+    viewModel.onPasswordChanged("Test@1234")
+    viewModel.onLoginClicked()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val state = viewModel.uiState.value
+    assertEquals(R.string.login_error_invalid_credentials, state.loginError)
+    assertFalse(state.loginSucceeded)
+    assertFalse(state.isSubmitting)
+  }
+
+  @Test
   fun `network error shows distinct message from invalid credentials`() = runTest(dispatcher) { // VM-4
     repository.result = LoginResult.Failure(LoginFailureReason.NETWORK_ERROR)
     viewModel.onUsernameChanged("test.sakhi")

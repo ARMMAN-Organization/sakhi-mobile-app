@@ -35,4 +35,18 @@ data class Beneficiary(
   val phoneNumber: String,
   /** Non-null only when [status] is JOURNEY_COMPLETE. */
   val journeyCompletedIn: YearMonth?,
+  /**
+   * False for a row sourced from [org.armman.sakhi.data.beneficiary.RemoteBeneficiaryRepository]
+   * with no matching local draft on this device — the server carries no risk model and no visit
+   * schedule (both are computed/generated entirely on-device per SRS FR-S-2.2), so [riskLevel] and
+   * the visit fields above are placeholders, not real assessments, for such a row. True for every
+   * locally-sourced row (the existing default), where those fields ARE real.
+   */
+  val isAssessed: Boolean = true,
+  /**
+   * The server-assigned beneficiary id once this row has synced, or null. Used only to de-duplicate
+   * a local row against its own remote counterpart in
+   * [org.armman.sakhi.data.beneficiary.OfflineFirstBeneficiaryRepository] — never displayed.
+   */
+  val remoteBeneficiaryId: String? = null,
 )

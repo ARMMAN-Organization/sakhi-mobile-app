@@ -1,5 +1,7 @@
 package org.armman.sakhi.data.childregistration
 
+import org.armman.sakhi.data.forms.REGISTRATION_DATE_QUESTION_CODES
+
 /**
  * `question_code`s in the CHILD_REGISTRATION schema that must never render as a fillable input,
  * regardless of `input_type` — the child twin of
@@ -15,6 +17,14 @@ package org.armman.sakhi.data.childregistration
  * unimplemented, `unique_id` is submitted with no value — if the backend types it `required` on the
  * CHILD_REGISTRATION submissions endpoint, this could 422 until the formula is supplied.
  *
+ * `project_name` and `registration_date` (bharath, 2026-08-07 — "only hide, don't do anything
+ * else") match the mother flow's existing behaviour
+ * ([org.armman.sakhi.data.forms.NonRenderableQuestionCodes]): both are still auto-filled and
+ * submitted exactly as before (`project_name` via [org.armman.sakhi.data.forms
+ * .GeographyFieldOptionsResolver], `registration_date` via
+ * [org.armman.sakhi.data.forms.RegistrationDatePrefill]) — this only removes them from the visible
+ * field list, no submission/validation behavior changes.
+ *
  * Same risk as [org.armman.sakhi.data.forms.GeographyQuestionCodes]: if the backend ever renames
  * one of these `question_code`s, this silently stops applying (the field reappears as an editable
  * input) rather than failing loudly.
@@ -22,6 +32,7 @@ package org.armman.sakhi.data.childregistration
 object ChildNonRenderableQuestionCodes {
   const val BENEFICIARY_ID = "beneficiary_id"
   const val UNIQUE_ID = "unique_id"
+  const val PROJECT_NAME = "project_name"
 
-  val ALL: Set<String> = setOf(BENEFICIARY_ID, UNIQUE_ID)
+  val ALL: Set<String> = setOf(BENEFICIARY_ID, UNIQUE_ID, PROJECT_NAME) + REGISTRATION_DATE_QUESTION_CODES
 }

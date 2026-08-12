@@ -26,6 +26,13 @@ object BeneficiaryNameRule {
    * get the same "no special characters in a name" enforcement (PR #31 review). */
   const val NAME_OF_THE_CHILD = "name_of_the_child"
 
+  /** Child Registration's caregiver-name field — same literal as [org.armman.sakhi.data.motherlink
+   * .MotherPrefillQuestionCodes.CAREGIVER_NAME], duplicated here rather than imported to avoid a
+   * `data.forms` → `data.motherlink` package cycle (same convention as [NAME_OF_THE_CHILD] above).
+   * Was missing from this rule entirely, so unlike every other name field on the form it accepted
+   * special characters untouched. */
+  const val CAREGIVER_NAME = "caregiver_name_first_name_middle_name_last_name"
+
   /** The name questions this rule governs. Every other TEXT field (address, RCH number, …) is
    * deliberately left alone — they legitimately contain digits and punctuation.
    *
@@ -34,7 +41,7 @@ object BeneficiaryNameRule {
    * split FIRST_NAME/MIDDLE_NAME/LAST_NAME — without listing both shapes, whichever one the live
    * schema ISN'T currently using would silently stop getting character sanitization the moment it
    * came back (see that object's doc for the full timeline). */
-  val QUESTION_CODES = setOf(FIRST_NAME, MIDDLE_NAME, LAST_NAME, NAME_OF_THE_CHILD) +
+  val QUESTION_CODES = setOf(FIRST_NAME, MIDDLE_NAME, LAST_NAME, NAME_OF_THE_CHILD, CAREGIVER_NAME) +
     BeneficiaryNameQuestionCodes.COMBINED_CODES
 
   fun appliesTo(questionCode: String): Boolean = questionCode in QUESTION_CODES

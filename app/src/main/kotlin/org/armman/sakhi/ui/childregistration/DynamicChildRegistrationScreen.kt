@@ -48,6 +48,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import org.armman.sakhi.R
 import org.armman.sakhi.data.forms.FormFieldInputType
 import org.armman.sakhi.data.forms.FormFieldSchema
+import org.armman.sakhi.data.motherlink.MotherPrefillQuestionCodes
 import org.armman.sakhi.ui.components.AppTabRow
 import org.armman.sakhi.ui.components.BackHeader
 import org.armman.sakhi.ui.components.PrimaryButton
@@ -88,6 +89,9 @@ fun DynamicChildRegistrationScreen(
   onBack: () -> Unit,
   /** Leaves the enrollment sub-graph (→ Home) once the Sakhi is done with the success screen. */
   onSubmitted: () -> Unit,
+  /** Leaves the enrollment sub-graph (→ the child's profile) when the Sakhi taps "See Visit
+   * Form" on the success screen — mirrors [DynamicMotherRegistrationScreen]'s onStartVisitForm. */
+  onStartVisitForm: (beneficiaryId: String) -> Unit,
   /** Leaves the enrollment sub-graph (→ Home) when the beneficiary refuses consent — the
    * registration is abandoned, so nothing is saved and the form is not left on screen. */
   onConsentRefused: () -> Unit,
@@ -100,7 +104,6 @@ fun DynamicChildRegistrationScreen(
   }
   var selectedTabIndex by remember { mutableStateOf(0) }
   val context = LocalContext.current
-  val comingSoonMessage = stringResource(R.string.enrollment_coming_soon)
   val isSuccess = state.submissionState is SubmissionState.Success
   val snackbarHostState = remember { SnackbarHostState() }
 
@@ -147,9 +150,7 @@ fun DynamicChildRegistrationScreen(
           Column(modifier = Modifier.fillMaxSize()) {
             when {
               isSuccess -> EnrollmentCompleteContent(
-                onStartVisitForm = {
-                  Toast.makeText(context, comingSoonMessage, Toast.LENGTH_SHORT).show()
-                },
+                onStartVisitForm = { onStartVisitForm(viewModel.beneficiaryId) },
               )
 
               state.isLoading && state.version == null -> Box(
@@ -391,6 +392,16 @@ private fun ChildFormFieldList(
             errorText = crossFieldMessages[field.questionCode],
             mediaCompleted = field.questionCode in state.mediaCompleted,
             capturedImageUri = state.capturedImages[field.questionCode],
+            // mother_age is locked shut for exactly as long as it still holds the value
+            // MotherPrefill derived from the linked mother's DOB — see
+            // MotherPrefillQuestionCodes.MOTHER_AGE's doc. It reverts to a normal editable NUMBER
+            // field the moment the Sakhi edits it (isPrefilledFromMother drops the code) or the
+            // path switches away from the registered-mother flow (MotherPrefill.clear wipes it).
+            readOnlyQuestionCodes = if (viewModel.isPrefilledFromMother(MotherPrefillQuestionCodes.MOTHER_AGE)) {
+              setOf(MotherPrefillQuestionCodes.MOTHER_AGE)
+            } else {
+              emptySet()
+            },
             loadOptions = { viewModel.optionsFor(field) },
             onSingleAnswer = { value -> viewModel.setAnswer(field.questionCode, value) },
             onMultiAnswer = { values -> viewModel.setMultiAnswer(field.questionCode, values) },

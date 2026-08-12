@@ -1,8 +1,11 @@
 package org.armman.sakhi.data.visitform
 
 import kotlinx.coroutines.delay
+import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfile
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfileRepository
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -15,26 +18,68 @@ class StaticVisitFormRepository @Inject constructor(
   private val beneficiaryProfileRepository: BeneficiaryProfileRepository,
 ) : VisitFormRepository {
 
-  /** Only the seeded ids have a canned context; a Sakhi's own enrolment carries a UUID. */
-  override suspend fun canStartVisit(beneficiaryId: String): Boolean =
-    RECORDS.containsKey(beneficiaryId)
+  /**
+   * CR-026 interim: every beneficiary can open a Visit Form now, not just the seeded demo ids.
+   * A Sakhi's own real enrolment still resolves — [getVisitContext] falls back to
+   * [syntheticContext] for any id [RECORDS] doesn't recognise — so this only needs to reject a
+   * blank id (screen opened without its nav argument).
+   */
+  override suspend fun canStartVisit(beneficiaryId: String): Boolean = beneficiaryId.isNotBlank()
 
   override suspend fun getVisitContext(beneficiaryId: String, visitId: String): VisitContext {
     delay(NETWORK_LATENCY_MS) // Simulate a round trip so the loading state is visible.
-    val base = RECORDS[beneficiaryId]
-      ?: throw NoSuchElementException("No visit context for beneficiary: $beneficiaryId")
+    // Propagates NoSuchElementException for a genuinely unknown id (neither seeded nor a real
+    // enrolment), same contract as before — only the "no canned context" case now has a fallback.
+    val profile = beneficiaryProfileRepository.getBeneficiary(beneficiaryId)
+    val base = RECORDS[beneficiaryId] ?: syntheticContext(profile)
     // CR-016c: Summary banner chips come from the beneficiary's own recorded
     // diagnoses — sourced here (not duplicated as a separate fetch in the
     // ViewModel) since Visit Form's context already owns "carried-forward data".
-    val comorbidities = beneficiaryProfileRepository.getBeneficiary(beneficiaryId).diagnoses
     return base.copy(
       visitTypeLabel = VISIT_TYPE_LABELS[visitId] ?: base.visitTypeLabel,
-      comorbidities = comorbidities,
+      comorbidities = profile.diagnoses,
     )
   }
 
+  /**
+   * Fresh context for a real enrolment [RECORDS] has no canned data for. There is no prior visit
+   * yet, so height/Hb/advised-delivery-place/sickle-cell all read null — exactly like a genuine
+   * first visit (see [VISIT_TYPE_LABELS]'s v1 comment). LMP is read from her own registration
+   * ([BeneficiaryProfile.lmp], formatted the same way [ScheduleBackedBeneficiaryProfileRepository]
+   * writes it); falls back to today only if that's missing or unparseable — a stub limitation,
+   * not expected once CR-026 replaces this class with the real API.
+   */
+  private fun syntheticContext(profile: BeneficiaryProfile) = VisitContext(
+    visitTypeLabel = "ANC1",
+    rchNumber = "",
+    lmp = profile.lmp
+      ?.let { runCatching { LocalDate.parse(it, PROFILE_DATE_FORMAT) }.getOrNull() }
+      ?: LocalDate.now(),
+    heightCm = null,
+    previousHb = null,
+    advisedDeliveryPlace = null,
+    sickleCell = null,
+    registrationWeightKg = registrationWeightKgFrom(profile),
+  )
+
+  /**
+   * [BeneficiaryProfile.weight] is formatted for display (`"62.5 kg"`, see
+   * [org.armman.sakhi.data.beneficiaryprofile.ScheduleBackedBeneficiaryProfileRepository
+   * .toProfile]) — strip the unit and parse back to a number for
+   * [VisitContext.registrationWeightKg]. Null for a beneficiary whose registration didn't record
+   * a weight (blank string) or whatever CHILD's own [BeneficiaryProfile.weight] means (not
+   * applicable here — [VisitFormComputedFieldEvaluator]'s weight-gain calc only runs for the
+   * mother/ANC_VISIT flow).
+   */
+  private fun registrationWeightKgFrom(profile: BeneficiaryProfile): Double? =
+    profile.weight?.removeSuffix("kg")?.trim()?.toDoubleOrNull()
+
   private companion object {
     const val NETWORK_LATENCY_MS = 500L
+
+    /** Matches ScheduleBackedBeneficiaryProfileRepository.PROFILE_DATE_FORMAT — same source. */
+    val PROFILE_DATE_FORMAT: DateTimeFormatter =
+      DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH)
 
     // v1 = the beneficiary's first visit (no height/Hb history yet — Q12 stays
     // editable); v2-v4 carry forward height + Hb from that first visit.
@@ -48,6 +93,7 @@ class StaticVisitFormRepository @Inject constructor(
       previousHb = 8.5,
       advisedDeliveryPlace = 5, // Primary Health Centre
       sickleCell = 1, // Tested and result is normal
+      registrationWeightKg = 54.0, // Demo baseline for the seeded b01-b14 records.
     )
 
     val CHILD_CONTEXT = MOTHER_CONTEXT.copy(previousHb = 10.5)

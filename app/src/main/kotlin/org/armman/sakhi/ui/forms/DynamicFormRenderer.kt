@@ -1,7 +1,10 @@
 package org.armman.sakhi.ui.forms
 
+import android.graphics.BitmapFactory
+import android.net.Uri
 import androidx.annotation.StringRes
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -29,11 +32,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusEvent
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.armman.sakhi.R
 import org.armman.sakhi.data.forms.AGE_FROM_DOB_QUESTION_CODES
 import org.armman.sakhi.data.forms.isAgeFromDobReadOnly
@@ -63,6 +73,8 @@ import org.armman.sakhi.ui.theme.StatusSuccess
 import org.armman.sakhi.ui.theme.VideoPlaceholderSurface
 import org.armman.sakhi.ui.theme.White
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /** Consent-audio field code — the one `media` field the design renders as a "Play …" pill button
  * instead of the video player box. See the MEDIA branch in [DynamicFormField]. */
@@ -75,6 +87,15 @@ private const val QUESTION_CODE_CONSENT_VIDEO = "arogya_sakhi_video"
 private const val VALUE_YES = "yes"
 private const val VALUE_NO = "no"
 
+/** `number` fields whose real-world unit needs a fractional part — e.g. a newborn's weight in kg
+ * ("3.2"), unlike a count field like household members. Kept as local literals (matching the
+ * "Date of visit" precedent above), not an import from `ChildRegistrationQuestionCodes`, so this
+ * generic renderer doesn't pick up a dependency on the child-registration flow for one field.
+ * Every other `number` field keeps the existing digits-only behaviour. */
+private val DECIMAL_NUMBER_QUESTION_CODES = setOf(
+  "child_weight_at_birth_in_kg",
+)
+
 /** The Consent tab's affirmation items. The schema types them as yes/no `radio`s, but the design
  * shows each as a single checkbox under "Ensure that the beneficiary". Rendered as a checkbox for
  * exactly these codes; every other radio (incl. `did_we_receive_consent`) keeps the Yes/No pair.
@@ -86,6 +107,12 @@ private val CONSENT_CHECKBOX_QUESTION_CODES = setOf(
   "consent_willing_participate_diagnostic_tests",
   "consent_understands_referral_logic",
 )
+
+/** The Visit Form's "Date of visit" (`org.armman.sakhi.data.visitform.VisitFormQuestionCodes
+ * .DATE_OF_VISIT` — kept as a local literal, not an import, so this generic renderer doesn't pick
+ * up a dependency on the visit-form package for one field). Shown in dd-mm-yyyy, unlike every
+ * other date field's "dd MMM yyyy" — asked for explicitly (bharath, 2026-08-07), this field only. */
+private const val DATE_OF_VISIT_QUESTION_CODE = "date_of_visit"
 
 /**
  * Renders one [FormFieldSchema] generically, dispatching on [FormFieldSchema.inputType] — the
@@ -145,6 +172,13 @@ fun DynamicFormField(
    * precedence over the local range/mobile hint; for every other field type it renders as a
    * trailing error line. Null = no server error for this field. */
   errorText: String? = null,
+  /** Question codes the HOST screen has decided are locked shut for reasons the schema itself
+   * can't express — e.g. the Visit Form's "height" (ANC_VISIT spec row 12: "Open only in first
+   * visit; auto-populate in the rest"), which is read-only once a prior visit already captured it,
+   * not because it's `computedFrom` anything. Renders via [AppReadOnlyField] like a computed field,
+   * but shows the plain value with no "Auto-calculated" placeholder (bharath, 2026-08-08). Empty
+   * for every caller except the Visit Form. */
+  readOnlyQuestionCodes: Set<String> = emptySet(),
 ) {
   val singleValue = answers.valueOf(field.questionCode).orEmpty()
   val multiValue = answers.multiValueOf(field.questionCode)
@@ -165,6 +199,7 @@ fun DynamicFormField(
       field.questionCode !in AGE_FROM_DOB_QUESTION_CODES &&
       field.questionCode != TRIMESTER_QUESTION_CODE &&
       field.questionCode !in GeographyQuestionCodes.ALL &&
+      field.questionCode !in readOnlyQuestionCodes &&
       field.inputType in INLINE_ERROR_INPUT_TYPES
   }
 
@@ -205,6 +240,7 @@ fun DynamicFormField(
       onPlayMedia = onPlayMedia,
       onCaptureImage = onCaptureImage,
       serverErrorText = errorText,
+      readOnlyQuestionCodes = readOnlyQuestionCodes,
     )
     if (errorText != null && !rendersErrorInline) {
       FieldErrorText(errorText)
@@ -229,13 +265,28 @@ private fun FormDateRuleset.Violation.messageRes(): Int = when (this) {
   FormDateRuleset.Violation.LMP_FUTURE -> R.string.enrollment_error_lmp_future
   FormDateRuleset.Violation.LMP_TOO_RECENT -> R.string.enrollment_error_lmp_recent
   FormDateRuleset.Violation.LMP_TOO_OLD -> R.string.enrollment_error_lmp_old
+  FormDateRuleset.Violation.GESTATIONAL_AGE_BEYOND_ENROLLMENT_WINDOW -> R.string.enrollment_error_gestational_age_ceiling
   FormDateRuleset.Violation.REGISTRATION_DATE_IN_FUTURE -> R.string.enrollment_error_registration_date_future
   FormDateRuleset.Violation.ANC1_DATE_NOT_AFTER_LMP -> R.string.enrollment_error_anc1_date_not_after_lmp
   FormDateRuleset.Violation.ANC1_DATE_TOO_LATE -> R.string.enrollment_error_anc1_date_too_late
   FormDateRuleset.Violation.TD_DATE_IN_FUTURE -> R.string.form_error_td_date_future
   FormDateRuleset.Violation.TD_2_NOT_AFTER_TD_1 -> R.string.form_error_td2_not_after_td1
   FormDateRuleset.Violation.TD_BOOSTER_NOT_AFTER_TD_2 -> R.string.form_error_td_booster_not_after_td2
+  FormDateRuleset.Violation.LMP_DATE_EDIT_FUTURE -> R.string.form_error_td_date_future
+  FormDateRuleset.Violation.VACCINATION_AT_BIRTH_DATE_IN_FUTURE -> R.string.form_error_td_date_future
 }
+
+/** Display formatter shared with every other date-picker field in this form ([AppDateField] /
+ * [org.armman.sakhi.ui.enrollment.components.FormFields]'s "dd MMM yyyy"), so a computed date
+ * (e.g. EDD_FROM_LMP) reads the same as the LMP date the Sakhi picked it from, instead of the raw
+ * ISO string ([org.armman.sakhi.data.forms.FormComputedFieldEvaluator] stores/returns
+ * `LocalDate.toString()`, which is ISO-8601 "yyyy-MM-dd"). Non-date computed values (gestational
+ * age, unique_id) simply fail the parse and pass through unchanged.
+ */
+private val ISO_TO_DISPLAY_DATE_FORMATTER = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.getDefault())
+
+private fun formatIfIsoDate(value: String): String =
+  runCatching { LocalDate.parse(value).format(ISO_TO_DISPLAY_DATE_FORMATTER) }.getOrDefault(value)
 
 /** Inline error line shown under a field whose widget has no native error slot (select, radio,
  * checkbox, geography, media, image, read-only). Matches the [AppTextInputField] error tone. */
@@ -271,9 +322,17 @@ private fun DynamicFormFieldBody(
   onPlayMedia: () -> Unit,
   onCaptureImage: () -> Unit,
   serverErrorText: String?,
+  readOnlyQuestionCodes: Set<String> = emptySet(),
 ) {
   val ageFromDobEditable = field.questionCode in AGE_FROM_DOB_QUESTION_CODES &&
     !isAgeFromDobReadOnly(answers)
+  if (field.questionCode in readOnlyQuestionCodes) {
+    // Locked by the host screen, not by the schema — see DynamicFormField's readOnlyQuestionCodes
+    // doc. No "Auto-calculated" fallback: an empty value here means missing data, not a pending
+    // calculation.
+    AppReadOnlyField(label = field.label, value = singleValue)
+    return
+  }
   if (!ageFromDobEditable &&
     (field.computedFrom != null ||
       field.questionCode in AGE_FROM_DOB_QUESTION_CODES ||
@@ -281,7 +340,8 @@ private fun DynamicFormFieldBody(
   ) {
     AppReadOnlyField(
       label = field.label,
-      value = singleValue.ifBlank { "Auto-calculated" },
+      value = singleValue.ifBlank { "Auto-calculated" }
+        .let { formatIfIsoDate(it) },
     )
     return
   }
@@ -358,16 +418,40 @@ private fun DynamicFormFieldBody(
       // Spec digit cap (e.g. household members = "2 digit"), so out-of-length values can't be typed
       // at all; the range message above covers right-length-but-out-of-range entries.
       val maxDigits = FormNumericInputRule.maxDigits(field)
+      val allowsDecimal = field.questionCode in DECIMAL_NUMBER_QUESTION_CODES
       AppTextInputField(
         label = field.label,
         placeholder = "",
         value = singleValue,
         onValueChange = { new ->
-          val digits = new.filter { it.isDigit() }
+          // Decimal fields keep digits AND a single "." (first one wins — any later "." is
+          // dropped rather than replacing/duplicating it); every other number field stays
+          // digits-only exactly as before.
+          val sanitized = if (allowsDecimal) {
+            val sb = StringBuilder()
+            var seenDot = false
+            for (c in new) {
+              when {
+                c.isDigit() -> sb.append(c)
+                c == '.' && !seenDot -> {
+                  seenDot = true
+                  sb.append(c)
+                }
+              }
+            }
+            sb.toString()
+          } else {
+            new.filter { it.isDigit() }
+          }
           val capped = when {
-            isMobile -> digits.take(MobileNumberRule.REQUIRED_DIGITS)
-            maxDigits != null -> digits.take(maxDigits)
-            else -> digits
+            isMobile -> sanitized.take(MobileNumberRule.REQUIRED_DIGITS)
+            // maxDigits counts digits in numericRange.max's WHOLE number (e.g. 2 for a 0.5..15
+            // range) — correct for an integer field, but would wrongly truncate a legitimate
+            // "12.5" (3 digit characters) to "12.". Decimal fields skip this cap and rely on
+            // exceedsMax below instead, which parses the full value as a Double and already
+            // blocks anything over `max` no matter how it got there.
+            !allowsDecimal && maxDigits != null -> sanitized.take(maxDigits)
+            else -> sanitized
           }
           // The digit cap alone lets a right-length-but-out-of-range value through (e.g. "16" in
           // a 2..15 field needs only 2 digits, same as "15"). Reject that keystroke outright
@@ -380,7 +464,7 @@ private fun DynamicFormFieldBody(
           }
           onSingleAnswer(next)
         },
-        keyboardType = KeyboardType.Number,
+        keyboardType = if (allowsDecimal) KeyboardType.Decimal else KeyboardType.Number,
         // Server error wins on submit; once the Sakhi edits the field its server error is cleared
         // (ViewModel.setAnswer), so the local range/mobile hint takes over again — no double error.
         errorText = serverErrorText ?: localError,
@@ -405,6 +489,7 @@ private fun DynamicFormFieldBody(
         required = required,
         minDate = bounds?.min,
         maxDate = bounds?.max,
+        displayPattern = if (field.questionCode == DATE_OF_VISIT_QUESTION_CODE) "dd-MM-yyyy" else "dd MMM yyyy",
       )
     }
 
@@ -493,6 +578,7 @@ private fun DynamicFormFieldBody(
       ConsentPhotoButton(
         label = field.label,
         captured = capturedImageUri != null,
+        imageUri = capturedImageUri,
         onCapture = onCaptureImage,
       )
 
@@ -515,6 +601,9 @@ private fun DynamicFormFieldBody(
  * dropdown. Zero options (a backend gap: this level missing from `geography`) renders as an empty,
  * submit-gating dropdown rather than silently passing — the same "notice the gap" behavior as a
  * choice field with no way to populate it.
+ *
+ * Either rendering shows the red `*` marker when [RequiredFieldMarker.isShownFor] says so — the
+ * field is still mandatory in the single-option read-only case, it's just already satisfied.
  */
 @Composable
 private fun GeographyField(
@@ -529,8 +618,15 @@ private fun GeographyField(
 
   val single = options.singleOrNull()
   if (single != null) {
-    // Pre-selected and unchangeable — no required marker; there is nothing for the Sakhi to do.
-    AppReadOnlyField(label = field.label, value = single.label, modifier = modifier)
+    // Pre-selected and unchangeable, but still shows the `*` when required — there's nothing for
+    // the Sakhi to do, but the marker communicates the value is mandatory (matches the dropdown
+    // branch below).
+    AppReadOnlyField(
+      label = field.label,
+      value = single.label,
+      modifier = modifier,
+      required = RequiredFieldMarker.isShownFor(field),
+    )
   } else {
     AppDropdownField(
       label = field.label,
@@ -600,15 +696,58 @@ private fun MediaPlayButton(label: String, completed: Boolean, onPlay: () -> Uni
 
 /** `image` field as an outlined lavender pill (design: "Take photo of consent form 📷"). Trailing
  * icon flips to a success check once a photo is captured. Same [onCapture] camera flow as before —
- * only the visual changed from a bordered box to a pill. */
+ * only the visual changed from a bordered box to a pill. Once captured, a thumbnail preview of the
+ * photo renders below the pill (bharath, 2026-08-07 — Sakhis had no way to confirm what was
+ * captured; tapping the pill silently reopened the camera instead of showing anything). Preview
+ * only, no clear/retake action on the thumbnail itself — retake still happens via the pill. */
 @Composable
-private fun ConsentPhotoButton(label: String, captured: Boolean, onCapture: () -> Unit, modifier: Modifier = Modifier) {
-  SecondaryButton(
-    text = label,
-    onClick = onCapture,
-    trailingIcon = painterResource(
-      if (captured) R.drawable.ic_check_circle_small else R.drawable.ic_camera,
-    ),
-    modifier = modifier,
-  )
+private fun ConsentPhotoButton(
+  label: String,
+  captured: Boolean,
+  imageUri: String?,
+  onCapture: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    SecondaryButton(
+      text = label,
+      onClick = onCapture,
+      trailingIcon = painterResource(
+        if (captured) R.drawable.ic_check_circle_small else R.drawable.ic_camera,
+      ),
+    )
+    if (imageUri != null) {
+      ConsentPhotoPreview(uri = imageUri)
+    }
+  }
+}
+
+/** Thumbnail preview of the just-captured consent photo, decoded off the main thread from the
+ * `content://` FileProvider URI written by the capture flow (see [DynamicFormField]'s host
+ * screens). No image-loading library (Coil/Glide) is in the project yet, so this decodes directly
+ * via [BitmapFactory] rather than adding a dependency for a single thumbnail. */
+@Composable
+private fun ConsentPhotoPreview(uri: String, modifier: Modifier = Modifier) {
+  val context = LocalContext.current
+  var bitmap by remember(uri) { mutableStateOf<ImageBitmap?>(null) }
+  LaunchedEffect(uri) {
+    bitmap = withContext(Dispatchers.IO) {
+      runCatching {
+        context.contentResolver.openInputStream(Uri.parse(uri))?.use { stream ->
+          BitmapFactory.decodeStream(stream)?.asImageBitmap()
+        }
+      }.getOrNull()
+    }
+  }
+  val loaded = bitmap
+  if (loaded != null) {
+    Image(
+      bitmap = loaded,
+      contentDescription = stringResource(R.string.enrollment_consent_photo_preview),
+      contentScale = ContentScale.Crop,
+      modifier = modifier
+        .size(Dimens.ConsentPhotoPreviewSize)
+        .clip(RoundedCornerShape(Dimens.TileRadius)),
+    )
+  }
 }

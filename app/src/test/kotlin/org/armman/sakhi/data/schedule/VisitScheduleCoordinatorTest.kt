@@ -1,7 +1,12 @@
 package org.armman.sakhi.data.schedule
 
+import com.google.gson.JsonObject
 import kotlinx.coroutines.test.runTest
+import org.armman.sakhi.data.rules.CachedRuleSet
+import org.armman.sakhi.data.rules.RuleEvaluator
+import org.armman.sakhi.data.rules.RuleSetRepository
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -9,7 +14,18 @@ import org.junit.Before
 import org.junit.Test
 import java.time.LocalDate
 
-/** CR-022e cases TR-1 … TR-8 and SU-1 … SU-6. */
+/**
+ * CR-022e cases TR-1 … TR-8 and SU-1 … SU-6.
+ *
+ * CR-032 (GoRules): [GoRulesScheduleFeatureFlag.ENABLED] is a compile-time `const val`, currently
+ * `false` — same limitation as `RemoteBeneficiaryListFeatureFlag`
+ * (see `OfflineFirstBeneficiaryRepositoryTest`'s KDoc) — so this suite cannot exercise the
+ * GoRules-first code path through the real coordinator entry points. What it can and does prove:
+ * a [GoRulesScheduleAdapter] wired into the coordinator is never touched while the flag is off, so
+ * a Sakhi never depends on the (still Step-1-unverified) rules pipeline today. Coverage of
+ * [GoRulesScheduleAdapter]'s own request/response mapping belongs in its own, not-yet-written test
+ * file — it doesn't depend on this flag at all.
+ */
 class VisitScheduleCoordinatorTest {
 
   private lateinit var dao: FakeVisitScheduleDao
@@ -371,6 +387,39 @@ class VisitScheduleCoordinatorTest {
     val context = ScheduleContext(localBeneficiaryId = BENEFICIARY, registrationDate = lmp)
 
     assertTrue(runCatching { coordinator.onLmpOrEddApproved(context) }.isFailure)
+  }
+
+  // ---- GoRules (CR-032) — flag-off safety --------------------------------------------------------
+
+  @Test
+  fun `a wired GoRules adapter is never invoked while the feature flag is off`() = runTest {
+    assertFalse("this test's premise depends on the flag being off", GoRulesScheduleFeatureFlag.ENABLED)
+    val poisoned = VisitScheduleCoordinator(
+      repository = repository,
+      ancGenerator = AncScheduleGenerator(HardcodedRuleSource()),
+      ppGenerator = PpScheduleGenerator(HardcodedRuleSource()),
+      nnGenerator = NnScheduleGenerator(HardcodedRuleSource()),
+      incGenerator = IncScheduleGenerator(HardcodedRuleSource()),
+      ccvGenerator = CcvScheduleGenerator(HardcodedRuleSource()),
+      goRulesAdapter = GoRulesScheduleAdapter(PoisonRuleSetRepository(), PoisonRuleEvaluator()),
+    )
+
+    val generated = poisoned.onMotherEnrolled(motherContext())
+
+    assertEquals(10, generated)
+    assertTrue(repository.getForBeneficiary(BENEFICIARY).all { it.visitType == VisitCodeType.ANC })
+  }
+
+  /** Throws if `getPublishedRuleSet` is ever called — proof the coordinator didn't call it. */
+  private class PoisonRuleSetRepository : RuleSetRepository {
+    override suspend fun getPublishedRuleSet(ruleSetId: String): CachedRuleSet? =
+      error("GoRulesScheduleAdapter must not be reached while GoRulesScheduleFeatureFlag.ENABLED is false")
+  }
+
+  /** Throws if `evaluate` is ever called — proof the coordinator didn't call it. */
+  private class PoisonRuleEvaluator : RuleEvaluator {
+    override suspend fun evaluate(rulesJson: JsonObject, context: JsonObject): JsonObject? =
+      error("GoRulesScheduleAdapter must not be reached while GoRulesScheduleFeatureFlag.ENABLED is false")
   }
 
   // ---- Helpers ---------------------------------------------------------------------------------

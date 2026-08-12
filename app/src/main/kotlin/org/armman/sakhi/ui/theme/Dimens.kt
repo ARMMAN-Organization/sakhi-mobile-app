@@ -89,6 +89,9 @@ object Dimens {
   /** Square consent checkbox size. */
   val ConsentCheckboxSize = 20.dp
 
+  /** Captured consent-photo thumbnail preview, shown below the "Take photo" pill. */
+  val ConsentPhotoPreviewSize = 96.dp
+
   /** Vertical gap between consent checklist rows. */
   val ConsentCheckRowSpacing = 20.dp
 

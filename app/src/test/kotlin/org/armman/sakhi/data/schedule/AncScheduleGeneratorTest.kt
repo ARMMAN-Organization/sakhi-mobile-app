@@ -142,7 +142,7 @@ class AncScheduleGeneratorTest {
   fun `every generated row carries the rule version and a unique id`() {
     val visits = series(lmp)
 
-    assertTrue(visits.all { it.generatedByRuleVersion == HardcodedRuleSource().ruleVersion })
+    assertTrue(visits.all { it.generatedByRuleVersion == HardcodedRuleSource().ruleVersion(VisitCodeType.ANC) })
     assertEquals(visits.size, visits.map { it.localScheduleUuid }.distinct().size)
     assertTrue(visits.all { it.status == VisitScheduleStatus.GENERATED })
     assertTrue(visits.all { it.serverScheduleId == null })

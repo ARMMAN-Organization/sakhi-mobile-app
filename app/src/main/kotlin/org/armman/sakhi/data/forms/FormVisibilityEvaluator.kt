@@ -1,5 +1,10 @@
 package org.armman.sakhi.data.forms
 
+import android.util.Log
+
+/** Shared with the other temporary "SakhiSync" diagnostics added this session. */
+private const val TAG = "SakhiSync"
+
 /**
  * Evaluates a field's [FormFieldSchema.visibleWhen] condition against the current [FormAnswers].
  * Pure/stateless so the renderer can call it on every recomposition without side effects.
@@ -35,6 +40,37 @@ object FormVisibilityEvaluator {
   fun isVisible(field: FormFieldSchema, answers: FormAnswers): Boolean {
     val condition = field.visibleWhen ?: return true
     val actual = answers.valueOf(condition.field)
+
+    // Temporary diagnostic for the "sonography No doesn't hide LMP Date/gestational age/EDD"
+    // report — only logs for the specific field the user says is misbehaving, to avoid flooding
+    // logcat with a line per field per recomposition. Prints exactly what this function is
+    // comparing so a questionCode/casing/value mismatch is visible instead of guessed at.
+    if (condition.field.contains("sonography", ignoreCase = true)) {
+      Log.d(
+        TAG,
+        "FormVisibilityEvaluator.isVisible(dependentField='${field.questionCode}'): " +
+          "condition.field='${condition.field}' condition.operator='${condition.operator}' " +
+          "condition.value='${condition.value}' actual='$actual' " +
+          "answers.singleValues.keys=${answers.singleValues.keys}",
+      )
+    }
+
+    // Temporary diagnostic for the "Gravida alert / Last-Pregnancy block doesn't appear when 2 is
+    // entered directly, only after 1 is entered then changed to 2" report. Logs every dependent
+    // field gated on a `gravida_total_number_of_pregnancies` condition, so a run that reproduces
+    // the symptom shows exactly what this function compared on the keystroke that typed "2" —
+    // whether `actual` was already "2" at that point (app-logic bug) or still blank/"1" (the
+    // ViewModel/TextField hadn't propagated the keystroke yet — a UI-layer timing issue instead).
+    if (condition.field.contains("gravida", ignoreCase = true)) {
+      Log.d(
+        TAG,
+        "FormVisibilityEvaluator.isVisible(dependentField='${field.questionCode}'): " +
+          "condition.field='${condition.field}' condition.operator='${condition.operator}' " +
+          "condition.value='${condition.value}' actual='$actual' " +
+          "answers.singleValues.keys=${answers.singleValues.keys}",
+      )
+    }
+
     // `isSet`/`contains` don't compare against [actual] (the single-value slot) at all, so both
     // must be handled before the unanswered-means-hidden rule below.
     if (condition.operator == OPERATOR_IS_SET) return !actual.isNullOrBlank()

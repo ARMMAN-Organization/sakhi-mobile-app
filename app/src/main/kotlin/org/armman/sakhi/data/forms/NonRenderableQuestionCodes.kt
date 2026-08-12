@@ -32,11 +32,17 @@ package org.armman.sakhi.data.forms
  * Same risk as [GeographyQuestionCodes]: if the backend ever renames one of these `question_code`s,
  * this silently stops applying (the field reappears as an editable input) rather than failing
  * loudly.
+ *
+ * `registration_date` (and its typo twin `registrtion_date` — see [REGISTRATION_DATE_QUESTION_CODES])
+ * is hidden on the mother enrollment form per product decision: the Sakhi never picks or sees it,
+ * [RegistrationDatePrefill] silently fills it with today's date on load, and that stays true
+ * whether or not the field renders — this only removes it from the visible field list, the
+ * prefilled answer is still collected into `answers` and submitted exactly as before.
  */
 object NonRenderableQuestionCodes {
   const val BENEFICIARY_ID = "beneficiary_id"
   const val UNIQUE_ID = "unique_id"
   const val PROJECT_NAME = "project_name"
 
-  val ALL: Set<String> = setOf(BENEFICIARY_ID, UNIQUE_ID, PROJECT_NAME)
+  val ALL: Set<String> = setOf(BENEFICIARY_ID, UNIQUE_ID, PROJECT_NAME) + REGISTRATION_DATE_QUESTION_CODES
 }

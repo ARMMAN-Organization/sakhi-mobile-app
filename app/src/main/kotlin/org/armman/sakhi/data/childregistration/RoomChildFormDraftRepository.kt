@@ -7,10 +7,19 @@ import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormUploadRecord
+import org.armman.sakhi.data.schedule.ChildEnrolmentScheduleTrigger
 import java.time.Instant
 import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/**
+ * The only form whose submission generates an INC schedule via this repository (CR-020's twin of
+ * `RoomDynamicFormDraftRepository`'s `MOTHER_REGISTRATION_FORM_CODE` guard). Kept here rather than
+ * assumed implicitly so the coupling is visible at the one place that branches on it, even though
+ * this repository is only ever bound to the CHILD_REGISTRATION flow today.
+ */
+private const val CHILD_REGISTRATION_FORM_CODE = "CHILD_REGISTRATION"
 
 /**
  * Offline-first [ChildFormDraftRepository]: sync metadata in Room ([ChildFormDraftDao]), answers
@@ -28,6 +37,7 @@ class RoomChildFormDraftRepository @Inject constructor(
   private val secureStore: SecureKeyValueStore,
   private val connectivityChecker: ConnectivityChecker,
   private val syncExecutor: ChildFormSyncExecutor,
+  private val scheduleTrigger: ChildEnrolmentScheduleTrigger,
 ) : ChildFormDraftRepository {
 
   override suspend fun saveDraft(
@@ -52,6 +62,16 @@ class RoomChildFormDraftRepository @Inject constructor(
     registrationDate: LocalDate,
   ): ChildFormSubmitResult {
     saveLocally(localBeneficiaryId, formCode, formVersionId, localSubmissionUuid, answers, registrationDate)
+
+    // Generate the infant's INC schedule the moment the form is submitted, on-device and with no
+    // network (SRS FR-S-2.2A) — the child twin of RoomDynamicFormDraftRepository's ANC generation
+    // for MOTHER_REGISTRATION. Deliberately here rather than in saveDraft (a partial save is not a
+    // registration) and BEFORE the sync attempt below, so a schedule always exists by the time the
+    // beneficiary can reach the server. The trigger swallows its own failures: a missing schedule
+    // can be fixed later, a lost registration cannot.
+    if (formCode == CHILD_REGISTRATION_FORM_CODE) {
+      scheduleTrigger.generateFor(localBeneficiaryId, answers, registrationDate)
+    }
 
     // Offline: the draft is safely persisted and waits in the queue for the Sakhi's Data Upload
     // tap. Nothing is scheduled here — a WorkManager job enqueued now would carry a

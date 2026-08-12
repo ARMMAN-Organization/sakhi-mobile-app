@@ -14,6 +14,8 @@ import org.armman.sakhi.data.forms.DynamicFormDraftEntity
 import org.armman.sakhi.data.schedule.ScheduleTypeConverters
 import org.armman.sakhi.data.schedule.VisitScheduleDao
 import org.armman.sakhi.data.schedule.VisitScheduleEntity
+import org.armman.sakhi.data.visitform.VisitFormDraftDao
+import org.armman.sakhi.data.visitform.VisitFormDraftEntity
 
 /**
  * App's single Room database. Holds enrollment, dynamic-form and Children Register sync-queue
@@ -32,6 +34,9 @@ import org.armman.sakhi.data.schedule.VisitScheduleEntity
  *    creates `visit_schedules` plus its two indices, touches no existing table. First entity that
  *    is real domain data rather than sync metadata, and the first to need [ScheduleTypeConverters]
  *    for its [java.time.LocalDate] columns.
+ *  - v5: [VisitFormDraftEntity] (CR-026b visit-form offline sync — the fifth queue, alongside the
+ *    three form-draft tables and `visit_schedules`). Additive [MIGRATION_4_5] — creates
+ *    `visit_form_drafts` only, touches no existing table.
  */
 @Database(
   entities = [
@@ -39,8 +44,9 @@ import org.armman.sakhi.data.schedule.VisitScheduleEntity
     DynamicFormDraftEntity::class,
     ChildFormDraftEntity::class,
     VisitScheduleEntity::class,
+    VisitFormDraftEntity::class,
   ],
-  version = 4,
+  version = 5,
   exportSchema = true,
 )
 @TypeConverters(ScheduleTypeConverters::class)
@@ -49,6 +55,7 @@ abstract class SakhiDatabase : RoomDatabase() {
   abstract fun dynamicFormDraftDao(): DynamicFormDraftDao
   abstract fun childFormDraftDao(): ChildFormDraftDao
   abstract fun visitScheduleDao(): VisitScheduleDao
+  abstract fun visitFormDraftDao(): VisitFormDraftDao
 
   companion object {
     /**
@@ -119,6 +126,33 @@ abstract class SakhiDatabase : RoomDatabase() {
         db.execSQL(
           "CREATE INDEX IF NOT EXISTS `index_visit_schedules_scheduledDate` " +
             "ON `visit_schedules` (`scheduledDate`)",
+        )
+      }
+    }
+
+    /**
+     * v4 → v5: adds the CR-026b `visit_form_drafts` table. Purely additive — no existing table is
+     * touched, so every other queue's rows survive the upgrade untouched.
+     *
+     * Column definitions must match [VisitFormDraftEntity] exactly or Room's schema validation
+     * fails at open time. `syncStatus` is stored as TEXT by enum name, same convention as every
+     * other drafts table.
+     */
+    val MIGRATION_4_5: Migration = object : Migration(4, 5) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `visit_form_drafts` (" +
+            "`localScheduleUuid` TEXT NOT NULL, " +
+            "`formCode` TEXT NOT NULL, " +
+            "`formVersionId` TEXT NOT NULL, " +
+            "`visitDateIso` TEXT NOT NULL, " +
+            "`syncStatus` TEXT NOT NULL, " +
+            "`createdAtEpochMillis` INTEGER NOT NULL, " +
+            "`lastAttemptAtEpochMillis` INTEGER, " +
+            "`retryCount` INTEGER NOT NULL, " +
+            "`serverVisitId` TEXT, " +
+            "`lastErrorMessage` TEXT, " +
+            "PRIMARY KEY(`localScheduleUuid`))",
         )
       }
     }

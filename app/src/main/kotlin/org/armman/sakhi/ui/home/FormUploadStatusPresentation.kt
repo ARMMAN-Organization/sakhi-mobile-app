@@ -33,6 +33,11 @@ import kotlin.math.roundToInt
 private const val MOTHER_REGISTRATION_FORM_CODE = "MOTHER_REGISTRATION"
 private const val CHILD_REGISTRATION_FORM_CODE = "CHILD_REGISTRATION"
 
+/** CR-026b ANC Visit Form drafts — a genuinely separate category, not folded into Registration:
+ * a Sakhi can have visit drafts with no registration drafts pending (or vice versa), so grouping
+ * them together would misrepresent what's actually left to upload. */
+private const val VISIT_FORM_CODE = "ANC_VISIT"
+
 /** Display category all registration-family form codes are folded into for this modal. */
 private const val REGISTRATION_CATEGORY_CODE = "REGISTRATION"
 
@@ -43,6 +48,7 @@ private const val REGISTRATION_CATEGORY_CODE = "REGISTRATION"
  */
 private fun displayCategoryCode(formCode: String): String = when (formCode) {
   MOTHER_REGISTRATION_FORM_CODE, CHILD_REGISTRATION_FORM_CODE -> REGISTRATION_CATEGORY_CODE
+  VISIT_FORM_CODE -> VISIT_FORM_CODE
   else -> formCode
 }
 
@@ -131,6 +137,7 @@ internal fun categoryIconKind(statuses: List<EnrollmentSyncStatus>): UploadStatu
  */
 internal fun categoryLabelRes(formCode: String): Int = when (formCode) {
   REGISTRATION_CATEGORY_CODE -> R.string.home_upload_modal_registration_form_label
+  VISIT_FORM_CODE -> R.string.home_upload_modal_visit_form_label
   else -> R.string.home_upload_modal_registration_form_label
 }
 

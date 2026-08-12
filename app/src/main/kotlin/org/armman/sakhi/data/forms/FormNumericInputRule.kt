@@ -28,6 +28,13 @@ package org.armman.sakhi.data.forms
 /** Spec row 34's live `question_code`, confirmed against the active `MOTHER_REGISTRATION` schema. */
 const val CHILDREN_UNDER_FIVE_QUESTION_CODE = "how_many_children_under_5_years_of_age_are_in_your_household"
 
+/** Spec row 33's live `question_code` — "How many family members in your household? (including
+ * children under 5 years of age)". Sibling of [CHILDREN_UNDER_FIVE_QUESTION_CODE]: the two share
+ * the [org.armman.sakhi.data.forms.FormCrossFieldValidator] LTE stopgap since children under 5 are
+ * by definition already counted inside this total. */
+const val FAMILY_MEMBERS_QUESTION_CODE =
+  "how_many_family_members_in_your_household_including_children_under_5_years_of_age"
+
 object FormNumericInputRule {
 
   /**
