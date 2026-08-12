@@ -55,6 +55,15 @@ android {
     targetCompatibility = JavaVersion.VERSION_17
   }
   kotlinOptions { jvmTarget = "17" }
+  testOptions {
+    unitTests {
+      // android.util.Log is a stub in JVM unit tests: every call throws
+      // "Method d in android.util.Log not mocked" unless stubs return defaults. Repository and
+      // sync-executor code logs on its normal paths, so without this the tests exercising those
+      // paths fail on the logging rather than on anything they assert.
+      isReturnDefaultValues = true
+    }
+  }
 }
 
 dependencies {
