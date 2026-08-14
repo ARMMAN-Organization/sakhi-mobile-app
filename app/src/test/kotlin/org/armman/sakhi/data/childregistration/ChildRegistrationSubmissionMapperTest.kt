@@ -174,12 +174,12 @@ class ChildRegistrationSubmissionMapperTest {
       .getOrThrow().pii
     assertEquals("Aarav Sharma", two.fullName)
 
-    // A single token becomes BOTH first and last name in the split heuristic, so the rejoin
-    // doubles it. Pinned deliberately: it is the visible consequence of that heuristic, and is
-    // part of the "CONFIRM WITH ARMMAN" question flagged on ChildName.
+    // A single token (a real mononym) stays a single token: it is kept as firstName with an empty
+    // lastName, so the rejoin round-trips it unchanged. This previously produced "Aarav Aarav",
+    // writing a permanently doubled name into the backend record — fixed per PR #32 review.
     val one = mapper.toCreateBeneficiaryRequest("c", answeredForm(name = "Aarav"), LocalDate.of(2026, 7, 20))
       .getOrThrow().pii
-    assertEquals("Aarav Aarav", one.fullName)
+    assertEquals("Aarav", one.fullName)
   }
 
   @Test

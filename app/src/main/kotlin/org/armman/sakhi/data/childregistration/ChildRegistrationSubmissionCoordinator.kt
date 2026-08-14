@@ -115,7 +115,11 @@ class ChildRegistrationSubmissionCoordinator @Inject constructor(
         body = body,
         errorCode = apiError.errorCode,
         fieldErrors = apiError.fieldErrors,
-        apiMessage = apiError.message,
+        // ApiErrorParser echoes the whole body back as `message` when the response isn't the
+        // expected envelope (plain-text 500s, HTML gateway pages). SubmitErrorCopy only detects
+        // raw bodies starting with `{`/`[`/`<`, so a plain-text one would otherwise reach the
+        // Sakhi verbatim. Mirrors DynamicFormSubmissionCoordinator's guard for the mother flow.
+        apiMessage = apiError.message?.takeIf { it != body },
       )
     }
     val serverBeneficiaryId = beneficiaryResponse.body()?.data?.id
@@ -138,7 +142,8 @@ class ChildRegistrationSubmissionCoordinator @Inject constructor(
       throw ChildRegistrationSubmissionException.FormSubmissionFailed(
         httpCode = submissionResponse.code(),
         body = body,
-        apiMessage = apiError.message,
+        // Same raw-body guard as the beneficiary-creation call above.
+        apiMessage = apiError.message?.takeIf { it != body },
         violations = apiError.violations,
       )
     }

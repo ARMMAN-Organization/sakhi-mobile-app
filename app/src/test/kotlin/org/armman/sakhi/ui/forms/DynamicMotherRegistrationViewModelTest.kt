@@ -1559,4 +1559,54 @@ class DynamicMotherRegistrationViewModelTest {
     assertTrue(vm.isSectionReady("Personal Info"))
     assertTrue(vm.isReadyToSubmit())
   }
+
+  @Test
+  fun `setMultiAnswer recomputes a derived field whose source it just hid`() = runTest {
+    // PR #32 review: setAnswer recomputed derived fields after FormHiddenFieldReset, setMultiAnswer
+    // didn't. A multiselect change that hides a computed field's source reset the source but left
+    // the derived value stale, until some unrelated setAnswer happened to fire afterwards.
+    // EDD_FROM_LMP, not AGE_FROM_DOB: the latter is deliberately exempt from clear-on-null
+    // (CR-037's "either DOB or age" fallback), so it would not show the gap being guarded here.
+    val gate = FormFieldSchema(
+      label = "Conditions",
+      required = false,
+      inputTypeRaw = "multiselect",
+      questionCode = "conditions",
+      section = "Health History",
+    )
+    val lmpGatedByConditions = FormFieldSchema(
+      label = "LMP date",
+      required = false,
+      inputTypeRaw = "date",
+      questionCode = LMP_DATE_QUESTION_CODE,
+      section = "Health History",
+      visibleWhen = FormVisibleWhen(field = "conditions", value = "is_pregnant", operator = "contains"),
+    )
+    val vm = viewModel(
+      listOf(
+        gate,
+        lmpGatedByConditions,
+        field(
+          "edd",
+          section = "Health History",
+          required = false,
+          inputType = "date",
+          computedFrom = "EDD_FROM_LMP",
+        ),
+      ),
+    )
+
+    vm.setMultiAnswer("conditions", listOf("is_pregnant"))
+    vm.setAnswer(LMP_DATE_QUESTION_CODE, LocalDate.of(2026, 1, 1).toString())
+    dispatcher.scheduler.advanceUntilIdle()
+    assertEquals("2026-10-08", vm.uiState.value.answers.valueOf("edd"))
+
+    // Unchecking hides the LMP field, so FormHiddenFieldReset clears it — the derived EDD must go
+    // with it rather than keep showing a date derived from an answer that no longer exists.
+    vm.setMultiAnswer("conditions", emptyList())
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertNull(vm.uiState.value.answers.valueOf(LMP_DATE_QUESTION_CODE))
+    assertNull(vm.uiState.value.answers.valueOf("edd"))
+  }
 }

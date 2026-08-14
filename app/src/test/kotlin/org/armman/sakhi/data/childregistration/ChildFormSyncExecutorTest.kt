@@ -266,4 +266,26 @@ class ChildFormSyncExecutorTest {
     val entity = requireNotNull(dao.getByLocalBeneficiaryId("local-1"))
     assertTrue(requireNotNull(entity.lastErrorMessage).contains("POST /beneficiaries failed: HTTP 400"))
   }
+
+  @Test
+  fun `a plain-text error body never reaches the Sakhi verbatim`() = runTest {
+    // Regression (PR #32 review): ApiErrorParser echoes the whole body back as `message` when the
+    // response isn't the expected envelope. SubmitErrorCopy only recognises raw bodies starting
+    // with `{`/`[`/`<`, so a plain-text gateway error used to pass through unrecognised and render
+    // verbatim. The coordinator now drops `message` when it is just the body echoed back.
+    seedPendingDraft()
+    val plainTextBody = "upstream connect error or disconnect/reset before headers"
+    enrollmentApi.response = Response.error(
+      502,
+      plainTextBody.toResponseBody("text/plain".toMediaType()),
+    )
+
+    val result = executor.runOne("local-1")
+
+    val shown = requireNotNull((result as ChildFormSyncItemResult.Failed).message)
+    assertFalse("raw gateway text must not reach the Sakhi", shown.contains("upstream connect error"))
+    // Raw body still retained for debugging.
+    val entity = requireNotNull(dao.getByLocalBeneficiaryId("local-1"))
+    assertTrue(requireNotNull(entity.lastErrorMessage).contains(plainTextBody))
+  }
 }

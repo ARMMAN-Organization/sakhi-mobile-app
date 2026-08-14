@@ -193,13 +193,18 @@ class ChildRegistrationSubmissionMapper @Inject constructor(
     answers.singleValues + answers.multiValues
 
   /** Split parts of `name_of_the_child`. Heuristic to CONFIRM WITH ARMMAN: firstName = first token,
-   * lastName = last token (or the first when there's only one), middleName = everything in between
-   * (null if none). Whitespace-delimited, collapsing repeated spaces. */
+   * lastName = last token, middleName = everything in between (null if none). Whitespace-delimited,
+   * collapsing repeated spaces.
+   *
+   * A single token (a real mononym) is kept as firstName with an EMPTY lastName, so [joinFullName]
+   * round-trips it unchanged. It used to be copied into lastName as well, which wrote a permanently
+   * doubled `pii.fullName` ("Aarav Aarav") into the backend record for every mononym child — see
+   * PR #32 review. */
   private fun parseChildName(rawName: String?): ChildName {
     val tokens = rawName.orEmpty().trim().split(Regex("\\s+")).filter { it.isNotBlank() }
     return when {
       tokens.isEmpty() -> ChildName(firstName = "", middleName = null, lastName = "")
-      tokens.size == 1 -> ChildName(firstName = tokens.first(), middleName = null, lastName = tokens.first())
+      tokens.size == 1 -> ChildName(firstName = tokens.first(), middleName = null, lastName = "")
       tokens.size == 2 -> ChildName(firstName = tokens.first(), middleName = null, lastName = tokens.last())
       else -> ChildName(
         firstName = tokens.first(),

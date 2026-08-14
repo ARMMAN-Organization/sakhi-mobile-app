@@ -44,10 +44,13 @@ data class BeneficiaryPiiDto(
  * string [BeneficiaryPiiDto] now sends — the ONE place this join happens, per that DTO's doc, so
  * every caller (dynamic mother form, static enrollment, child registration) stays consistent if
  * the join rule (spacing, missing-middle handling) ever needs to change. [first]/[last] are
- * expected non-blank (each caller's own required-field gate already enforces that); [middle] is
- * skipped entirely when blank rather than leaving a double space. */
+ * normally non-blank (each caller's own required-field gate enforces that), but a blank part is
+ * skipped rather than contributing a stray space: [middle] is absent for most names, and [last] is
+ * empty for a mononym child (see `ChildRegistrationSubmissionMapper.parseChildName`). */
 fun joinFullName(first: String, middle: String?, last: String): String =
-  listOfNotNull(first.trim(), middle?.trim()?.takeIf { it.isNotBlank() }, last.trim())
+  listOf(first, middle.orEmpty(), last)
+    .map { it.trim() }
+    .filter { it.isNotBlank() }
     .joinToString(" ")
 
 /** `case` block — `beneficiaryTypeLookupId`/`caseTypeLookupId` are UUIDs resolved via

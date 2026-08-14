@@ -305,6 +305,10 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
         fieldErrors = it.fieldErrors - questionCode - newlyHidden,
       )
     }
+    // Same reason as [setAnswer]: FormHiddenFieldReset above may have cleared a field that a
+    // computed field derives from, so the derived value has to be recomputed or it keeps showing a
+    // result calculated from an answer the Sakhi can no longer see.
+    recomputeDerivedFields()
   }
 
   /** Called once the Sakhi has watched/listened to a `media` field's content in full (the
