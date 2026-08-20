@@ -2,7 +2,9 @@ package org.armman.sakhi.data.beneficiary
 
 import com.google.gson.Gson
 import kotlinx.coroutines.test.runTest
+import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
+import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.childregistration.FakeChildFormDraftDao
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.DynamicFormDraftEntity
@@ -105,9 +107,24 @@ class OfflineFirstBeneficiaryRepositoryTest {
     BeneficiaryListResponseDto(success = true, message = "OK", data = Gson().toJsonTree(rows.toList())),
   )
 
+  private fun fakeSessionStore(subjectId: String = "sakhi-1") = SessionStore(FakeSecureKeyValueStore()).apply {
+    saveSession(
+      UserSession(
+        username = "sakhi1",
+        subjectId = subjectId,
+        roles = listOf("SAKHI"),
+        projectId = null,
+        geographyUnitId = null,
+        accessToken = "token",
+        refreshToken = "refresh",
+        accessTokenExpiresAtEpochSeconds = Long.MAX_VALUE,
+      ),
+    )
+  }
+
   private fun repository(remoteApi: BeneficiaryApi = FakeBeneficiaryApi()) = OfflineFirstBeneficiaryRepository(
     localEnrolments,
-    RemoteBeneficiaryRepository(remoteApi, FakeSecureKeyValueStore()),
+    RemoteBeneficiaryRepository(remoteApi, fakeSessionStore(), FakeSecureKeyValueStore()),
   )
 
   // ---- Flag on (temporarily, risk accepted — see RemoteBeneficiaryListFeatureFlag's KDoc) --------
@@ -160,6 +177,7 @@ class OfflineFirstBeneficiaryRepositoryTest {
 
     val remote = RemoteBeneficiaryRepository(
       FakeBeneficiaryApi(listAllResponse = { okRemote() }),
+      fakeSessionStore(),
       FakeSecureKeyValueStore(),
     ).fetchRemoteBeneficiaries(lmp)
     val syncedRemoteIds = local.mapNotNull { it.remoteBeneficiaryId }.toSet()
@@ -182,6 +200,7 @@ class OfflineFirstBeneficiaryRepositoryTest {
     val local = localEnrolments.getLocalBeneficiaries()
     val remote = RemoteBeneficiaryRepository(
       FakeBeneficiaryApi(listAllResponse = { okRemote(remoteRow("server-1", "Sunita Pawar")) }),
+      fakeSessionStore(),
       FakeSecureKeyValueStore(),
     ).fetchRemoteBeneficiaries(lmp)
 
@@ -201,6 +220,7 @@ class OfflineFirstBeneficiaryRepositoryTest {
 
     val remote = RemoteBeneficiaryRepository(
       FakeBeneficiaryApi(listAllResponse = { okRemote(remoteRow("server-1", "Deepa T")) }),
+      fakeSessionStore(),
       FakeSecureKeyValueStore(),
     ).fetchRemoteBeneficiaries(lmp)
 

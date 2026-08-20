@@ -331,6 +331,8 @@ private fun Footer(
         modifier = Modifier.weight(1f),
       )
     }
+    // Referral / Referral Follow-up / Reopen hidden — not in this sprint scope (temporary; see CR for restoring).
+    if (false) {
     Row(
       horizontalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
       modifier = Modifier.fillMaxWidth().padding(
@@ -359,6 +361,7 @@ private fun Footer(
         onClick = { if (!hasPendingReopenRequest) showReopenReasonPicker = true },
         modifier = Modifier.weight(1f),
       )
+    }
     }
   }
   if (showVisitPicker) {

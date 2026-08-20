@@ -6,19 +6,25 @@ import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
+import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.motherlink.BeneficiaryApi
 import org.armman.sakhi.data.motherlink.BeneficiaryListItemDto
 import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val KEY_REMOTE_BENEFICIARY_CACHE = "remote_beneficiary_list_cache"
+private const val KEY_REMOTE_BENEFICIARY_CACHE_PREFIX = "remote_beneficiary_list_cache_"
 private const val CASE_TYPE_CHILD = "CHILD"
 private const val STATUS_JOURNEY_COMPLETE = "JOURNEY_COMPLETE"
 private const val STATUS_CLOSED = "CLOSED"
 private const val UNNAMED_REMOTE = "Unnamed beneficiary"
 private const val PADA_UNRESOLVED = "—"
 private const val VISIT_UNAVAILABLE = "—"
+
+/** Both the disk cache and the in-memory [RemoteBeneficiaryRepository.cached] snapshot are scoped
+ * by the session's subjectId — see the constructor doc for why: a device previously used by a
+ * different Sakhi must never surface her cached caseload after a new Sakhi logs in. */
+private fun cacheKeyFor(subjectId: String) = "$KEY_REMOTE_BENEFICIARY_CACHE_PREFIX$subjectId"
 
 /**
  * Server-sourced beneficiaries for My Beneficiaries — the remote half of
@@ -33,6 +39,14 @@ private const val VISIT_UNAVAILABLE = "—"
  * [org.armman.sakhi.data.motherlink.motherLinkGson] needs one for [LocalDate] fields — mapping to
  * the domain shape happens fresh on every read, live or cached.
  *
+ * Both the disk cache and the in-memory [cached] snapshot are keyed by the current session's
+ * subjectId (via [sessionStore]) — this used to be one device-global disk key with an unscoped
+ * in-memory field, so a device previously used by a different Sakhi would keep showing her cached
+ * caseload (from memory, even before touching disk) after a new Sakhi logged in but before her own
+ * first successful fetch completed. Same "stale device cache" class of bug that
+ * [org.armman.sakhi.data.auth.CurrentUserRepository.clearIfDifferentUser] guards against for the
+ * `/me` profile, which this repository was missing on both its cache layers.
+ *
  * Deliberately calls [BeneficiaryApi.listAll] with no caseType/status filter rather than
  * [BeneficiaryApi.list]'s narrower mother-only contract: My Beneficiaries needs both MOTHER and
  * CHILD rows across every status, bucketed into tabs client-side exactly the way
@@ -41,12 +55,18 @@ private const val VISIT_UNAVAILABLE = "—"
 @Singleton
 class RemoteBeneficiaryRepository @Inject constructor(
   private val beneficiaryApi: BeneficiaryApi,
+  private val sessionStore: SessionStore,
   private val store: SecureKeyValueStore,
 ) {
 
   private val gson = Gson()
   private val mutex = Mutex()
+
+  // Both null fields together mean "nothing cached in memory yet". [cachedForSakhiId] records
+  // which Sakhi's session the in-memory [cached] list belongs to, so a mismatch (a different
+  // Sakhi logged in since) is treated the same as a cold cache rather than served up.
   private var cached: List<BeneficiaryListItemDto>? = null
+  private var cachedForSakhiId: String? = null
 
   /**
    * Null only when there is genuinely nothing to show yet — first run, offline, and nothing was
@@ -55,16 +75,25 @@ class RemoteBeneficiaryRepository @Inject constructor(
    */
   suspend fun fetchRemoteBeneficiaries(today: LocalDate = LocalDate.now()): List<Beneficiary>? =
     mutex.withLock {
+      val sakhiId = sessionStore.readSession()?.subjectId
+
       val fetched = fetchRows()
       if (fetched != null) {
         // Persisted even when empty: a Sakhi whose last case was closed must stop seeing a stale row.
-        store.putString(KEY_REMOTE_BENEFICIARY_CACHE, gson.toJson(fetched))
+        if (sakhiId != null) store.putString(cacheKeyFor(sakhiId), gson.toJson(fetched))
         cached = fetched
+        cachedForSakhiId = sakhiId
         return fetched.mapNotNull { it.toRemoteBeneficiary(today) }
       }
-      cached?.let { return it.mapNotNull { row -> row.toRemoteBeneficiary(today) } }
-      val persisted = readPersisted()
-      if (persisted != null) cached = persisted
+
+      if (cachedForSakhiId == sakhiId) {
+        cached?.let { return it.mapNotNull { row -> row.toRemoteBeneficiary(today) } }
+      }
+      val persisted = sakhiId?.let { readPersisted(it) }
+      if (persisted != null) {
+        cached = persisted
+        cachedForSakhiId = sakhiId
+      }
       persisted?.mapNotNull { it.toRemoteBeneficiary(today) }
     }
 
@@ -79,8 +108,8 @@ class RemoteBeneficiaryRepository @Inject constructor(
     null
   }
 
-  private fun readPersisted(): List<BeneficiaryListItemDto>? {
-    val json = store.getString(KEY_REMOTE_BENEFICIARY_CACHE) ?: return null
+  private fun readPersisted(sakhiId: String): List<BeneficiaryListItemDto>? {
+    val json = store.getString(cacheKeyFor(sakhiId)) ?: return null
     return try {
       gson.fromJson(json, object : TypeToken<List<BeneficiaryListItemDto>>() {}.type)
     } catch (e: JsonSyntaxException) {
