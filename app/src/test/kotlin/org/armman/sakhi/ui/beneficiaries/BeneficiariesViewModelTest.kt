@@ -109,6 +109,74 @@ class BeneficiariesViewModelTest {
   }
 
   @Test
+  fun `search matches phoneNumber substring`() {
+    val viewModel = createViewModel()
+
+    // a1's phoneNumber is "+911234567890" (fixture default) — matching a substring of it must
+    // surface the row even though the query doesn't match the name at all.
+    viewModel.onSearchQueryChanged("1234567")
+    assertEquals(listOf("a1", "a2", "a3"), viewModel.uiState.value.beneficiaries.map { it.id })
+  }
+
+  @Test
+  fun `search matches either name or phone, OR semantics`() {
+    val viewModel = createViewModel()
+
+    // All three fixture rows share the same phone number, so narrow to one that only matches
+    // by name to prove the two conditions are OR'd, not AND'd.
+    viewModel.onSearchQueryChanged("Sunita")
+    assertEquals(listOf("a1"), viewModel.uiState.value.beneficiaries.map { it.id })
+  }
+
+  @Test
+  fun `search against a blank phoneNumber never false-matches`() {
+    val repo = FakeBeneficiaryRepository(
+      beneficiaries = listOf(
+        beneficiary("r1", "Remote Only", BeneficiaryStatus.ACTIVE, RiskLevel.LOW, VisitState.OPEN, "Jamsar")
+          .copy(phoneNumber = ""),
+      ),
+    )
+    val viewModel = BeneficiariesViewModel(repo)
+    dispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onSearchQueryChanged("anything")
+    assertTrue(viewModel.uiState.value.beneficiaries.isEmpty())
+  }
+
+  @Test
+  fun `unassessed row remains visible when a risk filter is selected`() {
+    val repo = FakeBeneficiaryRepository(
+      beneficiaries = listOf(
+        beneficiary("u1", "Unassessed Row", BeneficiaryStatus.ACTIVE, RiskLevel.LOW, VisitState.OPEN, "Jamsar")
+          .copy(isAssessed = false),
+      ),
+    )
+    val viewModel = BeneficiariesViewModel(repo)
+    dispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onToggleRisk(RiskLevel.HIGH)
+    viewModel.onApplyFilters()
+
+    assertEquals(listOf("u1"), viewModel.uiState.value.beneficiaries.map { it.id })
+  }
+
+  @Test
+  fun `assessed rows still obey the risk filter normally`() {
+    val repo = FakeBeneficiaryRepository(
+      beneficiaries = listOf(
+        beneficiary("a1", "Assessed Row", BeneficiaryStatus.ACTIVE, RiskLevel.LOW, VisitState.OPEN, "Jamsar"),
+      ),
+    )
+    val viewModel = BeneficiariesViewModel(repo)
+    dispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onToggleRisk(RiskLevel.HIGH)
+    viewModel.onApplyFilters()
+
+    assertTrue(viewModel.uiState.value.beneficiaries.isEmpty())
+  }
+
+  @Test
   fun `pada filter restricts and clear resets`() {
     val viewModel = createViewModel()
 

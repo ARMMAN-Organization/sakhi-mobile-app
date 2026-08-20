@@ -4,7 +4,7 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.android)
   alias(libs.plugins.kotlin.compose)
-  alias(libs.plugins.kotlin.kapt)
+  alias(libs.plugins.ksp)
   alias(libs.plugins.hilt)
 }
 
@@ -82,7 +82,7 @@ dependencies {
   debugImplementation(libs.compose.ui.tooling)
 
   implementation(libs.hilt.android)
-  kapt(libs.hilt.compiler)
+  ksp(libs.hilt.compiler)
   implementation(libs.hilt.navigation.compose)
 
   implementation(libs.retrofit)
@@ -92,19 +92,22 @@ dependencies {
   implementation(libs.androidx.security.crypto)
 
   // GoRules local rule evaluation (CR-032 Milestone 3) — runs published ANC/PP/NN/INC/CCV/HR
-  // decision graphs fully on-device. Exact API surface unconfirmed until first Gradle sync;
-  // see data/rules/ZenRuleEvaluator.kt for the isolation seam if method names differ.
-  // implementation(libs.gorules.zen.engine) // TEMP disabled — isolating kapt metadata-2.1.0 crash
+  // decision graphs fully on-device. Re-enabled now that Room/Hilt annotation processing runs
+  // via KSP instead of KAPT (see gradle/libs.versions.toml `ksp` version comment) — KAPT's
+  // metadata reader couldn't handle this artifact's Kotlin 2.1.0 metadata. Exact API surface
+  // still needs confirming against the compiled Kotlin bindings; see
+  // data/rules/ZenRuleEvaluator.kt for the isolation seam if method names differ.
+  implementation(libs.gorules.zen.engine)
 
   // Local persistence for the enrollment offline queue (drafts + sync status).
   implementation(libs.room.runtime)
   implementation(libs.room.ktx)
-  kapt(libs.room.compiler)
+  ksp(libs.room.compiler)
 
   // Background sync for queued enrollments (connectivity-restored + periodic retry).
   implementation(libs.work.runtime.ktx)
   implementation(libs.hilt.work)
-  kapt(libs.androidx.hilt.compiler)
+  ksp(libs.androidx.hilt.compiler)
 
   testImplementation(libs.junit)
   testImplementation(libs.coroutines.test)

@@ -60,6 +60,49 @@
 -keep class org.armman.sakhi.data.schedule.** { *; }
 -keep class org.armman.sakhi.data.visitform.** { *; }
 
+# dashboard: DashboardApi (GET /sakhi/{sakhiId}/dashboard) + DashboardResponseDto/DashboardDataDto/
+# BeneficiarySummaryDto/ReferralSummaryDto/VisitSummaryDto/DashboardSakhiDto, reached only via
+# Retrofit's erased Response<T> generic, plus RemoteDashboardRepository's private
+# CachedDashboardSummary (gson.fromJson'd from SecureKeyValueStore, same on-disk-cache reflection
+# hazard as the other packages above) — none of these are `new`d directly from app code that R8's
+# reachability analysis can see. Missing this is the release-only "dashboard not working" bug
+# (2026-08-19): fetchSummary() catches the resulting Gson/cast exception and returns null exactly
+# like being offline, and with nothing cached yet getSummary() throws, so HomeViewModel renders
+# HomeUiState.Error — debug builds have isMinifyEnabled = false, so this only shows up in release.
+-keep class org.armman.sakhi.data.dashboard.** { *; }
+
+# Full audit (2026-08-19) of every remaining Retrofit-backed / Gson-reflected package in the app,
+# triggered by the dashboard R8 bug above turning out to be one of several, not a one-off. Same
+# exact hazard each time: DTOs reached only via Retrofit's erased Response<T> generic, or
+# SecureKeyValueStore draft payloads only ever read back via gson.fromJson(json, X::class.java) —
+# never `new`d/referenced by field name anywhere R8's reachability analysis can see, so release
+# builds (isMinifyEnabled = true) silently strip or rename their fields while debug builds
+# (isMinifyEnabled = false) work fine. Rather than wait for each of these to surface as its own
+# release-only bug report, keeping every remaining data/* package that touches Gson or Retrofit:
+# closure: ClosureApi (POST /closures) + ClosureRequestDto/ClosureResponseDto/ClosureResponseDataDto.
+# referral: ReferralApi (GET pending-followup) + ReferralFollowUp*Dto, plus
+# RemoteReferralRepository's own on-disk Gson cache (same cached-shape pattern as dashboard's
+# CachedDashboardSummary above).
+# reopen: ReopenApi (POST/GET reopen-requests) + ReopenRequest*Dto.
+# rules: RuleSetApi (GET published rule version) + PublishedRuleVersionDto/RuleSetEnvelopeDto — feeds
+# the on-device GoRules evaluator, so a silent parse failure here would misfire ANC/PP/NN/INC/CCV/HR
+# schedule generation release-only, the same category of bug as dashboard but harder to notice.
+# visit / visittracker: VisitApi (GET pada visits)/PadaApi (GET padas) + PadaVisit*Dto/PadaListDataDto,
+# plus RemoteVisitRepository's/RemotePadaRepository's own on-disk Gson caches (CachedVisit,
+# CachedPadaVisits, etc.) — the Pada/Visit-tracker screens' equivalent of the dashboard bug.
+# adhocform / delivery: no Retrofit DTOs of their own (they submit through forms'/FormSubmissionApi),
+# but AdHocFormDraftPayload/DeliveryFormDraftPayload/DeliveryChildRegistrationDraftPayload are
+# SecureKeyValueStore-persisted Gson payloads read back via gson.fromJson — same field-stripping
+# hazard as childregistration's ChildFormDraftPayload / visitform's VisitFormDraftPayload above.
+-keep class org.armman.sakhi.data.closure.** { *; }
+-keep class org.armman.sakhi.data.referral.** { *; }
+-keep class org.armman.sakhi.data.reopen.** { *; }
+-keep class org.armman.sakhi.data.rules.** { *; }
+-keep class org.armman.sakhi.data.visit.** { *; }
+-keep class org.armman.sakhi.data.visittracker.** { *; }
+-keep class org.armman.sakhi.data.adhocform.** { *; }
+-keep class org.armman.sakhi.data.delivery.** { *; }
+
 # Retrofit's own recommended R8 rules. Retrofit builds each call's generic return type
 # (Response<LoginResponseDto>) from the service interface method's signature/annotations at
 # runtime; stripping those causes GsonConverterFactory to hand back the wrong type and

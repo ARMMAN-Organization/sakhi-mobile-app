@@ -15,7 +15,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.armman.sakhi.data.beneficiary.BeneficiaryType
 import org.armman.sakhi.data.beneficiary.RiskLevel
+import org.armman.sakhi.data.audit.FormAuditRepository
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfileRepository
+import org.armman.sakhi.data.delivery.DeliveryFormDraftRepository
+import org.armman.sakhi.data.delivery.DeliverySessionRepository
+import org.armman.sakhi.data.delivery.DeliveryToNeonatalPrefill
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
@@ -25,6 +29,8 @@ import org.armman.sakhi.data.forms.FormNumericRangeValidator
 import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.FormVisibilityEvaluator
 import org.armman.sakhi.data.forms.FormsRepository
+import org.armman.sakhi.data.forms.VisitCodeFormResolver
+import org.armman.sakhi.data.schedule.VisitScheduleRepository
 import org.armman.sakhi.data.visitform.CriticalCondition
 import org.armman.sakhi.data.visitform.InfantVisitFormComputedFieldEvaluator
 import org.armman.sakhi.data.visitform.InfantVisitRiskAssessment
@@ -46,6 +52,16 @@ import javax.inject.Inject
 // tab (INFANT_VISIT has no risk model yet - see that check's own comment).
 internal const val FORM_CODE_MOTHER = "ANC_VISIT"
 internal const val FORM_CODE_INFANT = "INFANT_VISIT"
+
+/** CR-042: the delivery-session PP1/NN1/NN2 form codes — see [DynamicVisitFormViewModel.onFinish]
+ * for why these two (unlike [FORM_CODE_INFANT]) now have a real submission contract. Internal, not
+ * private, for the same reason as [FORM_CODE_MOTHER]/[FORM_CODE_INFANT] (test/screen visibility). */
+internal const val FORM_CODE_POSTPARTUM = "POSTPARTUM_VISIT"
+internal const val FORM_CODE_NEONATAL = "NEONATAL_VISIT"
+
+/** Form codes [DynamicVisitFormViewModel.onFinish] actually submits — every other form code (as of
+ * this pass, only [FORM_CODE_INFANT]) still fires [DynamicVisitFormEvent.ComingSoon]. */
+private val SUBMITTABLE_FORM_CODES = setOf(FORM_CODE_MOTHER, FORM_CODE_POSTPARTUM, FORM_CODE_NEONATAL)
 
 /** Temporary diagnostic tag for the "couldn't load this visit's data" report (CR-026
  * debugging) — load() had no logging on any of its three failure branches, so it was
@@ -85,9 +101,9 @@ data class DynamicVisitFormUiState(
    * the baseline [VisitFormComputedFieldEvaluator]'s gestational-weight-gain calculation needs.
    * Always null for INFANT_VISIT (no such field/context for infants). */
   val registrationWeightKg: Double? = null,
-  /** True while [DynamicVisitFormViewModel.onFinish]'s submit call is in flight (mother/ANC_VISIT
-   * only — see that function's doc). Drives the Submit button's loading state and guards against
-   * a double-tap firing two submissions. */
+  /** True while [DynamicVisitFormViewModel.onFinish]'s submit call is in flight (ANC_VISIT/
+   * POSTPARTUM_VISIT/NEONATAL_VISIT only — see that function's doc). Drives the Submit button's
+   * loading state and guards against a double-tap firing two submissions. */
   val isSubmitting: Boolean = false,
   /** Standalone hand-built fields for the Referral outer tab (bharath, 2026-08-08) - NOT part of
    * the ANC_VISIT schema's own "Referrals" section (that's a different set of questions, already
@@ -105,9 +121,9 @@ sealed interface DynamicVisitFormEvent {
    * partial-save exists for this fetch+render pass, same as before. */
   data object ExitForm : DynamicVisitFormEvent
 
-  /** INFANT_VISIT has no submission contract yet (mother/ANC_VISIT does, see
-   * [DynamicVisitFormViewModel.onFinish]) — its last-section action button still surfaces this
-   * instead of silently doing nothing. Also still used by the standalone Referral tab's own
+  /** [FORM_CODE_INFANT] has no submission contract yet (ANC_VISIT/POSTPARTUM_VISIT/NEONATAL_VISIT
+   * do, see [DynamicVisitFormViewModel.onFinish]) — its last-section action button still surfaces
+   * this instead of silently doing nothing. Also still used by the standalone Referral tab's own
    * submit stub (CR-028, out of scope for this pass). */
   data object ComingSoon : DynamicVisitFormEvent
 
@@ -131,21 +147,29 @@ sealed interface DynamicVisitFormEvent {
 }
 
 /**
- * Drives the schema-driven ANC_VISIT/INFANT_VISIT Visit Form — the dynamic replacement for the
- * retired hand-coded [org.armman.sakhi.ui.visitform.VisitFormViewModel]/`VisitDataState` stepper.
- * Fetches the active schema for whichever form the beneficiary's own type calls for
- * ([FormsRepository], same auto-refresh-on-load behaviour as the registration flow) and renders it
- * through the same generic [org.armman.sakhi.ui.forms.DynamicFormField] the Mother/Child
- * registration screens use.
+ * Drives the schema-driven ANC_VISIT/INFANT_VISIT/POSTPARTUM_VISIT/NEONATAL_VISIT Visit Form — the
+ * dynamic replacement for the retired hand-coded [org.armman.sakhi.ui.visitform.VisitFormViewModel]/
+ * `VisitDataState` stepper, and (since CR-042) also the screen [org.armman.sakhi.ui.delivery
+ * .DeliverySessionScreen]/[org.armman.sakhi.ui.delivery.DeliveryChildRegistrationScreen] hand off
+ * into for a delivery session's PP1 and same-session NN visit — those are already-generated
+ * [org.armman.sakhi.data.schedule.VisitScheduleEntity] rows by the time either screen navigates
+ * here, so nothing about opening them differs from opening any other scheduled visit. Fetches the
+ * active schema for whichever form the schedule row's [org.armman.sakhi.data.schedule.VisitCodeType]
+ * (or, failing that, the beneficiary's own type) calls for ([FormsRepository], same
+ * auto-refresh-on-load behaviour as the registration flow) and renders it through the same generic
+ * [org.armman.sakhi.ui.forms.DynamicFormField] the Mother/Child registration screens use.
  *
- * Scope for this pass is deliberately fetch + render only (bharath, 2026-08-07): no submission,
- * no offline draft, no cross-field/numeric-range gating — that lands with a real `POST /visits` +
- * `POST /forms/{code}/submissions` contract later (mirrors [org.armman.sakhi.data.visitform
- * .VisitFormRepository]'s own `saveVisit`-not-called-yet note). What IS preserved from the retired
- * flow is FR-S-4.4's critical-condition safety check (mother only — see
+ * Scope for this pass is deliberately fetch + render only for [FORM_CODE_INFANT] (bharath,
+ * 2026-08-07): no submission, no offline draft, no cross-field/numeric-range gating — that lands
+ * with a real `POST /visits` + `POST /forms/{code}/submissions` contract later (mirrors
+ * [org.armman.sakhi.data.visitform.VisitFormRepository]'s own `saveVisit`-not-called-yet note).
+ * [FORM_CODE_MOTHER] has that contract already; [FORM_CODE_POSTPARTUM]/[FORM_CODE_NEONATAL] gained
+ * it in this pass (CR-042) — see [onFinish]. What IS preserved from the retired flow, for the
+ * mother only, is FR-S-4.4's critical-condition safety check (see
  * [VisitCriticalConditionEvaluator]) and the carried-forward [org.armman.sakhi.data.visitform
  * .VisitContext] prefill of `rch_number`/`lmp` (mother only — the context shape has no infant
- * fields to prefill from).
+ * fields to prefill from). [FORM_CODE_NEONATAL] gets its own, unrelated prefill — see
+ * [prefillFromDeliveryVisit].
  */
 @HiltViewModel
 class DynamicVisitFormViewModel @Inject constructor(
@@ -153,6 +177,11 @@ class DynamicVisitFormViewModel @Inject constructor(
   private val visitFormRepository: VisitFormRepository,
   private val beneficiaryProfileRepository: BeneficiaryProfileRepository,
   private val visitFormDraftRepository: VisitFormDraftRepository,
+  private val visitScheduleRepository: VisitScheduleRepository,
+  private val visitCodeFormResolver: VisitCodeFormResolver,
+  private val formAuditRepository: FormAuditRepository,
+  private val deliverySessionRepository: DeliverySessionRepository,
+  private val deliveryFormDraftRepository: DeliveryFormDraftRepository,
   savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -184,16 +213,24 @@ class DynamicVisitFormViewModel @Inject constructor(
         _uiState.update { it.copy(isLoading = false, hasError = true) }
         return@launch
       }
-      val formCode = try {
-        when (beneficiaryProfileRepository.getBeneficiary(beneficiaryId).type) {
-          BeneficiaryType.MOTHER -> FORM_CODE_MOTHER
-          BeneficiaryType.INFANT -> FORM_CODE_INFANT
-        }
+      val beneficiaryType = try {
+        beneficiaryProfileRepository.getBeneficiary(beneficiaryId).type
       } catch (e: NoSuchElementException) {
         Log.w(TAG, "DynamicVisitFormViewModel.load($beneficiaryId): getBeneficiary threw NoSuchElementException")
         _uiState.update { it.copy(isLoading = false, hasError = true) }
         return@launch
       }
+      // CR-033/CR-034: prefer the schedule row's VisitCodeType (covers PP/NN/INC/CCV/HR, not just
+      // ANC/Infant) — see VisitCodeFormResolver's own doc for what's still a backend placeholder
+      // for INC/CCV/HR specifically. Falls back to the old beneficiary-type-only switch only if
+      // the schedule row itself can't be found, which should not happen in practice (every visit
+      // form is opened from a schedule entry) but must not crash load() if it somehow is.
+      val schedule = visitScheduleRepository.getByLocalScheduleUuid(visitId)
+      val formCode = schedule?.let { visitCodeFormResolver.resolve(it.visitType) }
+        ?: when (beneficiaryType) {
+          BeneficiaryType.MOTHER -> FORM_CODE_MOTHER
+          BeneficiaryType.INFANT -> FORM_CODE_INFANT
+        }
       val version = formsRepository.getActiveVersion(formCode)
       if (version == null) {
         Log.w(TAG, "DynamicVisitFormViewModel.load($beneficiaryId): getActiveVersion($formCode) returned null")
@@ -214,23 +251,41 @@ class DynamicVisitFormViewModel @Inject constructor(
         )
       }
       _uiState.update { it.copy(isLoading = false, formCode = formCode, version = version) }
+      // CR-035: logged only once the form has genuinely loaded (version confirmed non-null) —
+      // NOT on any of the earlier blank-id/beneficiary-not-found/version-null failure branches
+      // above, each of which returns before reaching here. Every open is logged, not just the
+      // first — an accurate trail is the point.
+      formAuditRepository.recordOpened(visitId, formCode)
       prefillDefaultVisitDate()
       if (formCode == FORM_CODE_MOTHER) prefillFromVisitContext()
+      if (formCode == FORM_CODE_NEONATAL) prefillFromDeliveryVisit()
       recomputeDerivedFields()
       recheckCriticalCondition()
     }
   }
 
-  /** Auto-fills "Date of visit" with today's date on load, for either beneficiary type — the
-   * Sakhi is almost always filling this in live, during the visit (bharath, 2026-08-07). Only
-   * sets it if blank, so a value restored from a future draft/backend answer isn't overwritten. */
+  /** Auto-fills the visit-date field with today's date on load, for every visit-form family
+   * (ANC_VISIT/INFANT_VISIT via [VisitFormQuestionCodes.DATE_OF_VISIT], POSTPARTUM_VISIT/
+   * NEONATAL_VISIT via [VisitFormQuestionCodes.ACTUAL_VISIT_DATE] per the spec's "Actual visit
+   * date... Should automatically select today's date" row) — the Sakhi is almost always filling
+   * this in live, during the visit (bharath, 2026-08-07). Skips a code already answered under
+   * EITHER spelling, so a value restored from a draft/backend answer isn't overwritten, and only
+   * ever writes codes the ACTIVE schema actually declares — mirrors
+   * [org.armman.sakhi.data.forms.RegistrationDatePrefill.apply]'s exact fail-safe pattern, which
+   * is what makes this safe to widen to both spellings without knowing which one any given form
+   * type uses. */
   private fun prefillDefaultVisitDate() {
     _uiState.update { state ->
-      if (state.answers.valueOf(VisitFormQuestionCodes.DATE_OF_VISIT).isNullOrBlank()) {
-        state.copy(answers = state.answers.withSingleValue(VisitFormQuestionCodes.DATE_OF_VISIT, visitDate.toString()))
-      } else {
-        state
+      if (VisitFormQuestionCodes.VISIT_DATE_QUESTION_CODES.any { !state.answers.valueOf(it).isNullOrBlank() }) {
+        return@update state
       }
+      val value = visitDate.toString()
+      val targetCodes = state.version?.schemaJson.orEmpty()
+        .map { it.questionCode }
+        .filter { it in VisitFormQuestionCodes.VISIT_DATE_QUESTION_CODES }
+        .distinct()
+        .ifEmpty { listOf(VisitFormQuestionCodes.DATE_OF_VISIT) }
+      state.copy(answers = targetCodes.fold(state.answers) { acc, code -> acc.withSingleValue(code, value) })
     }
   }
 
@@ -270,6 +325,41 @@ class DynamicVisitFormViewModel @Inject constructor(
         comorbidities = context.comorbidities,
         registrationWeightKg = context.registrationWeightKg,
       )
+    }
+  }
+
+  /**
+   * CR-042: `birth_weight_kg`/`term_of_delivery` on `NEONATAL_VISIT` (NN1 or NN2 — this fires for
+   * either, see [DeliveryToNeonatalPrefill]'s own doc) are labelled "(from the Delivery form...)"
+   * on the live schema — the Sakhi already gave both once on `DELIVERY_VISIT`, so this seeds them
+   * from that submission's own answers rather than asking her to retype them.
+   *
+   * Deliberately resolves the session via [DeliverySessionRepository.getMostRecentForBeneficiary],
+   * not [DeliverySessionRepository.getActiveForBeneficiary] — a same-session NN1 opens while the
+   * session is still active, but a tracker NN2 can open long after the session already reached
+   * [org.armman.sakhi.data.delivery.DeliverySessionStep.DONE], and it needs this prefill just as
+   * much.
+   *
+   * Best-effort throughout, same degrade-gracefully contract [prefillFromVisitContext] has: no
+   * delivery session ever recorded for this beneficiary, no [org.armman.sakhi.data.delivery
+   * .DeliverySessionEntity.deliverySubmissionLocalUuid] on it, or no draft payload found for that
+   * uuid (shouldn't happen — see [DeliveryFormDraftRepository.getAnswers]'s own doc) all just mean
+   * both fields stay blank and Sakhi-fillable rather than blocking the form.
+   */
+  private suspend fun prefillFromDeliveryVisit() {
+    val session = deliverySessionRepository.getMostRecentForBeneficiary(beneficiaryId) ?: return
+    val deliverySubmissionLocalUuid = session.deliverySubmissionLocalUuid ?: return
+    val deliveryAnswers = deliveryFormDraftRepository.getAnswers(deliverySubmissionLocalUuid) ?: return
+    val prefill = DeliveryToNeonatalPrefill.singleValueAnswersFor(deliveryAnswers)
+    if (prefill.isEmpty()) return
+    _uiState.update { state ->
+      var answers = state.answers
+      prefill.forEach { (questionCode, value) ->
+        if (answers.valueOf(questionCode).isNullOrBlank()) {
+          answers = answers.withSingleValue(questionCode, value)
+        }
+      }
+      state.copy(answers = answers)
     }
   }
 
@@ -321,6 +411,58 @@ class DynamicVisitFormViewModel @Inject constructor(
 
   /** Worst-of [infantKnownRisks] - LOW when the list is empty (no risk flagged this visit). */
   fun infantOverallRiskLevel(): RiskLevel = InfantVisitRiskAssessment.overall(infantKnownRisks().map { it.riskLevel })
+
+  /**
+   * Resolved review data for the Summary tab's plain "filled fields" review — POSTPARTUM_VISIT/
+   * NEONATAL_VISIT, and any other form code with no bespoke Summary tab of its own (ANC_VISIT/
+   * INFANT_VISIT keep their risk-banner Summary tabs above instead). Every answered,
+   * currently-visible field grouped by schema section into its own card, in the order each section
+   * first appears, coded values mapped to display labels. Mirrors [org.armman.sakhi.ui.delivery
+   * .DeliverySessionViewModel.buildSummary] — same shape, same empty-sections-dropped rule — but
+   * also folds in MEDIA fields (this form has some; DELIVERY_VISIT doesn't, per that function's own
+   * doc), using [mediaCompletedLabel] the same way [imageCapturedLabel] covers IMAGE fields. Not
+   * suspend, unlike that Delivery twin: [optionsFor] here never needs a lookup-repository round
+   * trip (see that function's own doc).
+   */
+  fun buildFieldSummary(imageCapturedLabel: String, mediaCompletedLabel: String): List<SummarySection> {
+    val fields = visibleFields()
+    val sectionTitles = fields.map(::sectionOf).distinct()
+    return sectionTitles.map { title ->
+      SummarySection(
+        title = title,
+        rows = fields.filter { sectionOf(it) == title }
+          .mapNotNull { summaryRowFor(it, imageCapturedLabel, mediaCompletedLabel) },
+      )
+    }.filter { it.rows.isNotEmpty() }
+  }
+
+  private fun summaryRowFor(
+    field: FormFieldSchema,
+    imageCapturedLabel: String,
+    mediaCompletedLabel: String,
+  ): SummaryRow? {
+    val state = _uiState.value
+    val value: String? = when (field.inputType) {
+      FormFieldInputType.MULTISELECT, FormFieldInputType.MULTISELECT_DATE -> {
+        val codes = state.answers.multiValueOf(field.questionCode)
+        if (codes.isEmpty()) {
+          null
+        } else {
+          val options = optionsFor(field)
+          codes.joinToString(", ") { code -> options.firstOrNull { it.valueCode == code }?.label ?: code }
+        }
+      }
+      FormFieldInputType.IMAGE -> imageCapturedLabel.takeIf { field.questionCode in state.capturedImages }
+      FormFieldInputType.MEDIA -> mediaCompletedLabel.takeIf { field.questionCode in state.mediaCompleted }
+      FormFieldInputType.SELECT, FormFieldInputType.RADIO -> {
+        val code = state.answers.valueOf(field.questionCode)
+        if (code.isNullOrBlank()) null else optionsFor(field).firstOrNull { it.valueCode == code }?.label ?: code
+      }
+      // text / text_geo / number / date / computed read-only — the stored value is display-ready.
+      else -> state.answers.valueOf(field.questionCode)
+    }
+    return value?.takeIf { it.isNotBlank() }?.let { SummaryRow(label = field.label, value = it) }
+  }
 
   fun setAnswer(questionCode: String, value: String?) {
     val fields = _uiState.value.version?.schemaJson.orEmpty()
@@ -412,16 +554,21 @@ class DynamicVisitFormViewModel @Inject constructor(
   }
 
   /**
-   * Real submit for the mother (ANC_VISIT) flow: `POST /visits` then
-   * `POST /forms/ANC_VISIT/submissions`, via [VisitFormDraftRepository.submitDraft] (CR-026b) —
-   * saves locally first, then attempts the real submission immediately while online (identical
-   * outcome to the pre-CR-026b direct coordinator call), or queues it for the next manual Data
-   * Upload while offline. INFANT_VISIT has no submission contract yet, so its last-section action
-   * still fires [DynamicVisitFormEvent.ComingSoon].
+   * Real submit for [SUBMITTABLE_FORM_CODES] — [FORM_CODE_MOTHER] (`POST /visits` then
+   * `POST /forms/ANC_VISIT/submissions`), and, since CR-042, [FORM_CODE_POSTPARTUM]/
+   * [FORM_CODE_NEONATAL] (PP1/NN1/NN2, the same two-call sequence under their own resolved
+   * formCode) — via [VisitFormDraftRepository.submitDraft] (CR-026b), which saves locally first,
+   * then attempts the real submission immediately while online (identical outcome to the
+   * pre-CR-026b direct coordinator call), or queues it for the next manual Data Upload while
+   * offline. Once a PP1/NN submission actually succeeds, [org.armman.sakhi.data.visitform
+   * .VisitFormSubmissionCoordinator.submit] advances the beneficiary's [org.armman.sakhi.data
+   * .delivery.DeliverySessionEntity] on its own (CR-042 step advancement) — this ViewModel does not
+   * need to know that happened. [FORM_CODE_INFANT] has no submission contract yet, so its
+   * last-section action still fires [DynamicVisitFormEvent.ComingSoon].
    */
   fun onFinish() {
     val state = _uiState.value
-    if (state.formCode != FORM_CODE_MOTHER) {
+    if (state.formCode !in SUBMITTABLE_FORM_CODES) {
       _events.trySend(DynamicVisitFormEvent.ComingSoon)
       return
     }

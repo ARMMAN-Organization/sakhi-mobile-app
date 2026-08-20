@@ -21,7 +21,9 @@ import javax.inject.Singleton
  * ([org.armman.sakhi.data.visitform.VisitFormDraftEntity.serverVisitId] set, form submission not
  * yet done). [attemptSync] always passes the draft's current `serverVisitId` back in as
  * `existingVisitId`, so a resumed attempt skips straight to step 2 rather than risking a second
- * visit instance for the same visit.
+ * visit instance for the same visit. It also always passes the draft's persisted
+ * [org.armman.sakhi.data.visitform.VisitFormDraftEntity.localSubmissionUuid] straight through, so
+ * a resumed submission call replays the same idempotency key rather than minting a fresh one.
  */
 @Singleton
 class VisitFormSyncExecutor @Inject constructor(
@@ -86,6 +88,7 @@ class VisitFormSyncExecutor @Inject constructor(
         formVersionId = draft.formVersionId,
         answers = payload.answers,
         visitDate = parseVisitDate(draft.visitDateIso),
+        localSubmissionUuid = draft.localSubmissionUuid,
         existingVisitId = draft.serverVisitId,
         onVisitCreated = { visitId ->
           capturedVisitId = visitId

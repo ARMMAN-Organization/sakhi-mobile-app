@@ -9,7 +9,12 @@ import retrofit2.http.Path
  * `formVersionId`/`beneficiaryId` are required UUIDs, `visitId` is nullable/optional (not used by
  * enrollment — only relevant for visit-linked forms, out of scope here), `localSubmissionUuid` is
  * the offline-retry idempotency key (same pattern as `case.localCaseUuid`, CR-017), and `formData`
- * is the free-form answer blob keyed by `question_code`. */
+ * is the free-form answer blob keyed by `question_code`.
+ *
+ * There used to be a client-supplied `submittedBy` field here (CR-035). It has been removed: the
+ * backend rejects/ignores it — attribution is derived server-side from the caller's auth token —
+ * and returns who it recorded as the submitter on the response instead, see
+ * [SubmissionResponseData.submittedByUserId]. */
 data class CreateSubmissionRequestDto(
   val formVersionId: String,
   val beneficiaryId: String,
@@ -18,8 +23,27 @@ data class CreateSubmissionRequestDto(
   val formData: Map<String, Any?>,
 )
 
+/**
+ * [submittedByUserId] is server-derived (see [CreateSubmissionRequestDto]'s doc for why the
+ * request-side `submittedBy` field was removed) — no current consumer reads it; modelled here so a
+ * future one (e.g. an audit/debug view) doesn't need a DTO change to get at it.
+ *
+ * [childBeneficiaryIds] (CR-042, "Delivery Event Session") is present **only** on a
+ * `DELIVERY_VISIT` submission's response, and only when at least one baby was live-born — every
+ * other form code's response omits the key entirely, which Gson deserializes as `null` here since
+ * the field is nullable. Do not read this as `?: emptyList()` — the distinction between "key
+ * absent" (`null`, no live birth / non-delivery form) and "key present but empty" (backend
+ * contract says this should not happen, but an empty list is still a distinct, valid state from
+ * null if it ever does) matters to the delivery session: `null` means "skip the child-registration
+ * step entirely," not "loop zero times." Order matches the submitted `child1_/child2_/child3_*`
+ * field order; a stillborn or absent child is skipped, never padded with a null entry. Stable
+ * across an idempotent retry (same `localSubmissionUuid` replays the same ids, no duplicate child
+ * cases) per the backend's `resolveDeliveryChildren()` contract (confirmed 2026-08-18).
+ */
 data class SubmissionResponseData(
   val id: String,
+  val submittedByUserId: String? = null,
+  val childBeneficiaryIds: List<String>? = null,
 )
 
 data class CreateSubmissionResponseDto(

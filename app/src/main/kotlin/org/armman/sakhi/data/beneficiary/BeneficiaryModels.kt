@@ -49,4 +49,12 @@ data class Beneficiary(
    * [org.armman.sakhi.data.beneficiary.OfflineFirstBeneficiaryRepository] — never displayed.
    */
   val remoteBeneficiaryId: String? = null,
+  /**
+   * The date this beneficiary was originally registered, or null when unavailable (a
+   * [org.armman.sakhi.data.beneficiaryprofile.StaticBeneficiaryProfileRepository] fallback row, or
+   * a legacy record predating this field). Used by ad-hoc forms (Closure, Referral) to bound
+   * "date of event"-style questions so they can't be set before the beneficiary was even enrolled
+   * — see [org.armman.sakhi.data.forms.FormDateRuleset.DATE_OF_EVENT_QUESTION_CODE].
+   */
+  val registrationDate: LocalDate? = null,
 )

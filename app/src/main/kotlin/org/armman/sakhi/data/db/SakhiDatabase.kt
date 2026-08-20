@@ -5,6 +5,8 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import org.armman.sakhi.data.audit.FormAuditEventDao
+import org.armman.sakhi.data.audit.FormAuditEventEntity
 import org.armman.sakhi.data.childregistration.ChildFormDraftDao
 import org.armman.sakhi.data.childregistration.ChildFormDraftEntity
 import org.armman.sakhi.data.enrollment.EnrollmentDraftDao
@@ -16,6 +18,14 @@ import org.armman.sakhi.data.schedule.VisitScheduleDao
 import org.armman.sakhi.data.schedule.VisitScheduleEntity
 import org.armman.sakhi.data.visitform.VisitFormDraftDao
 import org.armman.sakhi.data.visitform.VisitFormDraftEntity
+import org.armman.sakhi.data.adhocform.AdHocFormDraftDao
+import org.armman.sakhi.data.adhocform.AdHocFormDraftEntity
+import org.armman.sakhi.data.delivery.DeliveryChildRegistrationDraftDao
+import org.armman.sakhi.data.delivery.DeliveryChildRegistrationDraftEntity
+import org.armman.sakhi.data.delivery.DeliveryFormDraftDao
+import org.armman.sakhi.data.delivery.DeliveryFormDraftEntity
+import org.armman.sakhi.data.delivery.DeliverySessionDao
+import org.armman.sakhi.data.delivery.DeliverySessionEntity
 
 /**
  * App's single Room database. Holds enrollment, dynamic-form and Children Register sync-queue
@@ -37,6 +47,50 @@ import org.armman.sakhi.data.visitform.VisitFormDraftEntity
  *  - v5: [VisitFormDraftEntity] (CR-026b visit-form offline sync — the fifth queue, alongside the
  *    three form-draft tables and `visit_schedules`). Additive [MIGRATION_4_5] — creates
  *    `visit_form_drafts` only, touches no existing table.
+ *  - v6: [FormAuditEventEntity] (CR-035 capture-only local audit trail — form open/save/submit
+ *    events). Additive [MIGRATION_5_6] — creates `form_audit_events` plus its one index, touches
+ *    no existing table. No automated migration test, matching the existing convention for the
+ *    three prior additive migrations (explicit team decision — no real users on the app yet).
+ *  - v7: [AdHocFormDraftEntity] (ad-hoc-form offline sync — Referral / Referral Follow-up /
+ *    ANC Closure / Child Closure / Beneficiary Reopen). Additive [MIGRATION_6_7] — creates
+ *    `ad_hoc_form_drafts` only, touches no existing table. Same no-automated-migration-test
+ *    convention as v4/v5/v6.
+ *  - v8: [DeliverySessionEntity] (CR-042 Delivery Event Session resume state). Additive
+ *    [MIGRATION_7_8] — creates `delivery_sessions` only, touches no existing table. Not a sync
+ *    queue (see the entity's own doc) so, unlike v2-v7, it has no `syncStatus` column. Same
+ *    no-automated-migration-test convention as v4/v5/v6/v7.
+ *  - v9: [DeliveryFormDraftEntity] (CR-042 `DELIVERY_VISIT` submission queue). Additive
+ *    [MIGRATION_8_9] — creates `delivery_form_drafts` only, touches no existing table. A real sync
+ *    queue like v2-v7's tables (has `syncStatus`), distinct from v8's `delivery_sessions` (a resume
+ *    pointer with no sync status of its own) — see the entity's own doc for why this is a separate
+ *    table rather than reusing `ad_hoc_form_drafts`.
+ *  - v10: [DeliveryChildRegistrationDraftEntity] (CR-042 delivery-session `CHILD_REGISTRATION`
+ *    submission queue, for a child already auto-created by `DELIVERY_VISIT`). Additive
+ *    [MIGRATION_9_10] — creates `delivery_child_registration_drafts` only, touches no existing
+ *    table. Deliberately separate from both `delivery_form_drafts` (a different form/step) and the
+ *    standalone `child_registration_drafts` (same form code, but that table's primary key IS the
+ *    `localCaseUuid` sent to `POST /beneficiaries` — a call this flow never makes, since the child
+ *    beneficiary already exists) — see the entity's own doc.
+ *  - v11: [DeliverySessionEntity.deliveryFormFilledOn] (CR-042 PP1→NN/DONE step advancement).
+ *    Additive [MIGRATION_10_11] — this is the first migration in this database that `ALTER
+ *    TABLE`s an *existing* table rather than creating a new one: it adds one nullable
+ *    `deliveryFormFilledOn` column to `delivery_sessions` so [org.armman.sakhi.data.visitform
+ *    .VisitFormSubmissionCoordinator] can ask [org.armman.sakhi.data.schedule.sameSessionNnVisit]
+ *    whether a same-session NN visit exists, without re-deriving the delivery form's own fill date
+ *    from anywhere else. Every existing row is upgraded with this column `NULL` (SQLite's ALTER
+ *    TABLE ADD COLUMN default when none is specified) — safe because every such row is either
+ *    already [DeliverySessionStep.DONE] or predates this feature reaching PP1 in the field (no
+ *    real users on the app yet, same standing team decision as v4-v10). No automated migration
+ *    test for this one either.
+ *  - v12: [VisitFormDraftEntity.localSubmissionUuid] (client-side fix so a resumed visit-form
+ *    submission retry replays the same idempotency key on `POST /forms/:formCode/submissions`
+ *    instead of minting a fresh one — see the field's own doc and
+ *    [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator]). Additive [MIGRATION_11_12]
+ *    — `ALTER TABLE`s the existing `visit_form_drafts` table, adding one `NOT NULL DEFAULT ''`
+ *    `localSubmissionUuid` column (SQLite requires a non-null default to add a `NOT NULL` column
+ *    to a table that may already have rows). Same standing team decision as v4-v11 — no real users
+ *    on the app yet, so the placeholder `''` a pre-existing queued row would upgrade with is not
+ *    backfilled with a real uuid; no automated migration test for this one either.
  */
 @Database(
   entities = [
@@ -45,8 +99,13 @@ import org.armman.sakhi.data.visitform.VisitFormDraftEntity
     ChildFormDraftEntity::class,
     VisitScheduleEntity::class,
     VisitFormDraftEntity::class,
+    FormAuditEventEntity::class,
+    AdHocFormDraftEntity::class,
+    DeliverySessionEntity::class,
+    DeliveryFormDraftEntity::class,
+    DeliveryChildRegistrationDraftEntity::class,
   ],
-  version = 5,
+  version = 12,
   exportSchema = true,
 )
 @TypeConverters(ScheduleTypeConverters::class)
@@ -56,6 +115,11 @@ abstract class SakhiDatabase : RoomDatabase() {
   abstract fun childFormDraftDao(): ChildFormDraftDao
   abstract fun visitScheduleDao(): VisitScheduleDao
   abstract fun visitFormDraftDao(): VisitFormDraftDao
+  abstract fun formAuditEventDao(): FormAuditEventDao
+  abstract fun adHocFormDraftDao(): AdHocFormDraftDao
+  abstract fun deliverySessionDao(): DeliverySessionDao
+  abstract fun deliveryFormDraftDao(): DeliveryFormDraftDao
+  abstract fun deliveryChildRegistrationDraftDao(): DeliveryChildRegistrationDraftDao
 
   companion object {
     /**
@@ -153,6 +217,183 @@ abstract class SakhiDatabase : RoomDatabase() {
             "`serverVisitId` TEXT, " +
             "`lastErrorMessage` TEXT, " +
             "PRIMARY KEY(`localScheduleUuid`))",
+        )
+      }
+    }
+
+    /**
+     * v5 → v6: adds the CR-035 `form_audit_events` table and its one index. Purely additive — no
+     * existing table is touched, so every queue's rows survive the upgrade untouched.
+     *
+     * Column definitions must match [FormAuditEventEntity] exactly or Room's schema validation
+     * fails at open time. `eventType` is stored as TEXT by enum name, same convention as every
+     * other enum column in this database. `id` is an autoGenerate primary key, so it's declared
+     * `INTEGER PRIMARY KEY AUTOINCREMENT` per Room's own convention for that combination.
+     *
+     * No automated migration test for this one (explicit team decision — no real users on the app
+     * yet, and none of the three prior additive migrations above were automated-tested either).
+     */
+    val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `form_audit_events` (" +
+            "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+            "`subjectId` TEXT NOT NULL, " +
+            "`formCode` TEXT NOT NULL, " +
+            "`eventType` TEXT NOT NULL, " +
+            "`timestampEpochMillis` INTEGER NOT NULL, " +
+            "`performedBySakhiId` TEXT)",
+        )
+        db.execSQL(
+          "CREATE INDEX IF NOT EXISTS `index_form_audit_events_subjectId_formCode` " +
+            "ON `form_audit_events` (`subjectId`, `formCode`)",
+        )
+      }
+    }
+
+    /**
+     * v6 → v7: adds the ad-hoc-form `ad_hoc_form_drafts` table. Purely additive — no existing
+     * table is touched, so every other queue's rows survive the upgrade untouched.
+     *
+     * Column definitions must match [AdHocFormDraftEntity] exactly or Room's schema validation
+     * fails at open time. `syncStatus` is stored as TEXT by enum name, same convention as every
+     * other enum column in this database.
+     *
+     * No automated migration test for this one either (same explicit team decision as v4/v5/v6).
+     */
+    val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `ad_hoc_form_drafts` (" +
+            "`localFormInstanceUuid` TEXT NOT NULL, " +
+            "`localBeneficiaryId` TEXT NOT NULL, " +
+            "`formCode` TEXT NOT NULL, " +
+            "`formVersionId` TEXT NOT NULL, " +
+            "`syncStatus` TEXT NOT NULL, " +
+            "`createdAtEpochMillis` INTEGER NOT NULL, " +
+            "`lastAttemptAtEpochMillis` INTEGER, " +
+            "`retryCount` INTEGER NOT NULL, " +
+            "`serverSubmissionId` TEXT, " +
+            "`lastErrorMessage` TEXT, " +
+            "PRIMARY KEY(`localFormInstanceUuid`))",
+        )
+      }
+    }
+
+    /**
+     * v7 → v8: adds the CR-042 `delivery_sessions` table. Purely additive — no existing table is
+     * touched, so every other queue's rows (including any in-flight `DELIVERY_VISIT`/
+     * `CHILD_REGISTRATION`/`POSTPARTUM_VISIT`/`NEONATAL_VISIT` draft) survive the upgrade
+     * untouched. Column definitions must match [DeliverySessionEntity] exactly or Room's schema
+     * validation fails at open time. `step` is stored as TEXT by enum name, same convention as
+     * every other enum column in this database; the three child-id columns and
+     * `nextChildIndexToRegister` are plain nullable/INTEGER columns, no new
+     * [androidx.room.TypeConverter] needed (see the entity's own doc for why not a list column).
+     */
+    val MIGRATION_7_8: Migration = object : Migration(7, 8) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `delivery_sessions` (" +
+            "`localSessionUuid` TEXT NOT NULL, " +
+            "`localBeneficiaryId` TEXT NOT NULL, " +
+            "`step` TEXT NOT NULL, " +
+            "`deliverySubmissionLocalUuid` TEXT, " +
+            "`child1BeneficiaryId` TEXT, " +
+            "`child2BeneficiaryId` TEXT, " +
+            "`child3BeneficiaryId` TEXT, " +
+            "`nextChildIndexToRegister` INTEGER NOT NULL, " +
+            "`createdAtEpochMillis` INTEGER NOT NULL, " +
+            "`updatedAtEpochMillis` INTEGER NOT NULL, " +
+            "PRIMARY KEY(`localSessionUuid`))",
+        )
+      }
+    }
+
+    /**
+     * v8 → v9: adds the CR-042 `delivery_form_drafts` table — the `DELIVERY_VISIT` submission
+     * queue ([DeliveryFormDraftEntity]). Purely additive — no existing table is touched, so every
+     * other queue's rows (including `delivery_sessions` itself) survive the upgrade untouched.
+     * Column definitions must match [DeliveryFormDraftEntity] exactly or Room's schema validation
+     * fails at open time. `syncStatus` is stored as TEXT by enum name, same convention as every
+     * other enum column in this database. No automated migration test for this one either (same
+     * explicit team decision as v4/v5/v6/v7).
+     */
+    val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `delivery_form_drafts` (" +
+            "`localSubmissionUuid` TEXT NOT NULL, " +
+            "`localBeneficiaryId` TEXT NOT NULL, " +
+            "`localSessionUuid` TEXT NOT NULL, " +
+            "`formVersionId` TEXT NOT NULL, " +
+            "`syncStatus` TEXT NOT NULL, " +
+            "`createdAtEpochMillis` INTEGER NOT NULL, " +
+            "`lastAttemptAtEpochMillis` INTEGER, " +
+            "`retryCount` INTEGER NOT NULL, " +
+            "`serverSubmissionId` TEXT, " +
+            "`lastErrorMessage` TEXT, " +
+            "PRIMARY KEY(`localSubmissionUuid`))",
+        )
+      }
+    }
+
+    /**
+     * v9 → v10: adds the CR-042 `delivery_child_registration_drafts` table — the delivery-session
+     * `CHILD_REGISTRATION` submission queue ([DeliveryChildRegistrationDraftEntity]), for a child
+     * already auto-created by `DELIVERY_VISIT`. Purely additive — no existing table is touched, so
+     * every other queue's rows survive the upgrade untouched. Column definitions must match
+     * [DeliveryChildRegistrationDraftEntity] exactly or Room's schema validation fails at open
+     * time. `syncStatus` is stored as TEXT by enum name, same convention as every other enum
+     * column in this database. No automated migration test for this one either (same explicit
+     * team decision as v4/v5/v6/v7/v9).
+     */
+    val MIGRATION_9_10: Migration = object : Migration(9, 10) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `delivery_child_registration_drafts` (" +
+            "`localSubmissionUuid` TEXT NOT NULL, " +
+            "`localSessionUuid` TEXT NOT NULL, " +
+            "`serverBeneficiaryId` TEXT NOT NULL, " +
+            "`formVersionId` TEXT NOT NULL, " +
+            "`syncStatus` TEXT NOT NULL, " +
+            "`createdAtEpochMillis` INTEGER NOT NULL, " +
+            "`lastAttemptAtEpochMillis` INTEGER, " +
+            "`retryCount` INTEGER NOT NULL, " +
+            "`lastErrorMessage` TEXT, " +
+            "PRIMARY KEY(`localSubmissionUuid`))",
+        )
+      }
+    }
+
+    /**
+     * v10 → v11: adds the [DeliverySessionEntity.deliveryFormFilledOn] column to the existing
+     * `delivery_sessions` table. The first `ALTER TABLE` migration in this database — every prior
+     * bump only ever `CREATE TABLE`d a new table, so this is additive in the same spirit (no
+     * existing table is dropped or rewritten) but not the same shape as v2-v10. Stored as TEXT
+     * ISO-8601 via [ScheduleTypeConverters], same convention as every other [java.time.LocalDate]
+     * column in this database. No `DEFAULT` clause — SQLite leaves existing rows `NULL` for a
+     * column added without one, which matches the field's own nullable contract (see the entity's
+     * doc). No automated migration test for this one either (same explicit team decision as
+     * v4-v10).
+     */
+    val MIGRATION_10_11: Migration = object : Migration(10, 11) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "ALTER TABLE `delivery_sessions` ADD COLUMN `deliveryFormFilledOn` TEXT",
+        )
+      }
+    }
+
+    /**
+     * v11 → v12: adds the [VisitFormDraftEntity.localSubmissionUuid] column to the existing
+     * `visit_form_drafts` table. `NOT NULL DEFAULT ''` because SQLite requires a non-null default
+     * to add a `NOT NULL` column to a table that may already have rows — see the field's own doc
+     * for why every *new* save always gets a real uuid from here on regardless.
+     */
+    val MIGRATION_11_12: Migration = object : Migration(11, 12) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "ALTER TABLE `visit_form_drafts` ADD COLUMN `localSubmissionUuid` TEXT NOT NULL DEFAULT ''",
         )
       }
     }

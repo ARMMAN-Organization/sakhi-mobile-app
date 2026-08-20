@@ -3,6 +3,7 @@ package org.armman.sakhi.data.forms
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
+import org.armman.sakhi.data.audit.FakeFormAuditRepository
 import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
@@ -56,7 +57,13 @@ class DynamicFormSyncExecutorTest {
     val sessionStore = SessionStore(FakeSecureKeyValueStore())
     sessionStore.saveSession(session)
     val mapper = DynamicFormSubmissionMapper(sessionStore, FakeLookupRepository())
-    val coordinator = DynamicFormSubmissionCoordinator(enrollmentApi, formSubmissionApi, mapper)
+    val coordinator = DynamicFormSubmissionCoordinator(
+      enrollmentApi,
+      formSubmissionApi,
+      mapper,
+      sessionStore,
+      FakeFormAuditRepository(),
+    )
     scheduleDao = FakeVisitScheduleDao()
     visitScheduleSyncScheduler = FakeVisitScheduleSyncScheduler()
     executor = DynamicFormSyncExecutor(

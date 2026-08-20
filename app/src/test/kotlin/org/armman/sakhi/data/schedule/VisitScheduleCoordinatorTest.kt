@@ -1,12 +1,12 @@
 package org.armman.sakhi.data.schedule
 
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import kotlinx.coroutines.test.runTest
 import org.armman.sakhi.data.rules.CachedRuleSet
 import org.armman.sakhi.data.rules.RuleEvaluator
 import org.armman.sakhi.data.rules.RuleSetRepository
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -17,14 +17,16 @@ import java.time.LocalDate
 /**
  * CR-022e cases TR-1 … TR-8 and SU-1 … SU-6.
  *
- * CR-032 (GoRules): [GoRulesScheduleFeatureFlag.ENABLED] is a compile-time `const val`, currently
- * `false` — same limitation as `RemoteBeneficiaryListFeatureFlag`
- * (see `OfflineFirstBeneficiaryRepositoryTest`'s KDoc) — so this suite cannot exercise the
- * GoRules-first code path through the real coordinator entry points. What it can and does prove:
- * a [GoRulesScheduleAdapter] wired into the coordinator is never touched while the flag is off, so
- * a Sakhi never depends on the (still Step-1-unverified) rules pipeline today. Coverage of
- * [GoRulesScheduleAdapter]'s own request/response mapping belongs in its own, not-yet-written test
- * file — it doesn't depend on this flag at all.
+ * CR-032 (GoRules): [GoRulesScheduleFeatureFlag.ENABLED] is now `true` (flipped 2026-08-13 for
+ * internal dev testing — see that flag's own doc). Every test above this file's "GoRules" section
+ * still constructs [VisitScheduleCoordinator] without a [GoRulesScheduleAdapter] (`goRulesAdapter`
+ * defaults to null), so those tests exercise the flag-on-but-no-adapter-wired path — which, per
+ * [VisitScheduleCoordinator]'s own fallback design, behaves exactly like the old Hardcoded-only
+ * path for every family. Coverage of [GoRulesScheduleAdapter]'s own request/response mapping lives
+ * in [GoRulesScheduleAdapterMappingTest]; coverage of the fallback behavior itself — a wired
+ * adapter's answer being used, [HrVisitOutcome.RuleUnavailable] falling back, and
+ * [HrVisitOutcome.NoVisitNeeded] being trusted with no fallback — lives in this file's own
+ * "GoRules" section below.
  */
 class VisitScheduleCoordinatorTest {
 
@@ -389,37 +391,145 @@ class VisitScheduleCoordinatorTest {
     assertTrue(runCatching { coordinator.onLmpOrEddApproved(context) }.isFailure)
   }
 
-  // ---- GoRules (CR-032) — flag-off safety --------------------------------------------------------
+  // ---- GoRules (CR-032) — HR fallback safety net (fixed 2026-08-13) ------------------------------
 
+  /**
+   * With no [GoRulesScheduleAdapter] wired ([goRulesAdapter] null, same as this file's default
+   * `setUp()`), [HrVisitOutcome.RuleUnavailable] must fall back to the Kotlin HR generator instead
+   * of silently producing no visit — the bug this fix closes.
+   */
   @Test
-  fun `a wired GoRules adapter is never invoked while the feature flag is off`() = runTest {
-    assertFalse("this test's premise depends on the flag being off", GoRulesScheduleFeatureFlag.ENABLED)
-    val poisoned = VisitScheduleCoordinator(
+  fun `HR follow-up falls back to the Kotlin generator when no adapter is wired`() = runTest {
+    assertTrue("this test exercises the flag-on path", GoRulesScheduleFeatureFlag.ENABLED)
+    val withNoAdapterWired = VisitScheduleCoordinator(
       repository = repository,
       ancGenerator = AncScheduleGenerator(HardcodedRuleSource()),
       ppGenerator = PpScheduleGenerator(HardcodedRuleSource()),
       nnGenerator = NnScheduleGenerator(HardcodedRuleSource()),
       incGenerator = IncScheduleGenerator(HardcodedRuleSource()),
       ccvGenerator = CcvScheduleGenerator(HardcodedRuleSource()),
-      goRulesAdapter = GoRulesScheduleAdapter(PoisonRuleSetRepository(), PoisonRuleEvaluator()),
     )
+    withNoAdapterWired.onMotherEnrolled(motherContext())
+    val anc3 = repository.getForBeneficiary(BENEFICIARY)[2]
 
-    val generated = poisoned.onMotherEnrolled(motherContext())
+    val hr = withNoAdapterWired.onHighRiskDetected(motherContext(), anc3, LocalDate.of(2026, 3, 6))
 
-    assertEquals(10, generated)
-    assertTrue(repository.getForBeneficiary(BENEFICIARY).all { it.visitType == VisitCodeType.ANC })
+    // Same dates the plain Hardcoded-only test above expects — proves the fallback, not silence,
+    // handled this case.
+    assertNotNull(hr)
+    assertEquals(VisitCodeType.ANC_HR, hr!!.visitType)
+    assertEquals(LocalDate.of(2026, 3, 21), hr.scheduledDate)
   }
 
-  /** Throws if `getPublishedRuleSet` is ever called — proof the coordinator didn't call it. */
-  private class PoisonRuleSetRepository : RuleSetRepository {
-    override suspend fun getPublishedRuleSet(ruleSetId: String): CachedRuleSet? =
-      error("GoRulesScheduleAdapter must not be reached while GoRulesScheduleFeatureFlag.ENABLED is false")
+  /** Same as above, but the rule genuinely isn't cached yet (adapter wired, repository empty) —
+   * still [HrVisitOutcome.RuleUnavailable], still must fall back. */
+  @Test
+  fun `HR follow-up falls back to the Kotlin generator when the rule isn't cached yet`() = runTest {
+    val withUncachedAdapter = VisitScheduleCoordinator(
+      repository = repository,
+      ancGenerator = AncScheduleGenerator(HardcodedRuleSource()),
+      ppGenerator = PpScheduleGenerator(HardcodedRuleSource()),
+      nnGenerator = NnScheduleGenerator(HardcodedRuleSource()),
+      incGenerator = IncScheduleGenerator(HardcodedRuleSource()),
+      ccvGenerator = CcvScheduleGenerator(HardcodedRuleSource()),
+      goRulesAdapter = GoRulesScheduleAdapter(NoRuleCachedRepository(), NeverCalledEvaluator()),
+    )
+    withUncachedAdapter.onMotherEnrolled(motherContext())
+    val anc3 = repository.getForBeneficiary(BENEFICIARY)[2]
+
+    val hr = withUncachedAdapter.onHighRiskDetected(motherContext(), anc3, LocalDate.of(2026, 3, 6))
+
+    assertNotNull(hr)
+    assertEquals(VisitCodeType.ANC_HR, hr!!.visitType)
+    assertEquals(LocalDate.of(2026, 3, 21), hr.scheduledDate)
   }
 
-  /** Throws if `evaluate` is ever called — proof the coordinator didn't call it. */
-  private class PoisonRuleEvaluator : RuleEvaluator {
+  /** [HrVisitOutcome.NoVisitNeeded] is a real answer from the pack, not a missing-rule situation —
+   * it must be trusted with no fallback, even though a fallback path exists now. */
+  @Test
+  fun `HR follow-up trusts a real 'no visit needed' answer with no fallback`() = runTest {
+    val withGoRulesSayingNo = VisitScheduleCoordinator(
+      repository = repository,
+      ancGenerator = AncScheduleGenerator(HardcodedRuleSource()),
+      ppGenerator = PpScheduleGenerator(HardcodedRuleSource()),
+      nnGenerator = NnScheduleGenerator(HardcodedRuleSource()),
+      incGenerator = IncScheduleGenerator(HardcodedRuleSource()),
+      ccvGenerator = CcvScheduleGenerator(HardcodedRuleSource()),
+      goRulesAdapter = GoRulesScheduleAdapter(
+        FixedRuleSetRepository(),
+        FixedRuleEvaluator(JsonObject().apply { addProperty("generateHrVisit", false) }),
+      ),
+    )
+    withGoRulesSayingNo.onMotherEnrolled(motherContext())
+    val anc3 = repository.getForBeneficiary(BENEFICIARY)[2]
+
+    val hr = withGoRulesSayingNo.onHighRiskDetected(motherContext(), anc3, LocalDate.of(2026, 3, 6))
+
+    assertNull("GoRules said no visit is needed — the coordinator must not fall back", hr)
+  }
+
+  /** A wired adapter's [HrVisitOutcome.Generated] answer is used as-is — proves the coordinator
+   * doesn't ignore a real GoRules answer in favor of the Hardcoded fallback. */
+  @Test
+  fun `HR follow-up uses the wired adapter's Generated visit directly`() = runTest {
+    val goRulesDate = "2026-04-01" // deliberately different from Hardcoded's 2026-03-21
+    val withGoRulesAnswer = VisitScheduleCoordinator(
+      repository = repository,
+      ancGenerator = AncScheduleGenerator(HardcodedRuleSource()),
+      ppGenerator = PpScheduleGenerator(HardcodedRuleSource()),
+      nnGenerator = NnScheduleGenerator(HardcodedRuleSource()),
+      incGenerator = IncScheduleGenerator(HardcodedRuleSource()),
+      ccvGenerator = CcvScheduleGenerator(HardcodedRuleSource()),
+      goRulesAdapter = GoRulesScheduleAdapter(
+        FixedRuleSetRepository(),
+        FixedRuleEvaluator(
+          JsonObject().apply {
+            addProperty("generateHrVisit", true)
+            add(
+              "hrVisit",
+              JsonParser.parseString(
+                """{ "visitName": "ANC-HR", "scheduledDate": "$goRulesDate", "windowOpen": "$goRulesDate", "windowClose": "$goRulesDate" }""",
+              ),
+            )
+          },
+        ),
+      ),
+    )
+    withGoRulesAnswer.onMotherEnrolled(motherContext())
+    val anc3 = repository.getForBeneficiary(BENEFICIARY)[2]
+
+    val hr = withGoRulesAnswer.onHighRiskDetected(motherContext(), anc3, LocalDate.of(2026, 3, 6))
+
+    assertNotNull(hr)
+    assertEquals(LocalDate.parse(goRulesDate), hr!!.scheduledDate)
+  }
+
+  /** Never returns a cached rule — simulates a phone that hasn't fetched the HR pack yet. */
+  private class NoRuleCachedRepository : RuleSetRepository {
+    override suspend fun getPublishedRuleSet(ruleSetId: String): CachedRuleSet? = null
+  }
+
+  /** Never actually called in the "rule unavailable" scenarios above — the adapter returns
+   * [HrVisitOutcome.RuleUnavailable] as soon as [NoRuleCachedRepository] returns null, before
+   * reaching the evaluator. Throws if that assumption is ever wrong. */
+  private class NeverCalledEvaluator : RuleEvaluator {
     override suspend fun evaluate(rulesJson: JsonObject, context: JsonObject): JsonObject? =
-      error("GoRulesScheduleAdapter must not be reached while GoRulesScheduleFeatureFlag.ENABLED is false")
+      error("no rule was cached — evaluate should never be reached")
+  }
+
+  /** Always has a cached rule — pairs with [FixedRuleEvaluator] to control exactly what the
+   * "pack" answers, without touching the real native engine. */
+  private class FixedRuleSetRepository : RuleSetRepository {
+    override suspend fun getPublishedRuleSet(ruleSetId: String) = CachedRuleSet(
+      ruleSetId = ruleSetId,
+      ruleVersionId = "test-hr-version",
+      versionNo = "test",
+      rulesJson = JsonObject(),
+    )
+  }
+
+  private class FixedRuleEvaluator(private val response: JsonObject) : RuleEvaluator {
+    override suspend fun evaluate(rulesJson: JsonObject, context: JsonObject): JsonObject = response
   }
 
   // ---- Helpers ---------------------------------------------------------------------------------

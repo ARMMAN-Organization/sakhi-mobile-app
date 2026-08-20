@@ -34,6 +34,17 @@ import java.time.temporal.ChronoUnit
  *   SECOND error for one problem. Division of labour: this file prevents the bad pick, the ViewModel
  *   explains a bad value that is already in state (an older draft, a path switched after the fact).
  *
+* From the `DELIVERY_VISIT` form (spec rows given directly by product, not the form-spec sheet
+ * above): "Delivery form filled date" auto-selects today (bounds-only "not future" floor here;
+ * the actual prefill is [org.armman.sakhi.ui.delivery.DeliverySessionViewModel]'s job). "Date of
+ * delivery" and "Date of discharge" must both be strictly after the mother's ANC registration date
+ * AND her LMP, and no later than today; discharge is additionally floored at the answered delivery
+ * date (same day allowed, not earlier). "Date of death" has no registration/LMP floor at all —
+ * just strictly after the answered delivery date, and not in the future. See
+ * [DeliveryQuestionCodes] for the question codes (two of the four — [DeliveryQuestionCodes
+ * .DATE_OF_DISCHARGE]/[DeliveryQuestionCodes.DATE_OF_DEATH] — are UNCONFIRMED against a live
+ * schema payload; see their own docs).
+ *
  * These live client-side because the backend cannot express them: [FormFieldSchema] carries only
  * `numericRange` (no date bounds), and [FormCrossFieldValidator]'s `LTE` rule parses its operands
  * with `toDoubleOrNull()`, so a date-vs-date rule in `validationJson` would silently never
@@ -127,6 +138,84 @@ object FormDateRuleset {
   const val LMP_DATE_EDIT_QUESTION_CODE = "lmp_date_edit"
 
   /**
+   * ANC/Infant Closure forms' "Closure visit date" (spec row 1): "dd-mm-yyyy, Should auto populate
+   * today's date." The prefill itself lives in [org.armman.sakhi.ui.adhocform.AdHocFormViewModel]
+   * (`prefillTodayDateFields`); this file only supplies the matching "not future" bound so a
+   * Sakhi can't backdate a prefilled value into the future by hand.
+   */
+  const val CLOSURE_VISIT_DATE_QUESTION_CODE = "closure_visit_date"
+
+  /**
+   * ANC/Infant Closure forms' "Date of event" (spec row 4): "Should not accept future date and
+   * before registration date." Two-sided: [registrationDate] (this form's own fill date, i.e.
+   * "today" — same convention as every other bound in this file) caps it from above, and the
+   * beneficiary's actual enrollment date — passed in separately as [boundsFor]'s
+   * `beneficiaryRegistrationDate`, since it is a different value from [registrationDate] here and
+   * genuinely unavailable for some rows (see [org.armman.sakhi.data.beneficiary.Beneficiary
+   * .registrationDate]) — floors it from below. No lower bound at all when that value is
+   * unavailable, matching this file's existing "unconstrained until the data exists" convention.
+   */
+  const val DATE_OF_EVENT_QUESTION_CODE = "date_of_event"
+
+  /**
+   * Referral form's "Referral visit form filled date" (spec row 1): "Should accept only today's
+   * date." The backend's own `dateRule` for this field only declares `notFuture: true` (confirmed
+   * 2026-08-18 against a real `GET /forms/REFERRAL_VISIT/active-version` payload) — stricter than
+   * the spec text, which reads as "must equal today," but this file follows the backend's actual
+   * enforced rule rather than the spec's prose, same as every other bound here. Auto-populated
+   * with today on load (`AdHocFormViewModel.prefillTodayDateFields`), so in practice this only
+   * matters if the Sakhi manually edits it into the future.
+   */
+  const val REFERRAL_FORM_FILLED_DATE_QUESTION_CODE = "referral_form_filled_date"
+
+  /**
+   * Referral form's "Decided date for visit to health facility" (spec row 8): "Should accept
+   * todays date or future date." The backend expresses this relationally — `dateRule.notBefore.field
+   * = "referral_form_filled_date"` — rather than as a fixed "today" floor, so the real lower bound
+   * is whatever date the Sakhi actually put in [REFERRAL_FORM_FILLED_DATE_QUESTION_CODE] (which is
+   * today unless she edited it). Falls back to [registrationDate] (today) if that field is
+   * somehow still blank, so this never opens up to the unbounded past.
+   */
+  const val DECIDED_VISIT_DATE_QUESTION_CODE = "decided_visit_date"
+
+  /**
+   * Referral Follow-up's "Date of the form filled" (spec row 1): "Should accept today's date."
+   * Same shape as [REFERRAL_FORM_FILLED_DATE_QUESTION_CODE] — backend's own `dateRule` only
+   * declares `notFuture: true` (confirmed 2026-08-18 against a real
+   * `GET /forms/REFERRAL_FOLLOWUP_VISIT/active-version` payload), and it's auto-populated with
+   * today on load (`AdHocFormViewModel.prefillTodayDateFields`).
+   */
+  const val FOLLOWUP_FORM_FILLED_DATE_QUESTION_CODE = "form_filled_date"
+
+  /**
+   * Referral Follow-up's "Date when the beneficiary visited the first health facility?" (spec row
+   * 10): "Should accept todays date or past date." Backend's `dateRule` is `notFuture: true` only
+   * — no lower bound at all, matching the spec's "or past date" (unbounded).
+   */
+  const val FIRST_FACILITY_VISIT_DATE_QUESTION_CODE = "first_facility_visit_date"
+
+  /**
+   * Referral Follow-up's "Date when the beneficiary visited the LAST referred center?" (spec row
+   * 15). The spec's own prose says "referral form filled date or after that," but the backend's
+   * actual `dateRule` — `notBefore.field: "first_facility_visit_date"`, `notFuture: true` — floors
+   * it against this SAME follow-up form's own [FIRST_FACILITY_VISIT_DATE_QUESTION_CODE] answer
+   * instead (which makes more sense anyway: a Sakhi can't have visited the LAST facility before
+   * the FIRST one). Following the backend's actual rule, same convention as every other bound in
+   * this file. Falls back to [registrationDate] (today) if the first-facility date is somehow
+   * still blank, so this never opens up to the unbounded past.
+   */
+  const val LAST_FACILITY_VISIT_DATE_QUESTION_CODE = "last_facility_visit_date"
+
+  /**
+   * Referral Follow-up's "Date when beneficiary planning to visit further referral center" (spec
+   * row 24): "Should accept todays date or future date." Unlike every other Follow-up date field,
+   * the backend's own schema carries NO `dateRule` at all for this one (confirmed 2026-08-18
+   * against the same `GET /forms/REFERRAL_FOLLOWUP_VISIT/active-version` payload) — so this bound
+   * is purely a client-side addition from the spec text, not a mirror of an existing backend rule.
+   */
+  const val FURTHER_REFERRAL_PLANNED_DATE_QUESTION_CODE = "further_referral_planned_date"
+
+  /**
    * Which rule a date answer breaks. Mapped to a localized message by the UI layer.
    *
    * Mirrors the legacy static flow's [org.armman.sakhi.ui.enrollment.FieldError] cases
@@ -185,6 +274,27 @@ object FormDateRuleset {
      * the registration date — mirrors [TD_DATE_IN_FUTURE]: a vaccination cannot be dated after the
      * day the Sakhi is filling out the form. */
     VACCINATION_AT_BIRTH_DATE_IN_FUTURE,
+
+    /** [DeliveryQuestionCodes.DATE_OF_DELIVERY] is after today. The stricter "must be after
+     * registration/LMP" half of that field's rule is prevention-only (see [boundsFor]) — this
+     * file has no [motherLmpDate]-equivalent input on [violationFor], same "bounds-only" gap as
+     * [DATE_OF_EVENT_QUESTION_CODE]'s registration-date floor. */
+    DELIVERY_DATE_IN_FUTURE,
+
+    /** [DeliveryQuestionCodes.DATE_OF_DISCHARGE] is after today. */
+    DISCHARGE_DATE_IN_FUTURE,
+
+    /** [DeliveryQuestionCodes.DATE_OF_DISCHARGE] is before the answered
+     * [DeliveryQuestionCodes.DATE_OF_DELIVERY] — discharge can be the same day as delivery, just
+     * not earlier. */
+    DISCHARGE_DATE_BEFORE_DELIVERY,
+
+    /** [DeliveryQuestionCodes.DATE_OF_DEATH] is after today. */
+    DEATH_DATE_IN_FUTURE,
+
+    /** [DeliveryQuestionCodes.DATE_OF_DEATH] is on or before the answered
+     * [DeliveryQuestionCodes.DATE_OF_DELIVERY] (must be strictly after). */
+    DEATH_DATE_NOT_AFTER_DELIVERY,
   }
 
   /** Selectable range for a field's date picker — the prevention half of the rule. Null means the
@@ -203,9 +313,42 @@ object FormDateRuleset {
     questionCode: String,
     answers: FormAnswers,
     registrationDate: LocalDate,
+    /** The beneficiary's actual enrollment date, only meaningful for
+     * [DATE_OF_EVENT_QUESTION_CODE] — see that constant's doc. Every other caller (registration
+     * forms, visit forms) leaves this null; it has no bearing on any other question code. */
+    beneficiaryRegistrationDate: LocalDate? = null,
+    /** The mother's LMP on file, only meaningful for [DeliveryQuestionCodes.DATE_OF_DELIVERY] /
+     * [DeliveryQuestionCodes.DATE_OF_DISCHARGE] (spec: both must be strictly after her LMP, same
+     * as her registration date). Sourced from [org.armman.sakhi.data.beneficiaryprofile
+     * .BeneficiaryProfile.lmp] by [org.armman.sakhi.ui.delivery.DeliverySessionViewModel] — the
+     * only caller that ever passes this; null (unbounded lower end) when unavailable, same
+     * "missing data gap" convention as [beneficiaryRegistrationDate]. */
+    motherLmpDate: LocalDate? = null,
   ): Bounds? {
     val reference = referenceDate(answers, registrationDate)
     return when (questionCode) {
+      CLOSURE_VISIT_DATE_QUESTION_CODE -> Bounds(min = null, max = registrationDate)
+
+      DATE_OF_EVENT_QUESTION_CODE -> Bounds(min = beneficiaryRegistrationDate, max = registrationDate)
+
+      REFERRAL_FORM_FILLED_DATE_QUESTION_CODE -> Bounds(min = null, max = registrationDate)
+
+      DECIDED_VISIT_DATE_QUESTION_CODE -> Bounds(
+        min = referralFormFilledDateAnswer(answers) ?: registrationDate,
+        max = null,
+      )
+
+      FOLLOWUP_FORM_FILLED_DATE_QUESTION_CODE -> Bounds(min = null, max = registrationDate)
+
+      FIRST_FACILITY_VISIT_DATE_QUESTION_CODE -> Bounds(min = null, max = registrationDate)
+
+      LAST_FACILITY_VISIT_DATE_QUESTION_CODE -> Bounds(
+        min = firstFacilityVisitDateAnswer(answers) ?: registrationDate,
+        max = registrationDate,
+      )
+
+      FURTHER_REFERRAL_PLANNED_DATE_QUESTION_CODE -> Bounds(min = registrationDate, max = null)
+
       DOB_QUESTION_CODE, MOTHER_DOB_QUESTION_CODE -> Bounds(
         // A DOB on this boundary still floors to MAX_AGE_YEARS; one day earlier would floor to
         // MAX_AGE_YEARS + 1 and be out of range.
@@ -267,6 +410,40 @@ object FormDateRuleset {
         min = registrationDate.minusDays(childAgeCeilingDays(answers)),
         // "Should not accept future date" (spec row 6.0) — an infant aged 0 days is valid, so today
         // is selectable.
+        max = registrationDate,
+      )
+
+      // "Should automatically select today's date" — bounds-only "not future" floor, same shape
+      // as CLOSURE_VISIT_DATE_QUESTION_CODE/REFERRAL_FORM_FILLED_DATE_QUESTION_CODE above (the
+      // actual today-prefill is DeliverySessionViewModel's job, same division of labour as those
+      // two).
+      DeliveryQuestionCodes.DELIVERY_FORM_FILLED_ON -> Bounds(min = null, max = registrationDate)
+
+      // "Should be > registration and LMP date and <= todays date". registrationDate here is
+      // "today" (this form's own fill date, this file's usual convention) — the ceiling. The
+      // floor is the day after whichever of her actual ANC registration date / LMP is later.
+      DeliveryQuestionCodes.DATE_OF_DELIVERY -> Bounds(
+        min = deliveryLowerBound(beneficiaryRegistrationDate, motherLmpDate),
+        max = registrationDate,
+      )
+
+      // Same floor as DATE_OF_DELIVERY (> registration and LMP), ADDITIONALLY floored at the
+      // answered delivery date itself (discharge can be same-day, not earlier) — take whichever
+      // of the two lower bounds is later. Ceiling: <= today, same as every other field here.
+      DeliveryQuestionCodes.DATE_OF_DISCHARGE -> Bounds(
+        min = maxOfNullable(
+          deliveryLowerBound(beneficiaryRegistrationDate, motherLmpDate),
+          dateOfDeliveryAnswer(answers),
+        ),
+        max = registrationDate,
+      )
+
+      // "Should accept old date or todays date. Should be after delivery date." No registration/
+      // LMP floor at all here (unlike DATE_OF_DELIVERY/DATE_OF_DISCHARGE) — only strictly after
+      // the answered delivery date. Open (unbounded) until delivery is answered — nothing to
+      // derive from yet, same convention as ANC1_DATE_QUESTION_CODE's LMP-based lower bound.
+      DeliveryQuestionCodes.DATE_OF_DEATH -> Bounds(
+        min = dateOfDeliveryAnswer(answers)?.plusDays(1),
         max = registrationDate,
       )
 
@@ -369,6 +546,31 @@ object FormDateRuleset {
       VaccinationAtBirthQuestionCodes.VITAMIN_K_DATE_QUESTION_CODE,
       -> Violation.VACCINATION_AT_BIRTH_DATE_IN_FUTURE.takeIf { value.isAfter(registrationDate) }
 
+      // Only the "not future" half is detectable here — the "> registration/LMP" half needs
+      // motherLmpDate, which this function has no parameter for (see DELIVERY_DATE_IN_FUTURE's own
+      // doc). The picker still prevents it via `boundsFor`; this only catches a value that got in
+      // another way (older draft, backend-restored answer).
+      DeliveryQuestionCodes.DATE_OF_DELIVERY ->
+        Violation.DELIVERY_DATE_IN_FUTURE.takeIf { value.isAfter(registrationDate) }
+
+      DeliveryQuestionCodes.DATE_OF_DISCHARGE -> {
+        val delivery = dateOfDeliveryAnswer(answers)
+        when {
+          value.isAfter(registrationDate) -> Violation.DISCHARGE_DATE_IN_FUTURE
+          delivery != null && value.isBefore(delivery) -> Violation.DISCHARGE_DATE_BEFORE_DELIVERY
+          else -> null
+        }
+      }
+
+      DeliveryQuestionCodes.DATE_OF_DEATH -> {
+        val delivery = dateOfDeliveryAnswer(answers)
+        when {
+          value.isAfter(registrationDate) -> Violation.DEATH_DATE_IN_FUTURE
+          delivery != null && !value.isAfter(delivery) -> Violation.DEATH_DATE_NOT_AFTER_DELIVERY
+          else -> null
+        }
+      }
+
       // NOTE: DATE_OF_BIRTH_OF_INFANT is deliberately absent, even though `boundsFor` bounds it.
       // Its eligibility windows are detected by DynamicChildRegistrationViewModel, which has the
       // path-specific messages; reporting them here too would show the Sakhi two errors for one
@@ -408,11 +610,40 @@ object FormDateRuleset {
   private fun lmpDateAnswer(answers: FormAnswers): LocalDate? =
     parse(answers.valueOf(LMP_DATE_QUESTION_CODE))
 
+  private fun referralFormFilledDateAnswer(answers: FormAnswers): LocalDate? =
+    parse(answers.valueOf(REFERRAL_FORM_FILLED_DATE_QUESTION_CODE))
+
+  private fun firstFacilityVisitDateAnswer(answers: FormAnswers): LocalDate? =
+    parse(answers.valueOf(FIRST_FACILITY_VISIT_DATE_QUESTION_CODE))
+
   private fun td1DateAnswer(answers: FormAnswers): LocalDate? =
     parse(answers.valueOf(TdDoseQuestionCodes.TD_1_DATE_QUESTION_CODE))
 
   private fun td2DateAnswer(answers: FormAnswers): LocalDate? =
     parse(answers.valueOf(TdDoseQuestionCodes.TD_2_DATE_QUESTION_CODE))
+
+  /** The answered [DeliveryQuestionCodes.DATE_OF_DELIVERY] value, or null if it hasn't been
+   * answered (or isn't parseable) yet — [DeliveryQuestionCodes.DATE_OF_DISCHARGE]'s and
+   * [DeliveryQuestionCodes.DATE_OF_DEATH]'s lower bounds have nothing to derive from in that
+   * case. */
+  private fun dateOfDeliveryAnswer(answers: FormAnswers): LocalDate? =
+    parse(answers.valueOf(DeliveryQuestionCodes.DATE_OF_DELIVERY))
+
+  /** Inclusive lower bound for a date that must be strictly AFTER both the mother's ANC
+   * registration date and her LMP: whichever of the two is later, plus one day. Either or both may
+   * be unavailable (this file's usual "missing data gap" convention) — the bound simply narrows to
+   * whichever is present, or stays fully open (null) if neither is. */
+  private fun deliveryLowerBound(beneficiaryRegistrationDate: LocalDate?, motherLmpDate: LocalDate?): LocalDate? =
+    maxOfNullable(beneficiaryRegistrationDate, motherLmpDate)?.plusDays(1)
+
+  /** Null-tolerant [maxOf] — null loses to any real date rather than winning outright, so a bound
+   * built from two optional dates only excludes a side that's actually missing instead of
+   * collapsing the whole bound to "unconstrained" the moment either input is null. */
+  private fun maxOfNullable(a: LocalDate?, b: LocalDate?): LocalDate? = when {
+    a == null -> b
+    b == null -> a
+    else -> maxOf(a, b)
+  }
 
   private fun parse(raw: String?): LocalDate? =
     raw?.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() }

@@ -67,10 +67,9 @@ class RoomChildFormDraftRepositoryTest {
       FakeFormSubmissionApi(),
       mapper,
     )
-    val syncExecutor = ChildFormSyncExecutor(dao, secureStore, coordinator)
-
     val scheduleDao = FakeVisitScheduleDao()
     scheduleRepository = RoomVisitScheduleRepository(scheduleDao)
+    val syncExecutor = ChildFormSyncExecutor(dao, secureStore, coordinator, scheduleRepository)
     val rules = HardcodedRuleSource()
     val scheduleTrigger = ChildEnrolmentScheduleTrigger(
       coordinator = VisitScheduleCoordinator(

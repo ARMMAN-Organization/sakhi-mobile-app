@@ -3,6 +3,8 @@ package org.armman.sakhi.data.forms
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
+import org.armman.sakhi.data.audit.FakeFormAuditRepository
+import org.armman.sakhi.data.audit.FormAuditEventType
 import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
@@ -62,6 +64,7 @@ class DynamicFormSubmissionCoordinatorTest {
 
   private lateinit var enrollmentApi: FakeEnrollmentApi
   private lateinit var formSubmissionApi: FakeFormSubmissionApi
+  private lateinit var formAuditRepository: FakeFormAuditRepository
   private lateinit var coordinator: DynamicFormSubmissionCoordinator
 
   private val session = UserSession(
@@ -82,7 +85,8 @@ class DynamicFormSubmissionCoordinatorTest {
     val sessionStore = SessionStore(FakeSecureKeyValueStore())
     sessionStore.saveSession(session)
     val mapper = DynamicFormSubmissionMapper(sessionStore, FakeLookupRepository())
-    coordinator = DynamicFormSubmissionCoordinator(enrollmentApi, formSubmissionApi, mapper)
+    formAuditRepository = FakeFormAuditRepository()
+    coordinator = DynamicFormSubmissionCoordinator(enrollmentApi, formSubmissionApi, mapper, sessionStore, formAuditRepository)
   }
 
   /** Answers matching a real gravida invariant
@@ -164,12 +168,54 @@ class DynamicFormSubmissionCoordinatorTest {
   }
 
   @Test
+  fun `happy path records a SUBMITTED audit event`() = runTest {
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    coordinator.submit(
+      formVersionId = "version-v6",
+      localCaseUuid = "local-case-1",
+      localSubmissionUuid = "local-submission-1",
+      answers = consistentAnswers(),
+      fallbackRegistrationDate = LocalDate.of(2026, 7, 20),
+    )
+
+    assertEquals(
+      listOf(FormAuditEventType.SUBMITTED),
+      formAuditRepository.recordedEvents.map { it.eventType },
+    )
+    assertEquals("local-case-1", formAuditRepository.recordedEvents.single().subjectId)
+    assertEquals("MOTHER_REGISTRATION", formAuditRepository.recordedEvents.single().formCode)
+  }
+
+  @Test
+  fun `form submission failure does not record a SUBMITTED audit event`() = runTest {
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    formSubmissionApi.response = Response.error(
+      422,
+      "{\"message\":\"formVersionId not found\"}".toResponseBody("application/json".toMediaType()),
+    )
+
+    coordinator.submit(
+      formVersionId = "version-v6",
+      localCaseUuid = "local-case-1",
+      localSubmissionUuid = "local-submission-1",
+      answers = consistentAnswers(),
+      fallbackRegistrationDate = LocalDate.now(),
+    )
+
+    assertTrue(formAuditRepository.recordedEvents.isEmpty())
+  }
+
+  @Test
   fun `mapping failure short-circuits before either API is called`() = runTest {
     val noSessionSessionStore = SessionStore(FakeSecureKeyValueStore()) // never saved a session
     val brokenCoordinator = DynamicFormSubmissionCoordinator(
       enrollmentApi,
       formSubmissionApi,
       DynamicFormSubmissionMapper(noSessionSessionStore, FakeLookupRepository()),
+      noSessionSessionStore,
+      FakeFormAuditRepository(),
     )
 
     val result = brokenCoordinator.submit(

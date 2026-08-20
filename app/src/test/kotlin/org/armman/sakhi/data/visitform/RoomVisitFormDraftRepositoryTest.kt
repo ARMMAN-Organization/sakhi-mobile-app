@@ -4,6 +4,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
+import org.armman.sakhi.data.audit.FakeFormAuditRepository
+import org.armman.sakhi.data.audit.FormAuditEventType
 import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
@@ -11,6 +13,8 @@ import org.armman.sakhi.data.connectivity.FakeConnectivityChecker
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.CreateSubmissionResponseDto
 import org.armman.sakhi.data.forms.FakeFormSubmissionApi
+import org.armman.sakhi.data.forms.FakeFormsApi
+import org.armman.sakhi.data.forms.VisitCodeFormResolver
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.SubmissionResponseData
 import org.armman.sakhi.data.lookup.FakeLookupRepository
@@ -60,6 +64,7 @@ class RoomVisitFormDraftRepositoryTest {
   private lateinit var scheduleRepository: RoomVisitScheduleRepository
   private lateinit var syncExecutor: VisitFormSyncExecutor
   private lateinit var repository: RoomVisitFormDraftRepository
+  private lateinit var formAuditRepository: FakeFormAuditRepository
 
   private val session = UserSession(
     username = "test.sakhi",
@@ -96,11 +101,17 @@ class RoomVisitFormDraftRepositoryTest {
       visitScheduleRepository = scheduleRepository,
       lookupRepository = lookupRepository,
       sessionStore = sessionStore,
+      // CR-033/CR-034: defaults to a 404 map response, so the resolver falls back to its own
+      // hardcoded map — VisitCodeType.ANC still resolves to "ANC_VISIT", matching this test's
+      // pre-CR-033 behaviour exactly.
+      visitCodeFormResolver = VisitCodeFormResolver(FakeFormsApi(), FakeSecureKeyValueStore()),
+      formAuditRepository = FakeFormAuditRepository(),
     )
     // Reuses the same dao/secureStore as the repository so runOne() sees the row submitDraft just
     // wrote — matching how the real Hilt graph wires a single instance of each.
     syncExecutor = VisitFormSyncExecutor(dao, secureStore, coordinator)
-    repository = RoomVisitFormDraftRepository(dao, secureStore, connectivityChecker, syncExecutor)
+    formAuditRepository = FakeFormAuditRepository()
+    repository = RoomVisitFormDraftRepository(dao, secureStore, connectivityChecker, syncExecutor, formAuditRepository)
   }
 
   private val answers = FormAnswers(singleValues = mapOf("weight_kg" to "58"))
@@ -240,6 +251,34 @@ class RoomVisitFormDraftRepositoryTest {
   }
 
   @Test
+  fun `re-saving preserves an existing localSubmissionUuid across a retry, and it reaches the submission request`() =
+    runTest {
+      seedSyncedSchedule()
+      visitApi.response = successfulVisitResponse(id = "server-visit-7")
+      formSubmissionApi.response = Response.error(
+        500,
+        "server error".toResponseBody("text/plain".toMediaType()),
+      )
+
+      // First attempt: POST /visits succeeds, form submission fails. localSubmissionUuid is
+      // minted here, on the very first save.
+      submit()
+      val firstSubmissionUuid =
+        requireNotNull(dao.getByLocalScheduleUuid("schedule-1")?.localSubmissionUuid)
+      assertTrue(firstSubmissionUuid.isNotBlank())
+      assertEquals(firstSubmissionUuid, formSubmissionApi.lastRequest?.localSubmissionUuid)
+
+      // A second submit (e.g. the Sakhi retries from the same screen) must replay the exact same
+      // localSubmissionUuid, not mint a fresh one — otherwise a retry of a request the server may
+      // have already partially processed reads as a brand-new submission.
+      formSubmissionApi.response = successfulSubmissionResponse()
+      submit()
+
+      assertEquals(firstSubmissionUuid, dao.getByLocalScheduleUuid("schedule-1")?.localSubmissionUuid)
+      assertEquals(firstSubmissionUuid, formSubmissionApi.lastRequest?.localSubmissionUuid)
+    }
+
+  @Test
   fun `submitDraft persists a PENDING metadata row and the encrypted answers payload before attempting anything`() =
     runTest {
       seedSyncedSchedule()
@@ -251,6 +290,62 @@ class RoomVisitFormDraftRepositoryTest {
       val payload = visitFormDraftGson.fromJson(json, VisitFormDraftPayload::class.java)
       assertEquals(answers, payload.answers)
     }
+
+  // --- CR-035 audit trail --------------------------------------------------------------------
+
+  @Test
+  fun `saveLocally (via submitDraft) writes a SAVED audit event before attempting submission`() = runTest {
+    // A submission-step failure (or an offline device) must not stop the SAVED event from having
+    // already been written — saveLocally() runs, and records it, before submitDraft() even checks
+    // connectivity or calls either API.
+    seedSyncedSchedule()
+    visitApi.exceptionToThrow = IOException("no route to host")
+
+    submit()
+
+    assertEquals(
+      listOf(FormAuditEventType.SAVED),
+      formAuditRepository.recordedEvents.map { it.eventType },
+    )
+    assertEquals("schedule-1", formAuditRepository.recordedEvents.single().subjectId)
+    assertEquals("ANC_VISIT", formAuditRepository.recordedEvents.single().formCode)
+  }
+
+  @Test
+  fun `SAVED event is written in both the online-success and offline-queued paths`() = runTest {
+    seedSyncedSchedule()
+    visitApi.response = successfulVisitResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    val onlineResult = submit()
+
+    assertEquals(VisitFormSubmitResult.Synced, onlineResult)
+    assertEquals(
+      listOf(FormAuditEventType.SAVED),
+      formAuditRepository.recordedEvents.map { it.eventType },
+    )
+
+    // A second, independent draft that never gets a connection.
+    seedSyncedSchedule("schedule-2")
+    connectivityChecker.online = false
+    val offlineResult = repository.submitDraft(
+      localScheduleUuid = "schedule-2",
+      formCode = "ANC_VISIT",
+      formVersionId = "version-1",
+      answers = answers,
+      visitDate = LocalDate.of(2026, 8, 7),
+    )
+
+    assertEquals(VisitFormSubmitResult.QueuedOffline, offlineResult)
+    assertEquals(
+      listOf(FormAuditEventType.SAVED, FormAuditEventType.SAVED),
+      formAuditRepository.recordedEvents.map { it.eventType },
+    )
+    assertEquals(
+      setOf("schedule-1", "schedule-2"),
+      formAuditRepository.recordedEvents.map { it.subjectId }.toSet(),
+    )
+  }
 
   // --- getUploadRecords / observeUploadRecords: Home screen "Forms Uploaded" sync-status modal ---
 

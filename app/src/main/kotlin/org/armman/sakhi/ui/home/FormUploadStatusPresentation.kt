@@ -33,22 +33,44 @@ import kotlin.math.roundToInt
 private const val MOTHER_REGISTRATION_FORM_CODE = "MOTHER_REGISTRATION"
 private const val CHILD_REGISTRATION_FORM_CODE = "CHILD_REGISTRATION"
 
-/** CR-026b ANC Visit Form drafts — a genuinely separate category, not folded into Registration:
+/** CR-026b Visit Form drafts — a genuinely separate category, not folded into Registration:
  * a Sakhi can have visit drafts with no registration drafts pending (or vice versa), so grouping
- * them together would misrepresent what's actually left to upload. */
-private const val VISIT_FORM_CODE = "ANC_VISIT"
+ * them together would misrepresent what's actually left to upload.
+ *
+ * CR-033/CR-034: every visit-stage form code [org.armman.sakhi.data.forms.VisitCodeFormResolver]
+ * can resolve to, not just ANC_VISIT — before this set existed, PP/NN/DELIVERY/INC/CCV upload
+ * records fell into this file's `else` branch and were mislabeled as "Registration" (see
+ * [categoryLabelRes]'s old doc). INC_VISIT/CCV_VISIT are included even though their schema
+ * content is still a backend placeholder (docs/test-cases/visit-form.md) — this modal only cares
+ * about the form CODE, not whether its content is final. */
+private val VISIT_FORM_CODES = setOf(
+  "ANC_VISIT",
+  "DELIVERY_VISIT",
+  "POSTPARTUM_VISIT",
+  "NEONATAL_VISIT",
+  "INFANT_VISIT",
+  "INC_VISIT",
+  "CCV_VISIT",
+)
 
 /** Display category all registration-family form codes are folded into for this modal. */
 private const val REGISTRATION_CATEGORY_CODE = "REGISTRATION"
 
+/** Category code all [VISIT_FORM_CODES] entries display under. Deliberately kept as the literal
+ * "ANC_VISIT" (not a new "VISIT" code) — existing tests and any other caller that already checks
+ * for category code "ANC_VISIT" must keep working unchanged now that PP/NN/DELIVERY/INC/CCV fold
+ * into the same card. */
+private const val VISIT_CATEGORY_CODE = "ANC_VISIT"
+
 /**
  * Maps a raw [FormUploadRecord.formCode] to the category code this modal groups and labels by.
- * Mother and child registration codes fold into one "Registration" card; any other code (e.g. a
- * future Referral Form) passes through unchanged and gets its own card.
+ * Mother and child registration codes fold into one "Registration" card; any [VISIT_FORM_CODES]
+ * entry folds into the "ANC_VISIT"-labelled visit card; any other code (e.g. a future Referral
+ * Form) passes through unchanged and gets its own card.
  */
-private fun displayCategoryCode(formCode: String): String = when (formCode) {
-  MOTHER_REGISTRATION_FORM_CODE, CHILD_REGISTRATION_FORM_CODE -> REGISTRATION_CATEGORY_CODE
-  VISIT_FORM_CODE -> VISIT_FORM_CODE
+private fun displayCategoryCode(formCode: String): String = when {
+  formCode == MOTHER_REGISTRATION_FORM_CODE || formCode == CHILD_REGISTRATION_FORM_CODE -> REGISTRATION_CATEGORY_CODE
+  formCode in VISIT_FORM_CODES -> VISIT_CATEGORY_CODE
   else -> formCode
 }
 
@@ -137,7 +159,7 @@ internal fun categoryIconKind(statuses: List<EnrollmentSyncStatus>): UploadStatu
  */
 internal fun categoryLabelRes(formCode: String): Int = when (formCode) {
   REGISTRATION_CATEGORY_CODE -> R.string.home_upload_modal_registration_form_label
-  VISIT_FORM_CODE -> R.string.home_upload_modal_visit_form_label
+  VISIT_CATEGORY_CODE -> R.string.home_upload_modal_visit_form_label
   else -> R.string.home_upload_modal_registration_form_label
 }
 

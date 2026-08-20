@@ -767,6 +767,131 @@ class FormDateRulesetTest {
     }
   }
 
+  // --- Closure forms: closure visit date / date of event ---------------------------------------
+
+  @Test
+  fun `closure visit date is capped at today, with no lower bound`() {
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(FormDateRuleset.CLOSURE_VISIT_DATE_QUESTION_CODE, FormAnswers(), registrationDate),
+    )
+    assertNull(bounds.min)
+    assertEquals(registrationDate, bounds.max)
+  }
+
+  @Test
+  fun `date of event is bounded by beneficiary registration date and today when both are known`() {
+    val beneficiaryRegistrationDate = registrationDate.minusMonths(3)
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(
+        FormDateRuleset.DATE_OF_EVENT_QUESTION_CODE,
+        FormAnswers(),
+        registrationDate,
+        beneficiaryRegistrationDate,
+      ),
+    )
+    assertEquals(beneficiaryRegistrationDate, bounds.min)
+    assertEquals(registrationDate, bounds.max)
+  }
+
+  @Test
+  fun `date of event has no lower bound when the beneficiary registration date is unavailable`() {
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(FormDateRuleset.DATE_OF_EVENT_QUESTION_CODE, FormAnswers(), registrationDate),
+    )
+    assertNull(bounds.min)
+    assertEquals(registrationDate, bounds.max)
+  }
+
+  // --- Referral form: filled date / decided visit date ------------------------------------------
+
+  @Test
+  fun `referral form filled date is capped at today, with no lower bound`() {
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(FormDateRuleset.REFERRAL_FORM_FILLED_DATE_QUESTION_CODE, FormAnswers(), registrationDate),
+    )
+    assertNull(bounds.min)
+    assertEquals(registrationDate, bounds.max)
+  }
+
+  @Test
+  fun `decided visit date floors at the answered referral form filled date, with no upper bound`() {
+    val filledDate = registrationDate.minusDays(1)
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(
+        FormDateRuleset.DECIDED_VISIT_DATE_QUESTION_CODE,
+        answers(FormDateRuleset.REFERRAL_FORM_FILLED_DATE_QUESTION_CODE to filledDate.toString()),
+        registrationDate,
+      ),
+    )
+    assertEquals(filledDate, bounds.min)
+    assertNull(bounds.max)
+  }
+
+  @Test
+  fun `decided visit date falls back to today when referral form filled date is unanswered`() {
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(FormDateRuleset.DECIDED_VISIT_DATE_QUESTION_CODE, FormAnswers(), registrationDate),
+    )
+    assertEquals(registrationDate, bounds.min)
+    assertNull(bounds.max)
+  }
+
+  // --- Referral Follow-up form: filled date / facility visit dates ------------------------------
+
+  @Test
+  fun `followup form filled date is capped at today, with no lower bound`() {
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(FormDateRuleset.FOLLOWUP_FORM_FILLED_DATE_QUESTION_CODE, FormAnswers(), registrationDate),
+    )
+    assertNull(bounds.min)
+    assertEquals(registrationDate, bounds.max)
+  }
+
+  @Test
+  fun `first facility visit date is capped at today, with no lower bound`() {
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(FormDateRuleset.FIRST_FACILITY_VISIT_DATE_QUESTION_CODE, FormAnswers(), registrationDate),
+    )
+    assertNull(bounds.min)
+    assertEquals(registrationDate, bounds.max)
+  }
+
+  @Test
+  fun `last facility visit date floors at the answered first facility visit date, capped at today`() {
+    val firstVisitDate = registrationDate.minusDays(3)
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(
+        FormDateRuleset.LAST_FACILITY_VISIT_DATE_QUESTION_CODE,
+        answers(FormDateRuleset.FIRST_FACILITY_VISIT_DATE_QUESTION_CODE to firstVisitDate.toString()),
+        registrationDate,
+      ),
+    )
+    assertEquals(firstVisitDate, bounds.min)
+    assertEquals(registrationDate, bounds.max)
+  }
+
+  @Test
+  fun `last facility visit date falls back to today when first facility visit date is unanswered`() {
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(FormDateRuleset.LAST_FACILITY_VISIT_DATE_QUESTION_CODE, FormAnswers(), registrationDate),
+    )
+    assertEquals(registrationDate, bounds.min)
+    assertEquals(registrationDate, bounds.max)
+  }
+
+  @Test
+  fun `further referral planned date is floored at today, with no upper bound`() {
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(
+        FormDateRuleset.FURTHER_REFERRAL_PLANNED_DATE_QUESTION_CODE,
+        FormAnswers(),
+        registrationDate,
+      ),
+    )
+    assertEquals(registrationDate, bounds.min)
+    assertNull(bounds.max)
+  }
+
   private fun violationForTd2(td1Date: LocalDate, td2Date: LocalDate) = FormDateRuleset.violationFor(
     td2,
     answers(td1 to td1Date.toString(), td2 to td2Date.toString()),

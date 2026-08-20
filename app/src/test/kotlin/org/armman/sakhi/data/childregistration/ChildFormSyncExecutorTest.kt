@@ -17,6 +17,10 @@ import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.SubmissionResponseData
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.armman.sakhi.data.lookup.LookupValue
+import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
+import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
+import org.armman.sakhi.data.schedule.VisitScheduleRepository
+import org.armman.sakhi.data.schedule.schedule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -32,6 +36,7 @@ class ChildFormSyncExecutorTest {
   private lateinit var secureStore: FakeSecureKeyValueStore
   private lateinit var enrollmentApi: FakeEnrollmentApi
   private lateinit var formSubmissionApi: FakeFormSubmissionApi
+  private lateinit var visitScheduleRepository: VisitScheduleRepository
   private lateinit var executor: ChildFormSyncExecutor
 
   private val session = UserSession(
@@ -61,7 +66,8 @@ class ChildFormSyncExecutorTest {
     }
     val mapper = ChildRegistrationSubmissionMapper(sessionStore, lookupRepository)
     val coordinator = ChildRegistrationSubmissionCoordinator(enrollmentApi, formSubmissionApi, mapper)
-    executor = ChildFormSyncExecutor(dao, secureStore, coordinator)
+    visitScheduleRepository = RoomVisitScheduleRepository(FakeVisitScheduleDao())
+    executor = ChildFormSyncExecutor(dao, secureStore, coordinator, visitScheduleRepository)
   }
 
   private fun validAnswers() = FormAnswers(
@@ -141,6 +147,27 @@ class ChildFormSyncExecutorTest {
     // now returns it (Result<String>, was Result<Unit>) precisely so this can be persisted and
     // later used by the offline-first beneficiary list to match a synced child against her remote row.
     assertEquals("server-beneficiary-1", dao.getByLocalBeneficiaryId("local-1")?.remoteBeneficiaryId)
+  }
+
+  @Test
+  fun `successful sync attaches the server beneficiary id to this beneficiary's visit schedule rows`() = runTest {
+    // Regression: reported bug (2026-08-18) — every ad-hoc form (Referral/Closure/Reopen) submitted
+    // for a child beneficiary failed with "This beneficiary's data hasn't finished syncing yet,"
+    // even right after a successful ONLINE sync. AdHocFormSubmissionCoordinator resolves its server
+    // beneficiary id from VisitScheduleRepository rows, but this executor was only upserting
+    // remoteBeneficiaryId onto the draft entity itself and never onto the schedule rows — so the id
+    // was permanently missing from the one place AdHocFormSubmissionCoordinator actually reads.
+    seedPendingDraft()
+    visitScheduleRepository.saveGenerated(listOf(schedule(localScheduleUuid = "sched-1", localBeneficiaryId = "local-1")))
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    val outcome = executor.run()
+
+    assertEquals(EnrollmentSyncOutcome.COMPLETED, outcome)
+    val rows = visitScheduleRepository.getForBeneficiary("local-1")
+    assertEquals(1, rows.size)
+    assertEquals("server-beneficiary-1", rows.first().serverBeneficiaryId)
   }
 
   @Test

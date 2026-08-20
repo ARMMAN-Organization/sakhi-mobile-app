@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -68,6 +69,7 @@ import org.armman.sakhi.ui.enrollment.components.AppRadioGroup
 import org.armman.sakhi.ui.forms.DynamicFormField
 import org.armman.sakhi.ui.forms.FormSectionScroll
 import org.armman.sakhi.ui.theme.Dimens
+import org.armman.sakhi.ui.theme.NeutralG100
 import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG400
 import org.armman.sakhi.ui.theme.NeutralG50
@@ -323,6 +325,18 @@ private fun VisitFormBody(
             state = state,
             viewModel = viewModel,
           )
+          // Every other form code's Summary tab (POSTPARTUM_VISIT/PP1..PPn, NEONATAL_VISIT/NN1-NN2,
+          // and any future code with no bespoke Summary view of its own) — plain "filled fields"
+          // review, same shape as DeliverySessionScreen's own Summary tab. See
+          // FieldSummaryTabContent's doc.
+          selectedOuterTab == VisitFormOuterTab.SUMMARY -> FieldSummaryTabContent(
+            state = state,
+            viewModel = viewModel,
+            onEditVisitData = {
+              val firstSection = viewModel.subSections(VisitFormOuterTab.VISIT_DATA).firstOrNull()
+              onSelect(VisitFormOuterTab.VISIT_DATA, firstSection)
+            },
+          )
           selectedOuterTab == VisitFormOuterTab.REFERRAL -> ReferralTabContent(state = state, viewModel = viewModel)
           else -> BlankTabPlaceholder()
         }
@@ -572,6 +586,94 @@ private fun InfantRiskRow(risk: InfantVisitRiskFinding) {
       modifier = Modifier.weight(1f).padding(end = Dimens.SmallSpacing),
     )
     RiskBadge(riskLevel = risk.riskLevel, compact = true)
+  }
+}
+
+/**
+ * Summary outer tab's plain "filled fields" review — POSTPARTUM_VISIT/NEONATAL_VISIT, and any
+ * other form code with no bespoke Summary view of its own (ANC_VISIT/INFANT_VISIT keep their own
+ * risk-banner Summary tabs above — see [SummaryTabContent]/[InfantSummaryTabContent]). One white
+ * bordered card per schema section with an Edit pill (always returns to Visit Data's first
+ * sub-tab — there's no per-section tab to jump back to for these form codes) and its answered
+ * label/value rows. Same layout as [org.armman.sakhi.ui.delivery.DeliverySessionScreen]'s own
+ * Summary tab (`DeliverySessionSummary`), sharing [SummaryRow]/[SummarySection]'s shape (see
+ * [VisitFormSummaryModels]'s doc for why that's a local copy, not a shared import) — this form's
+ * first use of that plain-review pattern.
+ */
+@Composable
+private fun FieldSummaryTabContent(
+  state: DynamicVisitFormUiState,
+  viewModel: DynamicVisitFormViewModel,
+  onEditVisitData: () -> Unit,
+) {
+  val imageCapturedLabel = stringResource(R.string.enrollment_consent_photo_captured)
+  val mediaCompletedLabel = stringResource(R.string.visit_form_summary_media_completed)
+  val sections = remember(state.answers, state.capturedImages, state.mediaCompleted, state.formCode) {
+    viewModel.buildFieldSummary(imageCapturedLabel, mediaCompletedLabel)
+  }
+  LazyColumn(
+    contentPadding = PaddingValues(Dimens.ScreenPadding),
+    verticalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
+    modifier = Modifier.fillMaxSize(),
+  ) {
+    item(key = "field_summary_title") {
+      Text(
+        text = stringResource(R.string.enrollment_summary_title),
+        style = MaterialTheme.typography.titleLarge,
+        color = NeutralG400,
+      )
+    }
+    items(sections, key = { it.title }) { section ->
+      FieldSummaryReviewCard(title = section.title, onEdit = onEditVisitData) {
+        section.rows.forEach { row -> FieldSummaryReviewRow(label = row.label, value = row.value) }
+      }
+    }
+  }
+}
+
+@Composable
+private fun FieldSummaryReviewCard(
+  title: String,
+  onEdit: () -> Unit,
+  rows: @Composable () -> Unit,
+) {
+  val shape = RoundedCornerShape(Dimens.CardRadius)
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(shape)
+      .background(White)
+      .border(1.dp, NeutralG50, shape)
+      .padding(Dimens.ItemSpacing),
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+      Text(
+        text = title,
+        style = MaterialTheme.typography.titleLarge,
+        color = NeutralG400,
+        modifier = Modifier.weight(1f),
+      )
+      SecondaryButton(
+        text = stringResource(R.string.enrollment_summary_edit),
+        onClick = onEdit,
+        height = Dimens.SmallButtonHeight,
+      )
+    }
+    rows()
+  }
+}
+
+@Composable
+private fun FieldSummaryReviewRow(label: String, value: String) {
+  Column(modifier = Modifier.fillMaxWidth().padding(top = Dimens.ItemSpacing)) {
+    Text(text = label, style = MaterialTheme.typography.labelMedium, color = NeutralG100)
+    Text(
+      text = value,
+      style = MaterialTheme.typography.bodyLarge,
+      color = NeutralG400,
+      modifier = Modifier.padding(top = Dimens.LabelValueGap, bottom = Dimens.SmallSpacing),
+    )
+    HorizontalDivider(color = NeutralG50)
   }
 }
 

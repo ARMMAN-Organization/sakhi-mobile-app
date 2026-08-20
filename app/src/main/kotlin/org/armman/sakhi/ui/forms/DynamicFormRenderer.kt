@@ -66,6 +66,9 @@ import org.armman.sakhi.ui.enrollment.components.AppRadioGroup
 import org.armman.sakhi.ui.enrollment.components.AppReadOnlyField
 import org.armman.sakhi.ui.enrollment.components.AppSingleCheckbox
 import org.armman.sakhi.ui.enrollment.components.AppTextInputField
+import org.armman.sakhi.ui.enrollment.components.AppTimeField
+import org.armman.sakhi.ui.enrollment.components.formatTimeOfDay
+import org.armman.sakhi.ui.enrollment.components.parseTimeOfDayOrNull
 import org.armman.sakhi.ui.components.SecondaryButton
 import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG400
@@ -167,6 +170,17 @@ fun DynamicFormField(
   onPlayMedia: () -> Unit,
   onCaptureImage: () -> Unit,
   modifier: Modifier = Modifier,
+  /** The beneficiary's actual enrollment date, for [FormDateRuleset.DATE_OF_EVENT_QUESTION_CODE]'s
+   * lower bound (spec: "should not accept ... before registration date"). Null for every caller
+   * except the ad-hoc Closure forms, and null there too when the beneficiary's own registration
+   * date isn't resolvable (see [org.armman.sakhi.data.beneficiary.Beneficiary.registrationDate]) —
+   * the bound is simply not applied in that case, same as any other missing-data gap in
+   * [FormDateRuleset]. */
+  beneficiaryRegistrationDate: LocalDate? = null,
+  /** The mother's LMP on file, forwarded verbatim to [FormDateRuleset.boundsFor] — see that
+   * param's own doc. Null for every caller except [org.armman.sakhi.ui.delivery
+   * .DeliverySessionScreen]; has no bearing on any other question code. */
+  motherLmpDate: LocalDate? = null,
   /** Server-side per-field validation message (from a `400 VALIDATION_ERROR`), shown inline under
    * the field. For text/number fields it feeds the widget's own `errorText` slot and takes
    * precedence over the local range/mobile hint; for every other field type it renders as a
@@ -230,6 +244,8 @@ fun DynamicFormField(
       field = field,
       answers = answers,
       registrationDate = registrationDate,
+      beneficiaryRegistrationDate = beneficiaryRegistrationDate,
+      motherLmpDate = motherLmpDate,
       singleValue = singleValue,
       multiValue = multiValue,
       mediaCompleted = mediaCompleted,
@@ -255,6 +271,7 @@ private val INLINE_ERROR_INPUT_TYPES = setOf(
   FormFieldInputType.TEXT_GEO,
   FormFieldInputType.NUMBER,
   FormFieldInputType.DATE,
+  FormFieldInputType.TIME,
 )
 
 /** User-facing message for a [FormDateRuleset.Violation]. Reuses the static enrollment flow's
@@ -274,6 +291,11 @@ private fun FormDateRuleset.Violation.messageRes(): Int = when (this) {
   FormDateRuleset.Violation.TD_BOOSTER_NOT_AFTER_TD_2 -> R.string.form_error_td_booster_not_after_td2
   FormDateRuleset.Violation.LMP_DATE_EDIT_FUTURE -> R.string.form_error_td_date_future
   FormDateRuleset.Violation.VACCINATION_AT_BIRTH_DATE_IN_FUTURE -> R.string.form_error_td_date_future
+  FormDateRuleset.Violation.DELIVERY_DATE_IN_FUTURE -> R.string.form_error_td_date_future
+  FormDateRuleset.Violation.DISCHARGE_DATE_IN_FUTURE -> R.string.form_error_td_date_future
+  FormDateRuleset.Violation.DISCHARGE_DATE_BEFORE_DELIVERY -> R.string.form_error_discharge_before_delivery
+  FormDateRuleset.Violation.DEATH_DATE_IN_FUTURE -> R.string.form_error_td_date_future
+  FormDateRuleset.Violation.DEATH_DATE_NOT_AFTER_DELIVERY -> R.string.form_error_death_not_after_delivery
 }
 
 /** Display formatter shared with every other date-picker field in this form ([AppDateField] /
@@ -312,6 +334,8 @@ private fun DynamicFormFieldBody(
   field: FormFieldSchema,
   answers: FormAnswers,
   registrationDate: LocalDate,
+  beneficiaryRegistrationDate: LocalDate?,
+  motherLmpDate: LocalDate?,
   singleValue: String,
   multiValue: List<String>,
   mediaCompleted: Boolean,
@@ -476,7 +500,13 @@ private fun DynamicFormFieldBody(
       // Spec-driven bounds (DOB age range, LMP window, registration date not future) — the picker
       // won't offer an out-of-range date, and any value that got in another way (older draft,
       // backend-restored answer) shows the matching message. Server error still wins.
-      val bounds = FormDateRuleset.boundsFor(field.questionCode, answers, registrationDate)
+      val bounds = FormDateRuleset.boundsFor(
+        field.questionCode,
+        answers,
+        registrationDate,
+        beneficiaryRegistrationDate,
+        motherLmpDate,
+      )
       val localError = FormDateRuleset
         .violationFor(field.questionCode, answers, registrationDate)
         ?.let { stringResource(it.messageRes()) }
@@ -490,6 +520,19 @@ private fun DynamicFormFieldBody(
         minDate = bounds?.min,
         maxDate = bounds?.max,
         displayPattern = if (field.questionCode == DATE_OF_VISIT_QUESTION_CODE) "dd-MM-yyyy" else "dd MMM yyyy",
+      )
+    }
+
+    FormFieldInputType.TIME -> {
+      // No FormDateRuleset-equivalent bounds-checking exists for time fields, so unlike DATE
+      // above this branch is just the picker plus the server error — no client-side localError.
+      AppTimeField(
+        label = field.label,
+        placeholder = "",
+        value = singleValue.takeIf { it.isNotBlank() }?.let(::parseTimeOfDayOrNull),
+        onTimeSelected = { time -> onSingleAnswer(formatTimeOfDay(time)) },
+        errorText = serverErrorText,
+        required = required,
       )
     }
 

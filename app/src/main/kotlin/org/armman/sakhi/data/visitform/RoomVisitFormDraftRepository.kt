@@ -1,5 +1,6 @@
 package org.armman.sakhi.data.visitform
 
+import org.armman.sakhi.data.audit.FormAuditRepository
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import kotlinx.coroutines.flow.Flow
@@ -32,6 +33,7 @@ class RoomVisitFormDraftRepository @Inject constructor(
   private val secureStore: SecureKeyValueStore,
   private val connectivityChecker: ConnectivityChecker,
   private val syncExecutor: VisitFormSyncExecutor,
+  private val formAuditRepository: FormAuditRepository,
 ) : VisitFormDraftRepository {
 
   override suspend fun submitDraft(
@@ -88,6 +90,9 @@ class RoomVisitFormDraftRepository @Inject constructor(
     answers: FormAnswers,
     visitDate: LocalDate,
   ) {
+    // CR-035: unconditional — runs before the online/offline branch in submitDraft, so both the
+    // online-success and offline-queued paths get a SAVED event.
+    formAuditRepository.recordSaved(localScheduleUuid, formCode)
     val payload = VisitFormDraftPayload(answers = answers)
     secureStore.putString(visitFormDraftPayloadKey(localScheduleUuid), visitFormDraftGson.toJson(payload))
 
@@ -97,6 +102,11 @@ class RoomVisitFormDraftRepository @Inject constructor(
         localScheduleUuid = localScheduleUuid,
         formCode = formCode,
         formVersionId = formVersionId,
+        // Minted once, on this draft's very first save, and preserved on every re-save after
+        // that — same once-per-draft contract as `formVersionId`/`createdAtEpochMillis` below, so
+        // a resumed sync after a step-2-only failure replays the same idempotency key on
+        // `POST /forms/:formCode/submissions` instead of a fresh one each attempt.
+        localSubmissionUuid = existing?.localSubmissionUuid ?: newLocalVisitSubmissionUuid(),
         visitDateIso = visitDate.toString(),
         // Re-saving (a retry from the same screen, or a re-submit before the first attempt's
         // background sync ran) resets to PENDING so the sync worker picks up the fresh payload

@@ -16,14 +16,13 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.flow.toList
 import org.armman.sakhi.data.childregistration.FakeChildFormSyncScheduler
 import org.armman.sakhi.data.connectivity.ConnectivityChecker
-import org.armman.sakhi.data.dashboard.ActiveBeneficiaries
-import org.armman.sakhi.data.dashboard.ActiveVisits
 import org.armman.sakhi.data.dashboard.DashboardRepository
 import org.armman.sakhi.data.dashboard.DashboardSummary
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.enrollment.FakeEnrollmentSyncScheduler
 import org.armman.sakhi.data.schedule.FakeVisitScheduleSyncScheduler
 import org.armman.sakhi.data.visitform.FakeVisitFormSyncScheduler
+import org.armman.sakhi.data.adhocform.FakeAdHocFormSyncScheduler
 import org.armman.sakhi.data.forms.FakeDynamicFormSyncScheduler
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.DynamicFormSubmitResult
@@ -40,7 +39,6 @@ import org.junit.Before
 import org.junit.Test
 import java.io.IOException
 import java.time.LocalDate
-import java.time.YearMonth
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModelTest {
@@ -51,30 +49,33 @@ class HomeViewModelTest {
     var summary: DashboardSummary = defaultSummary(),
     var error: Exception? = null,
   ) : DashboardRepository {
+    var getSummaryCallCount = 0
+
     override suspend fun getSummary(): DashboardSummary {
+      getSummaryCallCount++
       error?.let { throw it }
       return summary
     }
 
     companion object {
-      fun defaultSummary(
-        mothersTotal: Int = 21,
-        infantsTotal: Int = 10,
-      ) = DashboardSummary(
+      // M3: DashboardSummary's shape changed to match the real dashboard API (percentages +
+      // due/overdue/referral counts, no high-risk-count breakdown) — fixture updated to match,
+      // no behavioral test below depended on the removed fields.
+      fun defaultSummary() = DashboardSummary(
         sakhiName = "Test Sakhi",
-        lastUploadedOn = LocalDate.of(2026, 4, 14),
-        activeVisits = ActiveVisits(
-          month = YearMonth.of(2026, 1),
-          openCount = 12,
-          endingCount = 2,
-          pendingReferralCount = 5,
-        ),
-        activeBeneficiaries = ActiveBeneficiaries(
-          mothersTotal = mothersTotal,
-          mothersHighRisk = 0,
-          infantsTotal = infantsTotal,
-          infantsHighRisk = 0,
-        ),
+        lastSyncedAt = null,
+        totalActiveBeneficiaries = 96,
+        activeMothersCount = 42,
+        activeChildrenCount = 54,
+        activeMothersHighRiskCount = 5,
+        activeChildrenHighRiskCount = 2,
+        activeMothersPercent = 43.75,
+        activeChildrenPercent = 56.25,
+        accompaniedReferralsCount = 7,
+        pendingFollowUpsCount = 3,
+        dueVisitsCount = 15,
+        overdueVisitsCount = 4,
+        endingSoonVisitsCount = 3,
       )
     }
   }
@@ -158,6 +159,7 @@ class HomeViewModelTest {
   private lateinit var enrollmentScheduler: FakeEnrollmentSyncScheduler
   private lateinit var visitScheduleScheduler: FakeVisitScheduleSyncScheduler
   private lateinit var visitFormScheduler: FakeVisitFormSyncScheduler
+  private lateinit var adHocFormScheduler: FakeAdHocFormSyncScheduler
   private lateinit var manualSyncTrigger: ManualSyncTrigger
   private lateinit var connectivityChecker: FakeConnectivityChecker
 
@@ -172,6 +174,7 @@ class HomeViewModelTest {
     enrollmentScheduler = FakeEnrollmentSyncScheduler()
     visitScheduleScheduler = FakeVisitScheduleSyncScheduler()
     visitFormScheduler = FakeVisitFormSyncScheduler()
+    adHocFormScheduler = FakeAdHocFormSyncScheduler()
     // Real ManualSyncTrigger over fake schedulers: its whole job is the fan-out, so faking the
     // trigger itself would test nothing.
     manualSyncTrigger = ManualSyncTrigger(
@@ -180,6 +183,7 @@ class HomeViewModelTest {
       enrollmentScheduler,
       visitScheduleScheduler,
       visitFormScheduler,
+      adHocFormScheduler,
     )
     connectivityChecker = FakeConnectivityChecker()
   }
@@ -296,6 +300,61 @@ class HomeViewModelTest {
     dispatcher.scheduler.advanceUntilIdle()
 
     assertEquals(0, viewModel.pendingUploadCount.value)
+  }
+
+  // --- Dashboard summary refresh after a sync completes -------------------------------------
+
+  @Test
+  fun `summary reloads once a sync completes so the Updated caption catches up`() = runTest(dispatcher) {
+    uploadRecordsSource.setRecords(listOf(record("local-1", EnrollmentSyncStatus.PENDING, 1L)))
+    val viewModel = viewModel()
+    observe(viewModel)
+    dispatcher.scheduler.advanceUntilIdle()
+
+    // Server now reports a sync time -- as it would right after this device's upload landed.
+    repository.summary = repository.summary.copy(lastSyncedAt = java.time.Instant.parse("2026-08-19T09:00:00Z"))
+
+    // The sync worker marks the draft SYNCED with no further user action.
+    uploadRecordsSource.setRecords(listOf(record("local-1", EnrollmentSyncStatus.SYNCED, 1L)))
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val state = viewModel.uiState.value
+    assertTrue(state is HomeUiState.Success)
+    assertEquals(
+      java.time.Instant.parse("2026-08-19T09:00:00Z"),
+      (state as HomeUiState.Success).summary.lastSyncedAt,
+    )
+  }
+
+  @Test
+  fun `an account with nothing ever queued does not trigger a spurious reload on launch`() =
+    runTest(dispatcher) {
+      val viewModel = viewModel()
+      observe(viewModel)
+      dispatcher.scheduler.advanceUntilIdle()
+      val callsAfterInitialLoad = repository.getSummaryCallCount
+
+      // pendingUploadCount starts and stays at zero -- nothing to complete, nothing to refresh.
+      dispatcher.scheduler.advanceUntilIdle()
+
+      assertEquals(callsAfterInitialLoad, repository.getSummaryCallCount)
+    }
+
+  @Test
+  fun `a failed background refresh after sync leaves the existing summary on screen`() = runTest(dispatcher) {
+    uploadRecordsSource.setRecords(listOf(record("local-1", EnrollmentSyncStatus.PENDING, 1L)))
+    val viewModel = viewModel()
+    observe(viewModel)
+    dispatcher.scheduler.advanceUntilIdle()
+
+    repository.error = IOException("network down")
+    uploadRecordsSource.setRecords(listOf(record("local-1", EnrollmentSyncStatus.SYNCED, 1L)))
+    dispatcher.scheduler.advanceUntilIdle()
+
+    // The background refresh failed silently -- still Success with the last good summary, not Error.
+    val state = viewModel.uiState.value
+    assertTrue(state is HomeUiState.Success)
+    assertEquals("Test Sakhi", (state as HomeUiState.Success).summary.sakhiName)
   }
 
   // --- "Forms Uploaded" sync-status modal ---------------------------------------------------

@@ -1,6 +1,7 @@
 package org.armman.sakhi.ui.enrollment.components
 
 import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -329,6 +330,93 @@ fun AppDateField(
     ) {
       Text(
         text = value?.format(formatter) ?: placeholder,
+        style = MaterialTheme.typography.bodyLarge,
+        color = if (value != null) NeutralG400 else NeutralG100,
+        modifier = Modifier.weight(1f),
+      )
+      Icon(
+        painter = painterResource(R.drawable.ic_calendar_blank),
+        contentDescription = null,
+        tint = NeutralG400,
+        modifier = Modifier.size(20.dp),
+      )
+    }
+  }
+}
+
+/**
+ * Formats [time] per the platform's "hh:mm am/pm" convention (lowercase am/pm, 12-hour clock) —
+ * e.g. `LocalTime.of(14, 45)` -> `"02:45 pm"`. Backend does not validate the `TIME` input_type's
+ * answer format server-side; this is purely a client-side consistency choice.
+ *
+ * `DateTimeFormatter`'s `"a"` pattern letter renders "AM"/"PM" (uppercase) in essentially every
+ * locale, so the formatted string is explicitly lowercased afterwards rather than relying on any
+ * locale trick to produce lowercase directly.
+ */
+private val TIME_OF_DAY_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("hh:mm a", Locale.US)
+
+/** Parses the "hh:mm am/pm" string [formatTimeOfDay] produces, back into a [LocalTime] — needed
+ * because the stored answer's am/pm marker is lowercase, but [DateTimeFormatter]'s `"a"` pattern
+ * letter is case-sensitive by default (it only matches "AM"/"PM" as-is). Case-insensitive parsing
+ * is opt-in via [java.time.format.DateTimeFormatterBuilder.parseCaseInsensitive], applied here
+ * only to the parser, not [TIME_OF_DAY_FORMATTER] itself (which must keep producing uppercase
+ * before the explicit `.lowercase()` in [formatTimeOfDay] — a case-insensitive formatter would
+ * still render using its locale's normal case). */
+private val TIME_OF_DAY_PARSER: DateTimeFormatter =
+  java.time.format.DateTimeFormatterBuilder().parseCaseInsensitive().appendPattern("hh:mm a").toFormatter(Locale.US)
+
+fun formatTimeOfDay(time: LocalTime): String = time.format(TIME_OF_DAY_FORMATTER).lowercase(Locale.US)
+
+fun parseTimeOfDayOrNull(text: String): LocalTime? = runCatching { LocalTime.parse(text, TIME_OF_DAY_PARSER) }.getOrNull()
+
+/**
+ * Time field mirroring [AppDateField]'s outlined-box-with-trailing-icon pattern, opening the
+ * platform time picker instead of the date picker. No [FormDateRuleset]-equivalent bounds
+ * checking exists for time fields, so unlike [AppDateField] this has no min/max — the schema's
+ * only TIME field so far (`maternal_death_time`) carries no such constraint.
+ */
+@Composable
+fun AppTimeField(
+  label: String,
+  placeholder: String,
+  value: LocalTime?,
+  onTimeSelected: (LocalTime) -> Unit,
+  modifier: Modifier = Modifier,
+  errorText: String? = null,
+  required: Boolean = false,
+) {
+  val context = LocalContext.current
+  val focusManager = LocalFocusManager.current
+  val keyboardController = LocalSoftwareKeyboardController.current
+  val openPicker = {
+    // See the matching note on AppDateField/AppDropdownField: clear focus off any still-focused
+    // text field above this one so the keyboard doesn't reappear once the dialog closes.
+    focusManager.clearFocus()
+    keyboardController?.hide()
+    val seed = value ?: LocalTime.now()
+    val dialog = TimePickerDialog(
+      context,
+      { _, hour, minute -> onTimeSelected(LocalTime.of(hour, minute)) },
+      seed.hour,
+      seed.minute,
+      false,
+    )
+    dialog.show()
+  }
+  FieldFrame(label = label, errorText = errorText, modifier = modifier, required = required) {
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(Dimens.SmallButtonHeight)
+        .clip(FieldShape)
+        .background(White)
+        .border(1.dp, fieldBorder(errorText != null), FieldShape)
+        .clickable(onClick = openPicker)
+        .padding(horizontal = Dimens.ItemSpacing),
+    ) {
+      Text(
+        text = value?.let { formatTimeOfDay(it) } ?: placeholder,
         style = MaterialTheme.typography.bodyLarge,
         color = if (value != null) NeutralG400 else NeutralG100,
         modifier = Modifier.weight(1f),

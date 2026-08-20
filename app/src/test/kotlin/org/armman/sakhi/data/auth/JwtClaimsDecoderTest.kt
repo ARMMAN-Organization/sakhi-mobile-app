@@ -86,12 +86,13 @@ class JwtClaimsDecoderTest {
   }
 
   @Test
-  fun `exp claim missing fails fast`() { // JW-9
-    // Defaulting a missing exp to 0 would mark the token already-expired and silently bypass
-    // "stay logged in" forever — surface it as a malformed token instead.
-    assertThrows(JwtDecodeException::class.java) {
-      decoder.decode(tokenWithoutExpKey)
-    }
+  fun `exp claim missing defaults to no expiry`() { // JW-9
+    // The auth-service intentionally no longer issues an `exp` claim (tokens don't expire) —
+    // a missing claim must decode successfully with a sentinel that
+    // SessionStore.hasValidSession() always treats as not-expired, rather than failing login.
+    val claims = decoder.decode(tokenWithoutExpKey)
+
+    assertEquals(NO_EXPIRY_EPOCH_SECONDS, claims.expiresAtEpochSeconds)
   }
 
   @Test

@@ -12,6 +12,7 @@ enum class FormFieldInputType {
   TEXT_GEO,
   NUMBER,
   DATE,
+  TIME,
   SELECT,
   RADIO,
   MULTISELECT,
@@ -36,12 +37,26 @@ enum class FormFieldInputType {
  */
 private val MULTISELECT_DATE_SPELLINGS = setOf("multiselect_date", "multiselect,calendar", "multiselect, calendar")
 
+/**
+ * `select`/dropdown fields are shipped by the backend as `"dropdown"`, not `"select"` — confirmed
+ * 2026-08-18 against a real `GET /forms/.../active-version` payload for `closure_reason` and
+ * `maternal_death_place` (ANC/Infant Closure forms), and reported live on the Referral form's
+ * "If No, state reasons" field with the same symptom: falling into [FormFieldInputType.UNKNOWN]
+ * and printing "Unsupported field type ... (dropdown) — app update needed." instead of rendering
+ * the dropdown. `"Dropdown"` (capitalized, matching the SRS Data Type column text verbatim) is
+ * included pre-emptively for the same reason [MULTISELECT_DATE_SPELLINGS] hedges on casing/
+ * punctuation — the backend normalizes the spec's own column text rather than using a fixed enum
+ * token, so a future republish could ship either casing.
+ */
+private val DROPDOWN_SPELLINGS = setOf("select", "dropdown", "Dropdown")
+
 fun String.toFormFieldInputType(): FormFieldInputType = when (this) {
   "text" -> FormFieldInputType.TEXT
   "text_geo" -> FormFieldInputType.TEXT_GEO
   "number" -> FormFieldInputType.NUMBER
   "date" -> FormFieldInputType.DATE
-  "select" -> FormFieldInputType.SELECT
+  "time" -> FormFieldInputType.TIME
+  in DROPDOWN_SPELLINGS -> FormFieldInputType.SELECT
   "radio" -> FormFieldInputType.RADIO
   "multiselect" -> FormFieldInputType.MULTISELECT
   in MULTISELECT_DATE_SPELLINGS -> FormFieldInputType.MULTISELECT_DATE
@@ -115,11 +130,22 @@ data class FormFieldSchema(
 
 /** One cross-field rule from `validationJson`. Matches the backend's `crossFieldRuleSchema`
  * discriminated union exactly: `LTE` compares `fields[0] <= fields[1]`; `SUM_EQUALS` checks
- * `sum(fields) == value-of(equals)`. [equals] is only present for `SUM_EQUALS`. */
+ * `sum(fields) == value-of(equals)`. [equals] is only present for `SUM_EQUALS`. [field] and
+ * [optionFieldMap] are only present for `REQUIRED_IF_SELECTED`: [field] is the trigger question
+ * (a multiselect), and [optionFieldMap] maps a selected option code to the question_code that
+ * becomes required when that option is selected — e.g. ANC_CLOSURE_VISIT/CHILD_CLOSURE_VISIT's
+ * "other, please specify" death-cause detail fields. [field] and [exclusiveValues] are only
+ * present for `EXCLUSIVE_OPTION` (confirmed 2026-08-19 against `DELIVERY_VISIT`'s
+ * `did_mother_experience_complications` and `CHILD_REGISTRATION`'s `vaccination_taken_at_birth`):
+ * [field] is the trigger multiselect, and [exclusiveValues] are option codes (e.g. `"none"`) that
+ * must not be selected alongside any other option in that same field. */
 data class FormCrossFieldRule(
   val rule: String,
   val fields: List<String>,
   val equals: String? = null,
+  val field: String? = null,
+  val optionFieldMap: Map<String, String>? = null,
+  val exclusiveValues: List<String>? = null,
 )
 
 /** One geography unit the backend ships alongside the form version in the `active-version`
@@ -154,4 +180,14 @@ data class FormActiveVersionResponseDto(
   val success: Boolean,
   val message: String?,
   val data: FormVersion?,
+)
+
+/** CR-033/CR-034: envelope for [FormsApi.getVisitCodeFormMap] — `data` is a flat
+ * `VisitCodeType.name -> formCode` map (e.g. `{"ANC": "ANC_VISIT", "PP": "POSTPARTUM_VISIT"}`),
+ * covering only the visit types the backend currently has a real/placeholder mapping for. See
+ * [VisitCodeFormResolver] for what happens when a code is missing from this map. */
+data class VisitCodeFormMapResponseDto(
+  val success: Boolean,
+  val message: String?,
+  val data: Map<String, String>?,
 )

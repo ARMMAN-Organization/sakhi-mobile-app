@@ -76,6 +76,7 @@ class LocalEnrolmentBeneficiarySource @Inject constructor(
   private val secureStore: SecureKeyValueStore,
   private val scheduleRepository: VisitScheduleRepository,
   private val formsRepository: FormsRepository,
+  private val statusOverrideStore: LocalBeneficiaryStatusOverrideStore,
 ) {
 
   /**
@@ -195,7 +196,11 @@ class LocalEnrolmentBeneficiarySource @Inject constructor(
       } else {
         EnrollmentRiskAssessment.baselineRiskLevel(answers, registrationDate ?: today)
       },
-      status = BeneficiaryStatus.ACTIVE,
+      // A freshly enrolled beneficiary defaults to ACTIVE; a beneficiary whose closure
+      // submission has already succeeded (or is queued offline) carries a local optimistic
+      // override instead — see LocalBeneficiaryStatusOverrideStore's doc for why this isn't
+      // just always ACTIVE any more.
+      status = statusOverrideStore.getStatus(localBeneficiaryId) ?: BeneficiaryStatus.ACTIVE,
       visitState = VisitState.OPEN,
       pada = answers.padaLabel(if (isChild) CHILD_REGISTRATION_FORM_CODE else MOTHER_REGISTRATION_FORM_CODE),
       // Falls back to today so the card still renders for a beneficiary enrolled before CR-022,
@@ -212,6 +217,7 @@ class LocalEnrolmentBeneficiarySource @Inject constructor(
       phoneNumber = answers.valueOf(QuestionCode.MOBILE_NUMBER).orEmpty(),
       journeyCompletedIn = null,
       remoteBeneficiaryId = remoteBeneficiaryId,
+      registrationDate = registrationDate,
     )
   }
 

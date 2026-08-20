@@ -11,6 +11,11 @@
   <string name="home_open">Open</string>
   <string name="home_ending">(Ending)</string>
   <string name="home_pending_referral">Pending Referral Follow-up</string>
+  <string name="home_due_visits">Due</string>
+  <string name="home_overdue_visits">Overdue</string>
+  <string name="home_accompanied_referrals">Accompanied Referrals</string>
+  <string name="home_never_synced">Not yet synced</string>
+  <string name="home_active_beneficiaries_total">%1$d Active</string>
   <string name="home_see_visit_tracker">See Visit Tracker</string>
   <string name="home_active_beneficiaries">Active Beneficiaries</string>
   <string name="home_mothers">Mothers</string>
@@ -78,6 +83,7 @@
   <string name="beneficiaries_subtab_open">Open</string>
   <string name="beneficiaries_subtab_pending_referral">Pending Referral</string>
   <string name="beneficiaries_subtab_missed">Missed</string>
+  <string name="beneficiaries_not_yet_assessed">Not yet assessed</string>
   <string name="beneficiaries_date_label">Date</string>
   <string name="beneficiaries_month_all">All months</string>
   <string name="beneficiaries_days_remaining">%1$d days remaining</string>
@@ -171,6 +177,12 @@
   <string name="beneficiary_profile_see_data">See Data</string>
   <string name="beneficiary_profile_referral">Referral</string>
   <string name="beneficiary_profile_delivery_form">Delivery Form</string>
+  <string name="beneficiary_profile_delivery_recorded">Delivery Recorded</string>
+  <string name="beneficiary_profile_delivery_continue_child_registration">Complete Child Registration</string>
+  <string name="beneficiary_profile_delivery_continue_pp1">Continue to PP1</string>
+  <string name="beneficiary_profile_delivery_continue_nn">Continue to NN Visit</string>
+  <string name="beneficiary_profile_delivery_child_registration_unavailable">Delivery recorded. Child registration for this delivery isn\'t available in the app yet — check back after the next update.</string>
+  <string name="beneficiary_profile_delivery_child_registration">Child Registration</string>
   <string name="beneficiary_profile_closure_form">Closure Form</string>
 
   <!-- Enrollment form (CR-015) -->
@@ -273,6 +285,8 @@
   <string name="form_error_td_date_future">This date cannot be in the future</string>
   <string name="form_error_td2_not_after_td1">Td-2 date must be after the Td-1 date</string>
   <string name="form_error_td_booster_not_after_td2">Td-Booster date must be after the Td-2 date</string>
+  <string name="form_error_discharge_before_delivery">Discharge date cannot be before the date of delivery</string>
+  <string name="form_error_death_not_after_delivery">Date of death must be after the date of delivery</string>
   <string name="enrollment_error_name_chars">Only letters and spaces are allowed</string>
   <string name="enrollment_error_age_range">Age must be between 10 and 50 years</string>
   <string name="enrollment_error_mobile">Enter a valid 10-digit mobile number</string>
@@ -389,6 +403,7 @@
   <string name="visit_form_subtab_symptoms">Symptoms</string>
   <string name="visit_form_subtab_history">History</string>
   <string name="visit_form_step_pending">This section is coming soon</string>
+  <string name="visit_form_summary_media_completed">Media completed</string>
   <string name="visit_form_back">Back</string>
   <string name="visit_form_next_summary">Summary</string>
   <string name="visit_form_next_health_info">Health Info</string>

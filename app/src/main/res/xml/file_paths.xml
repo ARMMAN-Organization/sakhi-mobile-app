@@ -26,4 +26,24 @@
   <files-path
     name="child_registration_captures"
     path="child-registration/" />
+  <!-- Referral Follow-up's "Photo of case paper/discharge summary..." and "Photo of further
+       investigation advised" image fields — see AdHocFormScreen.onCaptureImage. Reported bug
+       (2026-08-18): onCaptureImage was a no-op ({}), so tapping these fields did nothing at all
+       (not even a crash, since the camera never launched) — bharath's "I can't take picture"
+       report. -->
+  <files-path
+    name="ad_hoc_form_captures"
+    path="ad-hoc-form/" />
+  <!-- CR-042 Delivery Event Session's DELIVERY_VISIT form — see
+       DeliverySessionScreen.onCaptureImage. -->
+  <files-path
+    name="delivery_session_captures"
+    path="delivery-session/" />
+  <!-- CR-042 Delivery Event Session's CHILD_REGISTRATION step (photo consent field) — see
+       DeliveryChildRegistrationScreen.onCaptureImage. Missing this entry crashed the app the
+       instant the camera launched (the exact failure mode this file's own top comment warns
+       about) — reported 2026-08-19 as "photo consent... app crashed and closed automatically". -->
+  <files-path
+    name="delivery_child_registration_captures"
+    path="delivery-child-registration/" />
 </paths>

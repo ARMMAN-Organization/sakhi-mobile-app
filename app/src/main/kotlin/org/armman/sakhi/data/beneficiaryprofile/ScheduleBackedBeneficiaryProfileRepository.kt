@@ -112,6 +112,7 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
     // empty list here — matching every other MOTHER_REGISTRATION-only field above. Computed by the
     // suspend caller (getBeneficiary) and passed straight through — see the call site's comment.
     diagnoses = diagnoses,
+    registrationDate = registrationDate,
   )
 
   private val Beneficiary.dobQuestionCode: String

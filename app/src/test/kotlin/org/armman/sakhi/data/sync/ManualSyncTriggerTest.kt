@@ -1,5 +1,6 @@
 package org.armman.sakhi.data.sync
 
+import org.armman.sakhi.data.adhocform.FakeAdHocFormSyncScheduler
 import org.armman.sakhi.data.childregistration.FakeChildFormSyncScheduler
 import org.armman.sakhi.data.enrollment.FakeEnrollmentSyncScheduler
 import org.armman.sakhi.data.forms.FakeDynamicFormSyncScheduler
@@ -20,7 +21,9 @@ class ManualSyncTriggerTest {
   private val enrollment = FakeEnrollmentSyncScheduler()
   private val visitSchedules = FakeVisitScheduleSyncScheduler()
   private val visitFormDrafts = FakeVisitFormSyncScheduler()
-  private val trigger = ManualSyncTrigger(dynamic, child, enrollment, visitSchedules, visitFormDrafts)
+  private val adHocFormDrafts = FakeAdHocFormSyncScheduler()
+  private val trigger =
+    ManualSyncTrigger(dynamic, child, enrollment, visitSchedules, visitFormDrafts, adHocFormDrafts)
 
   @Test
   fun `syncAllQueues nudges every offline queue exactly once`() {
@@ -31,6 +34,7 @@ class ManualSyncTriggerTest {
     assertEquals(1, enrollment.syncNowCallCount)
     assertEquals(1, visitSchedules.syncNowCallCount)
     assertEquals(1, visitFormDrafts.syncNowCallCount)
+    assertEquals(1, adHocFormDrafts.syncNowCallCount)
   }
 
   /**
@@ -68,5 +72,6 @@ class ManualSyncTriggerTest {
     assertEquals(3, enrollment.syncNowCallCount)
     assertEquals(3, visitSchedules.syncNowCallCount)
     assertEquals(3, visitFormDrafts.syncNowCallCount)
+    assertEquals(3, adHocFormDrafts.syncNowCallCount)
   }
 }

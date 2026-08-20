@@ -20,6 +20,22 @@ object VisitFormQuestionCodes {
    * in dd-mm-yyyy, not the app's usual "dd MMM yyyy" (bharath, 2026-08-07: this field only). */
   const val DATE_OF_VISIT = "date_of_visit"
 
+  /** Q "Actual visit date" — the spec's own field name for the same "auto-select today's date,
+   * mandatory" requirement on POSTPARTUM_VISIT (PP I-IV) and NEONATAL_VISIT (NN1/NN2), which this
+   * codebase has not yet captured a live schema for (unlike [DATE_OF_VISIT]'s confirmed
+   * ANC_VISIT/INFANT_VISIT payload). Kept as a distinct constant rather than assumed identical to
+   * [DATE_OF_VISIT], since the two visit-form families were built independently and a schema diff
+   * (like `registrtion_date` vs `registration_date` elsewhere in this codebase) is the more likely
+   * failure mode than the prefill logic itself being wrong. */
+  const val ACTUAL_VISIT_DATE = "actual_visit_date"
+
+  /** Every question_code today's-date auto-fill should try, across every visit-form family. Mirrors
+   * [org.armman.sakhi.data.forms.REGISTRATION_DATE_QUESTION_CODES]'s defensive multi-spelling
+   * pattern: [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel.prefillDefaultVisitDate] only
+   * ever writes codes the ACTIVE schema actually declares, so listing both spellings here is safe
+   * for every form type regardless of which one it turns out to use. */
+  val VISIT_DATE_QUESTION_CODES: Set<String> = setOf(DATE_OF_VISIT, ACTUAL_VISIT_DATE)
+
   const val BLOOD_PRESSURE_SYSTOLIC = "blood_pressure_bp_systolic"
   const val BLOOD_PRESSURE_DIASTOLIC = "blood_pressure_bp_diastolic"
   const val HAEMOGLOBIN = "haemoglobin_hb_g_dl"

@@ -103,6 +103,54 @@ class HomeViewModel @Inject constructor(
       .map { records -> records.count { it.syncStatus != EnrollmentSyncStatus.SYNCED } }
       .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS), 0)
 
+  /**
+   * Watches [pendingUploadCount] for a sync finishing (count drops back to zero after being above
+   * zero) and re-fetches the dashboard summary when it does.
+   *
+   * [DashboardSummary.lastSyncedAt] -- the "Updated <date>"/"Not yet synced" caption under the Data
+   * Upload pill (see [org.armman.sakhi.ui.home.HomeContent]'s `SakhiRow`) -- only ever comes from
+   * [dashboardRepository], which this ViewModel otherwise calls just once, in [init]. Starting a
+   * sync via [ManualSyncTrigger.syncAllQueues] is deliberately fire-and-forget WorkManager
+   * scheduling (see that function's doc) -- nothing about it tells this ViewModel when the upload
+   * actually finishes -- so without this, a real successful upload left the caption showing its
+   * stale value (or "Not yet synced") for the rest of the session, only catching up the next time
+   * the Sakhi left and re-entered Home.
+   *
+   * The very first emission is recorded as the starting point rather than treated as a completion --
+   * otherwise an account with nothing ever queued (count starts and stays at zero) would trigger a
+   * spurious reload on launch.
+   */
+  private fun observeSyncCompletion() {
+    viewModelScope.launch {
+      var previousPendingCount: Int? = null
+      pendingUploadCount.collect { count ->
+        val previous = previousPendingCount
+        previousPendingCount = count
+        if (previous != null && previous > 0 && count == 0) {
+          refreshSummaryQuietly()
+        }
+      }
+    }
+  }
+
+  /**
+   * Re-fetches the dashboard summary after a sync completes, without going through [loadSummary]'s
+   * [HomeUiState.Loading] step -- that would blank the whole dashboard behind [HomeScreen]'s
+   * full-screen spinner for what should be an invisible background refresh. A failure here is
+   * swallowed rather than surfaced: the Sakhi already has a working summary on screen, so there is
+   * nothing wrong worth showing her over a background refresh that didn't happen to land.
+   */
+  private suspend fun refreshSummaryQuietly() {
+    val refreshed = try {
+      dashboardRepository.getSummary()
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      return
+    }
+    _uiState.value = HomeUiState.Success(refreshed)
+  }
+
   private val _modalVisible = MutableStateFlow(false)
 
   /**
@@ -137,6 +185,7 @@ class HomeViewModel @Inject constructor(
 
   init {
     loadSummary()
+    observeSyncCompletion()
   }
 
   /** Loads (or reloads after an error) the dashboard summary. */

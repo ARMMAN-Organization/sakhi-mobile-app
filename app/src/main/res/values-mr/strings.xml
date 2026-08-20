@@ -10,6 +10,11 @@
   <string name="home_open">खुल्या</string>
   <string name="home_ending">(संपत आहेत)</string>
   <string name="home_pending_referral">प्रलंबित रेफरल फॉलो-अप</string>
+  <string name="home_due_visits">देय</string>
+  <string name="home_overdue_visits">मुदत उलटलेल्या</string>
+  <string name="home_accompanied_referrals">सोबत केलेले रेफरल</string>
+  <string name="home_never_synced">अद्याप सिंक झाले नाही</string>
+  <string name="home_active_beneficiaries_total">%1$d सक्रिय</string>
   <string name="home_see_visit_tracker">भेट ट्रॅकर पहा</string>
   <string name="home_active_beneficiaries">सक्रिय लाभार्थी</string>
   <string name="home_mothers">माता</string>
@@ -77,6 +82,7 @@
   <string name="beneficiaries_subtab_open">खुल्या</string>
   <string name="beneficiaries_subtab_pending_referral">प्रलंबित रेफरल</string>
   <string name="beneficiaries_subtab_missed">चुकलेल्या</string>
+  <string name="beneficiaries_not_yet_assessed">अद्याप मूल्यांकन झाले नाही</string>
   <string name="beneficiaries_date_label">तारीख</string>
   <string name="beneficiaries_month_all">सर्व महिने</string>
   <string name="beneficiaries_days_remaining">%1$d दिवस शिल्लक</string>
@@ -165,6 +171,11 @@
   <string name="beneficiary_profile_see_data">डेटा पहा</string>
   <string name="beneficiary_profile_referral">संदर्भ</string>
   <string name="beneficiary_profile_delivery_form">प्रसूती फॉर्म</string>
+  <string name="beneficiary_profile_delivery_recorded">प्रसूती नोंदवली</string>
+  <string name="beneficiary_profile_delivery_continue_child_registration">बाल नोंदणी पूर्ण करा</string>
+  <string name="beneficiary_profile_delivery_continue_pp1">PP1 कडे सुरू ठेवा</string>
+  <string name="beneficiary_profile_delivery_continue_nn">NN भेटीकडे सुरू ठेवा</string>
+  <string name="beneficiary_profile_delivery_child_registration_unavailable">प्रसूती नोंदवली. या प्रसूतीसाठी बाल नोंदणी अद्याप अॅपमध्ये उपलब्ध नाही — पुढील अद्यतनानंतर पुन्हा तपासा.</string>
   <string name="beneficiary_profile_closure_form">समाप्ती फॉर्म</string>
 
   <!-- Enrollment form (CR-015) -->
@@ -369,6 +380,7 @@
   <string name="visit_form_subtab_symptoms">लक्षणे</string>
   <string name="visit_form_subtab_history">इतिहास</string>
   <string name="visit_form_step_pending">हा विभाग लवकरच येत आहे</string>
+  <string name="visit_form_summary_media_completed">मीडिया पूर्ण झाले</string>
   <string name="visit_form_back">मागे</string>
   <string name="visit_form_next_summary">सारांश</string>
   <string name="visit_form_next_health_info">आरोग्य माहिती</string>

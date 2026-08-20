@@ -222,4 +222,108 @@ class FormCrossFieldValidatorTest {
   fun `supplemental rule stays inert for a form that has neither question code`() {
     assertTrue(FormCrossFieldValidator.violatedRules(listOf(lteRule), FormAnswers()).isEmpty())
   }
+
+  // --- REQUIRED_IF_SELECTED (ANC_CLOSURE_VISIT / CHILD_CLOSURE_VISIT "other, please specify") --
+  //
+  // Backend's literal seed shape: `field` names the trigger multiselect question, `optionFieldMap`
+  // maps a selected option code to the question_code that becomes required when that option is
+  // selected. Trigger answers live in FormAnswers.multiValues (multiselect); a non-array/absent
+  // answer means the rule doesn't apply at all — see FormCrossFieldValidator's own doc.
+
+  private val requiredIfSelectedRule = FormCrossFieldRule(
+    rule = "REQUIRED_IF_SELECTED",
+    fields = emptyList(),
+    field = "maternal_death_cause",
+    optionFieldMap = mapOf("other" to "maternal_death_cause_other_specify"),
+  )
+
+  @Test
+  fun `REQUIRED_IF_SELECTED fails when the trigger option is selected and the target field is blank`() {
+    val answers = FormAnswers(multiValues = mapOf("maternal_death_cause" to listOf("other")))
+    assertEquals(
+      listOf(requiredIfSelectedRule),
+      FormCrossFieldValidator.violatedRules(listOf(requiredIfSelectedRule), answers),
+    )
+  }
+
+  @Test
+  fun `REQUIRED_IF_SELECTED passes when the trigger option is selected and the target field is answered`() {
+    val answers = FormAnswers(
+      multiValues = mapOf("maternal_death_cause" to listOf("other")),
+      singleValues = mapOf("maternal_death_cause_other_specify" to "Sepsis"),
+    )
+    assertTrue(FormCrossFieldValidator.violatedRules(listOf(requiredIfSelectedRule), answers).isEmpty())
+  }
+
+  @Test
+  fun `REQUIRED_IF_SELECTED passes when the trigger option is NOT selected, regardless of the target field`() {
+    val answers = FormAnswers(multiValues = mapOf("maternal_death_cause" to listOf("hemorrhage")))
+    assertTrue(FormCrossFieldValidator.violatedRules(listOf(requiredIfSelectedRule), answers).isEmpty())
+  }
+
+  @Test
+  fun `REQUIRED_IF_SELECTED does not apply when the trigger field's answer is not an array`() {
+    val answers = FormAnswers(singleValues = mapOf("maternal_death_cause" to "other"))
+    assertTrue(FormCrossFieldValidator.violatedRules(listOf(requiredIfSelectedRule), answers).isEmpty())
+  }
+
+  @Test
+  fun `REQUIRED_IF_SELECTED is exact string membership - a similar but different option code does not trigger it`() {
+    val answers = FormAnswers(multiValues = mapOf("maternal_death_cause" to listOf("other_reason")))
+    assertTrue(FormCrossFieldValidator.violatedRules(listOf(requiredIfSelectedRule), answers).isEmpty())
+  }
+
+  // --- EXCLUSIVE_OPTION (DELIVERY_VISIT's did_mother_experience_complications, CHILD_REGISTRATION's
+  // vaccination_taken_at_birth) — confirmed 2026-08-19 against both live schemas' validationJson.
+  // `field` names the trigger multiselect; `exclusiveValues` are option codes that must not be
+  // selected alongside any other option in that same field.
+
+  private val exclusiveOptionRule = FormCrossFieldRule(
+    rule = "EXCLUSIVE_OPTION",
+    fields = emptyList(),
+    field = "did_mother_experience_complications",
+    exclusiveValues = listOf("none"),
+  )
+
+  @Test
+  fun `EXCLUSIVE_OPTION fails when the exclusive value is selected alongside another option`() {
+    val answers = FormAnswers(
+      multiValues = mapOf("did_mother_experience_complications" to listOf("none", "eclampsia")),
+    )
+    assertEquals(
+      listOf(exclusiveOptionRule),
+      FormCrossFieldValidator.violatedRules(listOf(exclusiveOptionRule), answers),
+    )
+  }
+
+  @Test
+  fun `EXCLUSIVE_OPTION passes when only the exclusive value is selected`() {
+    val answers = FormAnswers(multiValues = mapOf("did_mother_experience_complications" to listOf("none")))
+    assertTrue(FormCrossFieldValidator.violatedRules(listOf(exclusiveOptionRule), answers).isEmpty())
+  }
+
+  @Test
+  fun `EXCLUSIVE_OPTION passes when only non-exclusive values are selected`() {
+    val answers = FormAnswers(
+      multiValues = mapOf("did_mother_experience_complications" to listOf("eclampsia", "abruption")),
+    )
+    assertTrue(FormCrossFieldValidator.violatedRules(listOf(exclusiveOptionRule), answers).isEmpty())
+  }
+
+  @Test
+  fun `EXCLUSIVE_OPTION passes when the field is unanswered`() {
+    assertTrue(FormCrossFieldValidator.violatedRules(listOf(exclusiveOptionRule), FormAnswers()).isEmpty())
+  }
+
+  @Test
+  fun `EXCLUSIVE_OPTION with more than one exclusive value still fails on any mix with a non-exclusive one`() {
+    val twoExclusiveValuesRule = exclusiveOptionRule.copy(exclusiveValues = listOf("none", "dont_know"))
+    val answers = FormAnswers(
+      multiValues = mapOf("did_mother_experience_complications" to listOf("dont_know", "eclampsia")),
+    )
+    assertEquals(
+      listOf(twoExclusiveValuesRule),
+      FormCrossFieldValidator.violatedRules(listOf(twoExclusiveValuesRule), answers),
+    )
+  }
 }

@@ -43,6 +43,12 @@ object RuleSetIds {
   const val DELIVERY = "33333333-3333-4333-8333-333333333391"
 
   /**
+   * Escalation policy pack (CR-032). Confirmed by the backend team 2026-08-13 to live at its
+   * own id, NOT in the 33333333-... schedule-pack family. Nothing in this app calls it yet.
+   */
+  const val ESCALATION = "44444444-4444-4444-8444-444444444441"
+
+  /**
    * Maps a [VisitCodeType] family to the rule set that schedules it. HR variants
    * ([VisitCodeType.ANC_HR], [VisitCodeType.INC_HR], [VisitCodeType.CCV_HR]) all resolve to [HR] —
    * per this object's doc, HR is evaluated as its own rule regardless of which family triggered it.

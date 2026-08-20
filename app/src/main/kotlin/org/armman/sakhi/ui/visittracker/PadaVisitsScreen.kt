@@ -31,6 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.armman.sakhi.R
 import org.armman.sakhi.data.beneficiary.Beneficiary
 import org.armman.sakhi.data.beneficiary.BeneficiaryStatus
+import org.armman.sakhi.data.beneficiary.RiskLevel
 import org.armman.sakhi.data.beneficiary.VisitState
 import org.armman.sakhi.data.visit.Visit
 import org.armman.sakhi.data.visit.VisitType
@@ -152,7 +153,9 @@ private fun VisitList(
         }
       }
     }
-    items(visits, key = { it.id }) { visit ->
+    // Referral-follow-up rows have no visitId (always null), so the key falls back to
+    // beneficiaryId + tab, which is unique within a single status bucket.
+    items(visits, key = { "${it.visitType}-${it.beneficiaryId}-${it.id ?: ""}" }) { visit ->
       BeneficiaryCard(
         beneficiary = visit.toCardModel(),
         onCall = { onCall(visit) },
@@ -162,12 +165,19 @@ private fun VisitList(
   }
 }
 
-/** Maps a visit to the card's display model (the card shows the same fields). */
+/**
+ * Maps a visit to the card's display model. A null [Visit.riskLevel]/[Visit.beneficiaryName]/
+ * [Visit.phoneNumber] (lookup failure, or an unassessed `none` grade — see [Visit.riskLevel])
+ * degrades to [Beneficiary.isAssessed] = false / a placeholder name / a blank phone number, the
+ * same neutral states [BeneficiaryCard] already renders for a beneficiary with no on-device
+ * assessment. [BeneficiaryCard] hides/disables the Call action when [Beneficiary.phoneNumber] is
+ * blank.
+ */
 private fun Visit.toCardModel() = Beneficiary(
   id = beneficiaryId,
-  name = beneficiaryName,
+  name = beneficiaryName ?: "—",
   type = beneficiaryType,
-  riskLevel = riskLevel,
+  riskLevel = riskLevel ?: RiskLevel.LOW,
   status = BeneficiaryStatus.ACTIVE,
   visitState = when (visitType) {
     VisitType.OPEN -> VisitState.OPEN
@@ -177,6 +187,7 @@ private fun Visit.toCardModel() = Beneficiary(
   scheduleDate = scheduleDate,
   visitLabel = visitLabel,
   daysRemaining = daysRemaining,
-  phoneNumber = phoneNumber,
+  phoneNumber = phoneNumber.orEmpty(),
   journeyCompletedIn = null,
+  isAssessed = riskLevel != null,
 )

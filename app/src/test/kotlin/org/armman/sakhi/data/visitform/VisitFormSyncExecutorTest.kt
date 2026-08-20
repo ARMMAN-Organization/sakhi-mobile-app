@@ -3,12 +3,15 @@ package org.armman.sakhi.data.visitform
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
+import org.armman.sakhi.data.audit.FakeFormAuditRepository
 import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.enrollment.EnrollmentSyncOutcome
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.FakeFormSubmissionApi
+import org.armman.sakhi.data.forms.FakeFormsApi
+import org.armman.sakhi.data.forms.VisitCodeFormResolver
 import org.armman.sakhi.data.forms.CreateSubmissionResponseDto
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.SubmissionResponseData
@@ -94,6 +97,11 @@ class VisitFormSyncExecutorTest {
       visitScheduleRepository = scheduleRepository,
       lookupRepository = lookupRepository,
       sessionStore = sessionStore,
+      // CR-033/CR-034: defaults to a 404 map response, so the resolver falls back to its own
+      // hardcoded map — VisitCodeType.ANC still resolves to "ANC_VISIT", matching this test's
+      // pre-CR-033 behaviour exactly.
+      visitCodeFormResolver = VisitCodeFormResolver(FakeFormsApi(), FakeSecureKeyValueStore()),
+      formAuditRepository = FakeFormAuditRepository(),
     )
     executor = VisitFormSyncExecutor(dao, secureStore, coordinator)
   }
@@ -116,6 +124,7 @@ class VisitFormSyncExecutorTest {
     localScheduleUuid: String = "schedule-1",
     serverVisitId: String? = null,
     syncStatus: EnrollmentSyncStatus = EnrollmentSyncStatus.PENDING,
+    localSubmissionUuid: String = "submission-uuid-1",
   ) {
     secureStore.putString(
       visitFormDraftPayloadKey(localScheduleUuid),
@@ -126,6 +135,7 @@ class VisitFormSyncExecutorTest {
         localScheduleUuid = localScheduleUuid,
         formCode = "ANC_VISIT",
         formVersionId = "version-1",
+        localSubmissionUuid = localSubmissionUuid,
         visitDateIso = "2026-08-07",
         syncStatus = syncStatus,
         createdAtEpochMillis = Instant.now().toEpochMilli(),
@@ -210,6 +220,25 @@ class VisitFormSyncExecutorTest {
     val entity = requireNotNull(dao.getByLocalScheduleUuid("schedule-1"))
     assertEquals(EnrollmentSyncStatus.SYNCED, entity.syncStatus)
     assertEquals("server-visit-1", entity.serverVisitId)
+  }
+
+  @Test
+  fun `a resumed submission replays the draft's persisted localSubmissionUuid, not a fresh one`() = runTest {
+    // Simulates the same partial-success state as the test above, but this one is about the
+    // *other* half of CR-026b's resume contract: the retried POST /forms/.../submissions call
+    // must carry the exact same localSubmissionUuid the first (failed) attempt used, or the
+    // server sees it as a brand-new submission rather than a retry of the same one.
+    seedSyncedSchedule()
+    seedPendingDraft(
+      serverVisitId = "server-visit-1",
+      syncStatus = EnrollmentSyncStatus.FAILED,
+      localSubmissionUuid = "submission-uuid-retry-1",
+    )
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    executor.run()
+
+    assertEquals("submission-uuid-retry-1", formSubmissionApi.lastRequest?.localSubmissionUuid)
   }
 
   @Test
@@ -319,6 +348,7 @@ class VisitFormSyncExecutorTest {
         localScheduleUuid = "schedule-1",
         formCode = "ANC_VISIT",
         formVersionId = "version-1",
+        localSubmissionUuid = "submission-uuid-1",
         visitDateIso = "2026-08-07",
         syncStatus = EnrollmentSyncStatus.PENDING,
         createdAtEpochMillis = Instant.now().toEpochMilli(),

@@ -24,6 +24,18 @@ data class VisitFormDraftEntity(
   /** The form version the Sakhi actually answered against — sent as-is on sync, not re-resolved
    * against whatever's active by the time the sync runs. Same rationale as the other queues. */
   val formVersionId: String,
+  /**
+   * Minted once — the moment this draft is first saved (see [RoomVisitFormDraftRepository]'s
+   * `saveLocally`) — and held for the draft's lifetime, same once-per-draft/stable-across-retries
+   * contract as [org.armman.sakhi.data.forms.DynamicFormDraftEntity.localSubmissionUuid]. Sent
+   * as-is to `POST /forms/:formCode/submissions` on every attempt, including retries, via
+   * [VisitFormSubmissionCoordinator.submit]'s `localSubmissionUuid` param — so a resumed sync
+   * after a step-2-only failure replays the *same* idempotency key instead of minting a fresh
+   * one. Before this field existed, the coordinator generated a new uuid on every call, so a
+   * retry after an ambiguous network failure (the request may have already reached the server)
+   * risked creating a duplicate `form_submissions` row server-side.
+   */
+  val localSubmissionUuid: String,
   val visitDateIso: String,
   val syncStatus: EnrollmentSyncStatus,
   val createdAtEpochMillis: Long,

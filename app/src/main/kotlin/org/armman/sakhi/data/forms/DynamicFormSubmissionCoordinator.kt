@@ -1,5 +1,7 @@
 package org.armman.sakhi.data.forms
 
+import org.armman.sakhi.data.audit.FormAuditRepository
+import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.enrollment.ApiErrorParser
 import org.armman.sakhi.data.enrollment.DuplicateAcknowledgement
 import org.armman.sakhi.data.enrollment.DuplicateOutcome
@@ -100,6 +102,8 @@ class DynamicFormSubmissionCoordinator @Inject constructor(
   private val enrollmentApi: EnrollmentApi,
   private val formSubmissionApi: FormSubmissionApi,
   private val mapper: DynamicFormSubmissionMapper,
+  private val sessionStore: SessionStore,
+  private val formAuditRepository: FormAuditRepository,
 ) {
 
   /**
@@ -172,6 +176,9 @@ class DynamicFormSubmissionCoordinator @Inject constructor(
         violations = apiError.violations,
       )
     }
+
+    // CR-035: logged only on success, immediately after the submission call succeeds.
+    formAuditRepository.recordSubmitted(localCaseUuid, FORM_CODE)
     serverBeneficiaryId
   }
 }

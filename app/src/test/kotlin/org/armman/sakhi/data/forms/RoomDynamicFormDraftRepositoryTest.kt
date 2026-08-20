@@ -4,6 +4,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
+import org.armman.sakhi.data.audit.FakeFormAuditRepository
+import org.armman.sakhi.data.audit.FormAuditEventType
 import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
@@ -51,6 +53,7 @@ class RoomDynamicFormDraftRepositoryTest {
   private lateinit var visitScheduleApi: FakeVisitScheduleApi
   private lateinit var repository: RoomDynamicFormDraftRepository
   private lateinit var lookupRepository: FakeLookupRepository
+  private lateinit var formAuditRepository: FakeFormAuditRepository
 
   private val session = UserSession(
     username = "test.sakhi",
@@ -75,7 +78,14 @@ class RoomDynamicFormDraftRepositoryTest {
     sessionStore.saveSession(session)
     lookupRepository = FakeLookupRepository()
     val mapper = DynamicFormSubmissionMapper(sessionStore, lookupRepository)
-    val coordinator = DynamicFormSubmissionCoordinator(enrollmentApi, formSubmissionApi, mapper)
+    formAuditRepository = FakeFormAuditRepository()
+    val coordinator = DynamicFormSubmissionCoordinator(
+      enrollmentApi,
+      formSubmissionApi,
+      mapper,
+      sessionStore,
+      formAuditRepository,
+    )
     // Reuses the same dao/secureStore as the repository so runOne() sees the row submitDraft just
     // wrote — matching how the real Hilt graph wires a single instance of each.
     // CR-022: submitDraft also generates the ANC schedule, and a successful sync links it to the
@@ -106,6 +116,7 @@ class RoomDynamicFormDraftRepositoryTest {
       syncExecutor,
       scheduleTrigger,
       visitScheduleSyncExecutor,
+      formAuditRepository,
     )
   }
 
@@ -156,6 +167,25 @@ class RoomDynamicFormDraftRepositoryTest {
     assertEquals("version-1", entity?.formVersionId)
     assertEquals("submission-uuid-1", entity?.localSubmissionUuid)
     assertEquals(0, entity?.retryCount)
+  }
+
+  @Test
+  fun `saveDraft records a SAVED audit event`() = runTest {
+    repository.saveDraft(
+      localBeneficiaryId = "local-1",
+      formCode = "MOTHER_REGISTRATION",
+      formVersionId = "version-1",
+      localSubmissionUuid = "submission-uuid-1",
+      answers = answers,
+      registrationDate = LocalDate.of(2026, 7, 20),
+    )
+
+    assertEquals(
+      listOf(FormAuditEventType.SAVED),
+      formAuditRepository.recordedEvents.map { it.eventType },
+    )
+    assertEquals("local-1", formAuditRepository.recordedEvents.single().subjectId)
+    assertEquals("MOTHER_REGISTRATION", formAuditRepository.recordedEvents.single().formCode)
   }
 
   @Test
@@ -213,6 +243,20 @@ class RoomDynamicFormDraftRepositoryTest {
   private suspend fun submit() = repository.submitDraft(
     "local-1", "MOTHER_REGISTRATION", "version-1", "submission-uuid-1", answers, LocalDate.of(2026, 7, 20),
   )
+
+  @Test
+  fun `submitDraft() writes a SAVED audit event via its shared saveLocally() call`() = runTest {
+    connectivityChecker.online = false
+
+    submit()
+
+    assertEquals(
+      listOf(FormAuditEventType.SAVED),
+      formAuditRepository.recordedEvents.map { it.eventType },
+    )
+    assertEquals("local-1", formAuditRepository.recordedEvents.single().subjectId)
+    assertEquals("MOTHER_REGISTRATION", formAuditRepository.recordedEvents.single().formCode)
+  }
 
   @Test
   fun `submitDraft online success returns Synced and marks the draft SYNCED`() = runTest {

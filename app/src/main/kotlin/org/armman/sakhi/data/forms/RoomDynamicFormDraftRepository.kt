@@ -3,6 +3,7 @@ package org.armman.sakhi.data.forms
 import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import org.armman.sakhi.data.audit.FormAuditRepository
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import org.armman.sakhi.data.enrollment.DuplicateAcknowledgement
@@ -45,6 +46,7 @@ class RoomDynamicFormDraftRepository @Inject constructor(
   private val syncExecutor: DynamicFormSyncExecutor,
   private val scheduleTrigger: MotherEnrolmentScheduleTrigger,
   private val visitScheduleSyncExecutor: VisitScheduleSyncExecutor,
+  private val formAuditRepository: FormAuditRepository,
 ) : DynamicFormDraftRepository {
 
   override suspend fun saveDraft(
@@ -207,6 +209,9 @@ class RoomDynamicFormDraftRepository @Inject constructor(
     answers: FormAnswers,
     registrationDate: LocalDate,
   ) {
+    // CR-035: unconditional — shared by saveDraft() and submitDraft(), both of which must record a
+    // SAVED event.
+    formAuditRepository.recordSaved(localBeneficiaryId, formCode)
     val payload = DynamicFormDraftPayload(answers = answers, registrationDateIso = registrationDate.toString())
     secureStore.putString(dynamicFormDraftPayloadKey(localBeneficiaryId), dynamicFormDraftGson.toJson(payload))
 

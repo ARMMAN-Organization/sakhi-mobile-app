@@ -79,4 +79,7 @@ data class BeneficiaryProfile(
   val lastVisitStats: List<VitalStat> = emptyList(),
   /** Visit history shown under "See Visits" (newest first). */
   val visits: List<ProfileVisit> = emptyList(),
+  /** The beneficiary's original enrollment date, or null when unavailable (see
+   * [org.armman.sakhi.data.beneficiary.Beneficiary.registrationDate]). */
+  val registrationDate: java.time.LocalDate? = null,
 )

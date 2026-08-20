@@ -97,6 +97,7 @@ class RemoteBeneficiaryRepository @Inject constructor(
   private fun BeneficiaryListItemDto.toRemoteBeneficiary(today: LocalDate): Beneficiary? {
     val remoteId = id?.takeIf { it.isNotBlank() } ?: return null
     val status = currentStatus.toBeneficiaryStatus()
+    val parsedRegistrationDate = registrationDate.toLocalDateOrNull()
 
     return Beneficiary(
       id = remoteId,
@@ -119,7 +120,7 @@ class RemoteBeneficiaryRepository @Inject constructor(
       // since the backend enrichment itself degrades a stale/deleted villageId to null rather than
       // failing the whole row.
       pada = villageName?.trim()?.takeIf { it.isNotBlank() } ?: PADA_UNRESOLVED,
-      scheduleDate = registrationDate.toLocalDateOrNull() ?: today,
+      scheduleDate = parsedRegistrationDate ?: today,
       // Visit schedules are generated entirely on-device (SRS FR-S-2.2) and never uploaded — a
       // remote-only row (no local draft on this device) has no schedule to show at all.
       visitLabel = VISIT_UNAVAILABLE,
@@ -130,6 +131,7 @@ class RemoteBeneficiaryRepository @Inject constructor(
       journeyCompletedIn = null,
       isAssessed = false,
       remoteBeneficiaryId = remoteId,
+      registrationDate = parsedRegistrationDate,
     )
   }
 

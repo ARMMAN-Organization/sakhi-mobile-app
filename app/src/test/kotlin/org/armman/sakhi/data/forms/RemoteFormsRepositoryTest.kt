@@ -23,6 +23,11 @@ class RemoteFormsRepositoryTest {
       exceptionToThrow?.let { throw it }
       return response!!
     }
+
+    // Not exercised by this test class (it only covers getActiveVersion) — added purely so this
+    // fake still satisfies the FormsApi interface after CR-033/CR-034 added getVisitCodeFormMap.
+    override suspend fun getVisitCodeFormMap(): Response<VisitCodeFormMapResponseDto> =
+      error("FakeFormsApi.getVisitCodeFormMap() not stubbed — not used by RemoteFormsRepositoryTest")
   }
 
   private fun version(

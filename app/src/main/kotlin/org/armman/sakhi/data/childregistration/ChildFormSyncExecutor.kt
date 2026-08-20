@@ -1,9 +1,11 @@
 package org.armman.sakhi.data.childregistration
 
+import android.util.Log
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.enrollment.EnrollmentSyncOutcome
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.SubmitErrorCopy
+import org.armman.sakhi.data.schedule.VisitScheduleRepository
 import retrofit2.HttpException
 import java.io.IOException
 import java.time.Instant
@@ -12,6 +14,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val HTTP_CONFLICT = 409
+private const val TAG = "ChildFormSyncExecutor"
 
 /**
  * Per-draft outcome of an IMMEDIATE, single-item sync attempt via [ChildFormSyncExecutor.runOne] —
@@ -39,6 +42,7 @@ class ChildFormSyncExecutor @Inject constructor(
   private val dao: ChildFormDraftDao,
   private val secureStore: SecureKeyValueStore,
   private val coordinator: ChildRegistrationSubmissionCoordinator,
+  private val visitScheduleRepository: VisitScheduleRepository,
 ) {
 
   /** Processes every PENDING draft — used by the background [ChildFormSyncWorker]. Sole source of
@@ -81,6 +85,7 @@ class ChildFormSyncExecutor @Inject constructor(
                 remoteBeneficiaryId = serverBeneficiaryId,
               ),
             )
+            linkScheduleToServerBeneficiary(draft.localBeneficiaryId, serverBeneficiaryId)
           },
           onFailure = { error ->
             when {
@@ -164,6 +169,7 @@ class ChildFormSyncExecutor @Inject constructor(
               remoteBeneficiaryId = serverBeneficiaryId,
             ),
           )
+          linkScheduleToServerBeneficiary(draft.localBeneficiaryId, serverBeneficiaryId)
           ChildFormSyncItemResult.Synced
         },
         onFailure = { error ->
@@ -242,5 +248,34 @@ class ChildFormSyncExecutor @Inject constructor(
     is ChildRegistrationSubmissionException.BeneficiaryCreationFailed -> httpCode
     is ChildRegistrationSubmissionException.FormSubmissionFailed -> httpCode
     else -> null
+  }
+
+  /**
+   * Makes this child's locally generated visit schedules eligible for upload, AND — just as
+   * importantly — gives every ad-hoc form (Referral/Closure/Reopen) a server beneficiary id to
+   * submit against. Mirrors [org.armman.sakhi.data.forms.DynamicFormSyncExecutor
+   * .linkScheduleToServerBeneficiary] exactly; this file never called it at all until this fix
+   * (reported bug, 2026-08-18: EVERY ad-hoc form submission for a child beneficiary failed with
+   * "This beneficiary's data hasn't finished syncing yet," even right after a successful ONLINE
+   * sync — [AdHocFormSubmissionCoordinator] resolves its server beneficiary id from
+   * [VisitScheduleRepository] rows, and this file was upserting [remoteBeneficiaryId] onto the
+   * draft itself but never onto the schedule rows [AdHocFormSubmissionCoordinator] actually reads
+   * — so the id was permanently missing from the one place that mattered, for every child, no
+   * matter how long she waited or how many times she synced).
+   *
+   * Failure here must not fail the enrolment sync: the registration itself has already succeeded
+   * on the server, and the link can be re-established on a later pass.
+   */
+  private suspend fun linkScheduleToServerBeneficiary(
+    localBeneficiaryId: String,
+    serverBeneficiaryId: String,
+  ) {
+    runCatching {
+      visitScheduleRepository.attachServerBeneficiaryId(localBeneficiaryId, serverBeneficiaryId)
+    }.onFailure { error ->
+      Log.e(TAG, "linkScheduleToServerBeneficiary($localBeneficiaryId -> $serverBeneficiaryId) failed", error)
+    }.onSuccess {
+      Log.d(TAG, "linkScheduleToServerBeneficiary($localBeneficiaryId -> $serverBeneficiaryId) OK")
+    }
   }
 }

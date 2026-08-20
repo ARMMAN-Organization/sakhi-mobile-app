@@ -12,6 +12,18 @@ import org.armman.sakhi.data.beneficiary.BeneficiaryType
 import org.armman.sakhi.data.beneficiary.RiskLevel
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfile
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfileRepository
+import org.armman.sakhi.data.delivery.DeliverySessionEntity
+import org.armman.sakhi.data.delivery.DeliverySessionStep
+import org.armman.sakhi.data.delivery.FakeDeliverySessionDao
+import org.armman.sakhi.data.delivery.RoomDeliverySessionRepository
+import org.armman.sakhi.data.reopen.FakeReopenRepository
+import org.armman.sakhi.data.reopen.ReopenRequestReason
+import org.armman.sakhi.data.reopen.ReopenSubmissionException
+import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
+import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
+import org.armman.sakhi.data.schedule.VisitCodeType
+import org.armman.sakhi.data.schedule.VisitScheduleStatus
+import org.armman.sakhi.data.schedule.schedule
 import org.armman.sakhi.data.visitform.VisitContext
 import org.armman.sakhi.data.visitform.VisitFormRepository
 import org.armman.sakhi.data.beneficiaryprofile.VitalStat
@@ -58,12 +70,22 @@ class BeneficiaryProfileViewModelTest {
 
   private lateinit var repository: FakeRepository
   private lateinit var visitFormRepository: FakeVisitFormRepository
+  private lateinit var reopenRepository: FakeReopenRepository
+  private lateinit var scheduleDao: FakeVisitScheduleDao
+  private lateinit var visitScheduleRepository: RoomVisitScheduleRepository
+  private lateinit var deliverySessionDao: FakeDeliverySessionDao
+  private lateinit var deliverySessionRepository: RoomDeliverySessionRepository
 
   @Before
   fun setUp() {
     Dispatchers.setMain(dispatcher)
     repository = FakeRepository()
     visitFormRepository = FakeVisitFormRepository()
+    reopenRepository = FakeReopenRepository()
+    scheduleDao = FakeVisitScheduleDao()
+    visitScheduleRepository = RoomVisitScheduleRepository(scheduleDao)
+    deliverySessionDao = FakeDeliverySessionDao()
+    deliverySessionRepository = RoomDeliverySessionRepository(deliverySessionDao)
   }
 
   @After
@@ -74,9 +96,29 @@ class BeneficiaryProfileViewModelTest {
   private fun createViewModel(id: String?): BeneficiaryProfileViewModel {
     val args = if (id == null) emptyMap() else mapOf(BeneficiaryProfileViewModel.NAV_ARG_ID to id)
     val viewModel =
-      BeneficiaryProfileViewModel(repository, visitFormRepository, SavedStateHandle(args))
+      BeneficiaryProfileViewModel(
+        repository,
+        visitFormRepository,
+        reopenRepository,
+        visitScheduleRepository,
+        deliverySessionRepository,
+        SavedStateHandle(args),
+      )
     dispatcher.scheduler.advanceUntilIdle()
     return viewModel
+  }
+
+  private suspend fun seedServerBeneficiaryId(localBeneficiaryId: String, serverBeneficiaryId: String) {
+    visitScheduleRepository.saveGenerated(
+      listOf(
+        schedule(
+          "schedule-for-$localBeneficiaryId",
+          localBeneficiaryId = localBeneficiaryId,
+          serverScheduleId = "server-schedule-1",
+          serverBeneficiaryId = serverBeneficiaryId,
+        ),
+      ),
+    )
   }
 
   /**
@@ -102,6 +144,138 @@ class BeneficiaryProfileViewModelTest {
 
     assertTrue(viewModel.uiState.value.canStartVisit)
   }
+
+  /**
+   * CR-042 (Delivery Event Session). Backed by [org.armman.sakhi.data.schedule.VisitScheduleRepository.hasScheduleOfType]
+   * against [VisitCodeType.PP] — see [BeneficiaryProfileUiState.hasDeliveryRecorded]'s doc for why.
+   */
+  @Test
+  fun `hasDeliveryRecorded is false for a mother with no PP schedule yet`() {
+    val viewModel = createViewModel("mother")
+
+    assertFalse(viewModel.uiState.value.hasDeliveryRecorded)
+  }
+
+  @Test
+  fun `hasDeliveryRecorded is true once a PP schedule exists for the mother`() = runTest {
+    visitScheduleRepository.saveGenerated(
+      listOf(schedule("pp1-for-mother", localBeneficiaryId = "mother", visitCode = "PP1", visitType = VisitCodeType.PP)),
+    )
+
+    val viewModel = createViewModel("mother")
+
+    assertTrue(viewModel.uiState.value.hasDeliveryRecorded)
+  }
+
+  /**
+   * Delivery only applies to a mother's own journey (matches the Footer's own "only shown for
+   * MOTHER" gating) — an infant profile must never report a delivery as recorded against it, even
+   * if a PP-type row somehow existed under its id.
+   */
+  @Test
+  fun `hasDeliveryRecorded is false for an infant profile even if a PP row exists under its id`() = runTest {
+    visitScheduleRepository.saveGenerated(
+      listOf(schedule("pp1-for-child", localBeneficiaryId = "child", visitCode = "PP1", visitType = VisitCodeType.PP)),
+    )
+
+    val viewModel = createViewModel("child")
+
+    assertFalse(viewModel.uiState.value.hasDeliveryRecorded)
+  }
+
+  // --- DeliveryButtonState (CR-042 session-aware Delivery button) ---
+
+  @Test
+  fun `deliveryButtonState is NotApplicable for an infant profile`() {
+    val viewModel = createViewModel("child")
+
+    assertEquals(DeliveryButtonState.NotApplicable, viewModel.uiState.value.deliveryButtonState)
+  }
+
+  @Test
+  fun `deliveryButtonState is NotStarted for a mother with no delivery session at all`() {
+    val viewModel = createViewModel("mother")
+
+    assertEquals(DeliveryButtonState.NotStarted, viewModel.uiState.value.deliveryButtonState)
+  }
+
+  @Test
+  fun `deliveryButtonState is ChildRegistrationPending when the active session is at that step`() = runTest {
+    visitScheduleRepository.saveGenerated(
+      listOf(schedule("pp1-for-mother", localBeneficiaryId = "mother", visitCode = "PP1", visitType = VisitCodeType.PP)),
+    )
+    deliverySessionRepository.save(deliverySession("mother", DeliverySessionStep.CHILD_REGISTRATION))
+
+    val viewModel = createViewModel("mother")
+
+    assertEquals(
+      DeliveryButtonState.ChildRegistrationPending("session-for-mother"),
+      viewModel.uiState.value.deliveryButtonState,
+    )
+  }
+
+  @Test
+  fun `deliveryButtonState resolves to ResumeVisit PP1 when the active session is at that step`() = runTest {
+    visitScheduleRepository.saveGenerated(
+      listOf(schedule("pp1-schedule", localBeneficiaryId = "mother", visitCode = "PP1", visitType = VisitCodeType.PP, sequenceNo = 1)),
+    )
+    deliverySessionRepository.save(deliverySession("mother", DeliverySessionStep.PP1))
+
+    val viewModel = createViewModel("mother")
+
+    val state = viewModel.uiState.value.deliveryButtonState
+    assertTrue(state is DeliveryButtonState.ResumeVisit)
+    assertEquals("pp1-schedule", (state as DeliveryButtonState.ResumeVisit).localScheduleUuid)
+    assertEquals("PP1", state.label)
+  }
+
+  /**
+   * A session parked at PP1 whose PP1 row has already been COMPLETED (e.g. the Sakhi submitted it
+   * through the visit tracker directly, bypassing this button) has nothing left to resume —
+   * [BeneficiaryProfileViewModel.resolveResumeVisit] must not offer a finished visit back.
+   */
+  @Test
+  fun `deliveryButtonState falls back to Completed when the PP1 row is already completed`() = runTest {
+    visitScheduleRepository.saveGenerated(
+      listOf(
+        schedule(
+          "pp1-schedule",
+          localBeneficiaryId = "mother",
+          visitCode = "PP1",
+          visitType = VisitCodeType.PP,
+          sequenceNo = 1,
+          status = VisitScheduleStatus.COMPLETED,
+        ),
+      ),
+    )
+    deliverySessionRepository.save(deliverySession("mother", DeliverySessionStep.PP1))
+
+    val viewModel = createViewModel("mother")
+
+    assertEquals(DeliveryButtonState.Completed, viewModel.uiState.value.deliveryButtonState)
+  }
+
+  @Test
+  fun `deliveryButtonState is Completed once delivery is recorded and no session remains active`() = runTest {
+    visitScheduleRepository.saveGenerated(
+      listOf(schedule("pp1-for-mother", localBeneficiaryId = "mother", visitCode = "PP1", visitType = VisitCodeType.PP)),
+    )
+    // No DeliverySessionEntity saved at all — mirrors a session that reached DONE (excluded by
+    // getActiveForBeneficiary) or one from before this session-aware button existed.
+
+    val viewModel = createViewModel("mother")
+
+    assertEquals(DeliveryButtonState.Completed, viewModel.uiState.value.deliveryButtonState)
+  }
+
+  private fun deliverySession(localBeneficiaryId: String, step: DeliverySessionStep) = DeliverySessionEntity(
+    localSessionUuid = "session-for-$localBeneficiaryId",
+    localBeneficiaryId = localBeneficiaryId,
+    step = step,
+    deliverySubmissionLocalUuid = "submission-1",
+    createdAtEpochMillis = 1_754_265_600_000L,
+    updatedAtEpochMillis = 1_754_265_600_000L,
+  )
 
   @Test
   fun `loads the profile for the given id`() {
@@ -170,6 +344,35 @@ class BeneficiaryProfileViewModelTest {
     val state = viewModel.uiState.value
     assertFalse(state.hasError)
     assertEquals("Aishwarya Pawar", state.profile?.name)
+  }
+
+  @Test
+  fun `submitReopenRequest calls ReopenRepository with the resolved server beneficiary id and updates state`() = runTest {
+    seedServerBeneficiaryId("mother", "server-mother-1")
+    val viewModel = createViewModel("mother")
+
+    viewModel.submitReopenRequest(ReopenRequestReason.MIGRATION_RETURNED)
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val recorded = reopenRepository.recordedRequests.single()
+    assertEquals("server-mother-1", recorded.beneficiaryId)
+    assertEquals(ReopenRequestReason.MIGRATION_RETURNED, recorded.reason)
+    val state = viewModel.uiState.value
+    assertFalse(state.isSubmittingReopen)
+    assertTrue(state.hasPendingReopenRequest)
+  }
+
+  @Test
+  fun `submitReopenRequest failure surfaces a ReopenFailed event and clears isSubmittingReopen`() = runTest {
+    seedServerBeneficiaryId("mother", "server-mother-1")
+    reopenRepository.exceptionToThrow = ReopenSubmissionException.Failed(httpCode = 500, apiMessage = "boom")
+    val viewModel = createViewModel("mother")
+
+    viewModel.submitReopenRequest(ReopenRequestReason.OTHER)
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertFalse(viewModel.uiState.value.isSubmittingReopen)
+    assertFalse(viewModel.uiState.value.hasPendingReopenRequest)
   }
 
   private companion object {

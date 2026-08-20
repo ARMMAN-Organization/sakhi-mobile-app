@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -62,6 +63,12 @@ fun BeneficiariesScreen(
   viewModel: BeneficiariesViewModel = hiltViewModel(),
 ) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
+  // Reruns on every fresh entry into composition, including a pop-back from a beneficiary's
+  // Closure form submission — so a beneficiary just moved to JOURNEY_COMPLETE/CLOSED (or any
+  // other change made downstream) shows up immediately instead of the stale snapshot this
+  // retained ViewModel loaded the first time it was created. See BeneficiariesViewModel's doc
+  // for why this isn't in its init{} instead.
+  LaunchedEffect(Unit) { viewModel.loadBeneficiaries() }
   val context = LocalContext.current
   val today = remember {
     LocalDate.now().format(DateTimeFormatter.ofPattern("EEE, d MMM", Locale.getDefault()))
