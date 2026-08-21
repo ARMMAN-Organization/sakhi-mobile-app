@@ -13,6 +13,7 @@ import org.armman.sakhi.data.beneficiary.BeneficiaryType
 import org.armman.sakhi.data.beneficiary.RiskLevel
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfile
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfileRepository
+import org.armman.sakhi.data.previsithealth.BeneficiaryNotSyncedException
 import org.armman.sakhi.data.previsithealth.PreVisitHealthHistory
 import org.armman.sakhi.data.previsithealth.PreVisitHealthHistoryRepository
 import org.armman.sakhi.data.previsithealth.RiskFactorTrend
@@ -25,7 +26,10 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * CR-016a unit tests — spec: docs/test-cases/visit-form.md (PVH-1..7).
+ * CR-016a unit tests — spec: docs/test-cases/visit-form.md (PVH-1..7). PVH-8 (not-synced skip)
+ * added alongside the real [org.armman.sakhi.data.previsithealth.RemotePreVisitHealthHistoryRepository]
+ * wiring — see [org.armman.sakhi.data.previsithealth.RemotePreVisitHealthHistoryRepositoryTest]
+ * for the mapping logic that repository owns.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class PreVisitHealthHistoryViewModelTest {
@@ -144,6 +148,18 @@ class PreVisitHealthHistoryViewModelTest {
   fun `unknown beneficiary sets error state`() = runTest {
     val state = createViewModel(beneficiaryId = "ghost").uiState.value
     assertTrue(state.hasError)
+  }
+
+  @Test
+  fun `not-synced beneficiary skips straight to visit form instead of showing an error`() = runTest {
+    historyRepository.error = BeneficiaryNotSyncedException("local-only-id")
+
+    val viewModel = createViewModel()
+    val state = viewModel.uiState.value
+
+    // No error surfaced — this is a normal offline state, not a failure.
+    assertFalse(state.hasError)
+    assertEquals(PreVisitHealthHistoryEvent.NavigateToVisitForm, viewModel.events.first())
   }
 
   private companion object {

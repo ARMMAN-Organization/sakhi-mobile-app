@@ -58,6 +58,12 @@ fun HomeScreen(
   val pendingUploadCount by viewModel.pendingUploadCount.collectAsStateWithLifecycle()
   val duplicateReview by viewModel.duplicateReview.collectAsStateWithLifecycle()
 
+  // Reruns on every fresh entry into composition, including a pop-back from "Start Visit Form"
+  // after registering a new beneficiary — so the dashboard just changed by that registration
+  // shows up immediately instead of the stale snapshot this retained ViewModel loaded the first
+  // time it was created. See HomeViewModel's doc for why this isn't in its init{} instead.
+  LaunchedEffect(Unit) { viewModel.loadSummary() }
+
   // Offline Data Upload tap (bharath, 2026-08-08) - see HomeViewModel.onDataUploadClicked's doc.
   val context = LocalContext.current
   val offlineUploadMessage = stringResource(R.string.home_data_upload_offline)

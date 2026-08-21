@@ -208,14 +208,19 @@ class HomeViewModelTest {
     status: EnrollmentSyncStatus,
     createdAtEpochMillis: Long,
     pendingNewPregnancyBeneficiaryId: String? = null,
+    formCode: String = "MOTHER_REGISTRATION",
   ) =
     FormUploadRecord(
       localBeneficiaryId = id,
-      formCode = "MOTHER_REGISTRATION",
+      formCode = formCode,
       syncStatus = status,
       createdAtEpochMillis = createdAtEpochMillis,
       pendingNewPregnancyBeneficiaryId = pendingNewPregnancyBeneficiaryId,
     )
+
+  /** Same shape as [record], for the Children Register queue (`formCode == "CHILD_REGISTRATION"`). */
+  private fun childRecord(id: String, status: EnrollmentSyncStatus, createdAtEpochMillis: Long) =
+    record(id, status, createdAtEpochMillis, formCode = "CHILD_REGISTRATION")
 
   @Test
   fun `initial state is Loading`() {
@@ -356,6 +361,87 @@ class HomeViewModelTest {
     assertTrue(state is HomeUiState.Success)
     assertEquals("Test Sakhi", (state as HomeUiState.Success).summary.sakhiName)
   }
+
+  // --- Offline pending-beneficiary-count overlay (M3) ---------------------------------------
+
+  @Test
+  fun `a pending local mother draft increments the displayed count immediately`() = runTest(dispatcher) {
+    val viewModel = viewModel()
+    observe(viewModel)
+    dispatcher.scheduler.advanceUntilIdle()
+    val before = viewModel.uiState.value as HomeUiState.Success
+
+    // A registration saved offline — no sync attempted yet, so the server summary above hasn't
+    // moved, but the local queue already has the new draft.
+    uploadRecordsSource.setRecords(listOf(record("local-1", EnrollmentSyncStatus.PENDING, 1L)))
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val after = viewModel.uiState.value as HomeUiState.Success
+    assertEquals(before.summary.activeMothersCount + 1, after.summary.activeMothersCount)
+    assertEquals(before.summary.totalActiveBeneficiaries + 1, after.summary.totalActiveBeneficiaries)
+    assertEquals(before.summary.activeChildrenCount, after.summary.activeChildrenCount)
+  }
+
+  @Test
+  fun `a pending local child draft increments the displayed count immediately`() = runTest(dispatcher) {
+    val viewModel = viewModel()
+    observe(viewModel)
+    dispatcher.scheduler.advanceUntilIdle()
+    val before = viewModel.uiState.value as HomeUiState.Success
+
+    uploadRecordsSource.setRecords(listOf(childRecord("local-1", EnrollmentSyncStatus.PENDING, 1L)))
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val after = viewModel.uiState.value as HomeUiState.Success
+    assertEquals(before.summary.activeChildrenCount + 1, after.summary.activeChildrenCount)
+    assertEquals(before.summary.totalActiveBeneficiaries + 1, after.summary.totalActiveBeneficiaries)
+    assertEquals(before.summary.activeMothersCount, after.summary.activeMothersCount)
+  }
+
+  @Test
+  fun `the overlay returns to the server-only value once the draft's syncStatus flips to SYNCED`() =
+    runTest(dispatcher) {
+      val viewModel = viewModel()
+      observe(viewModel)
+      dispatcher.scheduler.advanceUntilIdle()
+      val serverOnly = viewModel.uiState.value as HomeUiState.Success
+
+      uploadRecordsSource.setRecords(listOf(record("local-1", EnrollmentSyncStatus.PENDING, 1L)))
+      dispatcher.scheduler.advanceUntilIdle()
+      assertEquals(
+        serverOnly.summary.activeMothersCount + 1,
+        (viewModel.uiState.value as HomeUiState.Success).summary.activeMothersCount,
+      )
+
+      // The sync worker marks it SYNCED — the beneficiary is now counted by the server too, so the
+      // local overlay must drop back out rather than double-count her.
+      uploadRecordsSource.setRecords(listOf(record("local-1", EnrollmentSyncStatus.SYNCED, 1L)))
+      dispatcher.scheduler.advanceUntilIdle()
+
+      assertEquals(
+        serverOnly.summary.activeMothersCount,
+        (viewModel.uiState.value as HomeUiState.Success).summary.activeMothersCount,
+      )
+    }
+
+  @Test
+  fun `a DUPLICATE_CONFLICT mother draft still counts as pending, matching the badge's own rule`() =
+    runTest(dispatcher) {
+      val viewModel = viewModel()
+      observe(viewModel)
+      dispatcher.scheduler.advanceUntilIdle()
+      val before = viewModel.uiState.value as HomeUiState.Success
+
+      uploadRecordsSource.setRecords(
+        listOf(record("local-1", EnrollmentSyncStatus.DUPLICATE_CONFLICT, 1L, "earlier-case")),
+      )
+      dispatcher.scheduler.advanceUntilIdle()
+
+      assertEquals(
+        before.summary.activeMothersCount + 1,
+        (viewModel.uiState.value as HomeUiState.Success).summary.activeMothersCount,
+      )
+    }
 
   // --- "Forms Uploaded" sync-status modal ---------------------------------------------------
 

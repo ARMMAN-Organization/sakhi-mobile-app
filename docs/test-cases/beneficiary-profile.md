@@ -74,3 +74,64 @@ UI (Compose):
 | VIS-6 | ☐ `completed visit shows See Data and risk chip` | COMPLETED + SEE_DATA → See Data (secondary) + red risk chip when `riskLabel` set. |
 | VIS-7 | ☐ `visit action shows coming soon` | Any visit action click → "coming soon" toast. |
 | VIS-8 | ☐ `footer delivery and closure coming soon` | Delivery Form / Closure Form click → "coming soon". |
+
+---
+
+# Test Cases — Remote Beneficiary Profile Fetch (CR-037)
+
+**Bug fixed:** "Not yet assessed" / remote-only beneficiaries (no local enrolment draft synced to device) failed to open their profile — `ScheduleBackedBeneficiaryProfileRepository.getBeneficiary(id)` fell through to `StaticBeneficiaryProfileRepository`'s 14-sample-ID fixture (`b01`..`b14`) and threw `NoSuchElementException` for any real server id, surfacing as "We couldn't load this beneficiary."
+**Files under test:** `data/beneficiaryprofile/ScheduleBackedBeneficiaryProfileRepository.kt`, its new profile mapper, `data/motherlink/BeneficiaryApi.kt` (extended `BeneficiaryDetailDto`).
+**Type:** Repository unit tests (JVM), `ScheduleBackedBeneficiaryProfileRepositoryTest`.
+**API contract confirmed by BE (this cycle):** `GET /api/v1/beneficiaries/{id}` now returns `riskLevel` (`none/mild/moderate/high`), `riskColor` (`GREEN/YELLOW/RED` — flagged by BE as a new convention, not a confirmed existing rule), `riskConditionSummaries[]` (`conditionCode`/`conditionName` nullable if risk-referral-service is briefly unreachable), `motherCaseDetails`/`childCaseDetails` (child adds `currentPhase`, `ccvOpeningRiskState`), and `lastVisitVitals` (from new `GET /beneficiaries/:beneficiaryId/latest-visit-vitals`, wired in, `null` on failure/no visits yet). `husbandName` intentionally not mapped (hidden field, out of scope).
+
+Status legend: ☐ not yet implemented.
+
+## 1. Core fetch path
+
+| # | Name | Given / When / Then |
+|---|---|---|
+| RF-1 | ☐ `local miss falls through to remote fetch` | Given `LocalEnrolmentBeneficiarySource.findLocalBeneficiary(id)` returns null; When `getBeneficiary(id)`; Then `beneficiaryApi.detail(id)` is called (not the static repo). |
+| RF-2 | ☐ `local hit never calls remote` | Given local source returns a record; Then `beneficiaryApi.detail` is never invoked. |
+| RF-3 | ☐ `not-yet-assessed profile loads without error` | Given API returns `riskConditionSummaries: []`, `riskLevel: "none"`, `lastVisitVitals: null`; Then `getBeneficiary` returns a valid `BeneficiaryProfile` (no exception), `riskLevel = LOW`, `diagnoses = emptyList()`, `lastVisitStats = emptyList()`. |
+| RF-4 | ☐ `assessed profile maps risk and diagnoses` | Given API returns `riskLevel: "high"`, `riskColor: "RED"`, one `riskConditionSummaries` entry with `conditionName: "Hypertension (High BP)"`; Then mapped profile has `riskLevel = HIGH`, `diagnoses = ["Hypertension (High BP)"]`. |
+| RF-5 | ☐ `null conditionName entries are skipped, not crashed` | Given a `riskConditionSummaries` entry with `conditionName: null` (risk-referral-service degraded); Then that entry is excluded from `diagnoses`, no exception. |
+
+## 2. Last-visit vitals mapping
+
+| # | Name | Given / When / Then |
+|---|---|---|
+| RF-6 | ☐ `lastVisitVitals null maps to empty stats` | Given `lastVisitVitals: null`; Then `lastVisitStats = emptyList()` (no crash, no placeholder row). |
+| RF-7 | ☐ `lastVisitVitals populated maps each vital` | Given a populated `lastVisitVitals` (weight, BP, hemoglobin, etc.); Then each maps to a `VitalStat(value, caption, abnormal)` preserving the `abnormal` flag. |
+
+## 3. Mother / child case mapping
+
+| # | Name | Given / When / Then |
+|---|---|---|
+| RF-8 | ☐ `mother case maps lmp/edd, not dob/weight` | Given `caseType: MOTHER`, `motherCaseDetails` populated; Then `lmp`/`edd` non-null, `dob`/`weight` null. |
+| RF-9 | ☐ `child case maps dob/weight, not lmp/edd` | Given `caseType: CHILD`, `childCaseDetails` populated; Then `dob` (from `pii.dateOfBirth`) non-null, `lmp`/`edd` null; `currentPhase`/`ccvOpeningRiskState` carried through on the profile model even if not yet rendered by UI. |
+
+## 4. Caching
+
+| # | Name | Given / When / Then |
+|---|---|---|
+| RF-10 | ☐ `successful remote fetch is cached` | Given a successful `getBeneficiary(id)` call; Then the profile is persisted via `SecureKeyValueStore` keyed by id. |
+| RF-11 | ☐ `cached profile returned when offline` | Given a prior successful fetch cached id X; When `beneficiaryApi.detail` throws `IOException` (offline) for id X; Then the cached profile is returned instead of an error. |
+
+## 5. Failure handling
+
+| # | Name | Given / When / Then |
+|---|---|---|
+| RF-12 | ☐ `404 with no cache sets error` | Given remote returns 404 and no cache exists for id; Then `getBeneficiary` throws/returns error state (not the static-repo fallback). |
+| RF-13 | ☐ `malformed JSON with no cache sets error` | Given response body fails to deserialize; Then error state, no crash. |
+| RF-14 | ☐ `network error with no cache sets error` | Given `IOException` and no cache; Then error state surfaced to ViewModel (existing VM-5 already covers the ViewModel side). |
+
+## 6. Manual QA (not automatable)
+
+| # | Name | Check |
+|---|---|---|
+| MQ-1 | ☐ | `riskColor` (GREEN/YELLOW/RED from API) visually matches the app's existing `RiskBadge` colors for LOW/MODERATE-MILD/HIGH — flag any mismatch since BE called this "a new convention, not confirmed." |
+| MQ-2 | ☐ | On a real device, tap "See Profile" on a genuine "Not yet assessed" beneficiary — confirms end-to-end fix, not just unit coverage. |
+
+---
+
+**Coverage:** RF-1..14 = CR-037 core. MQ-1/2 = manual sign-off before merge.

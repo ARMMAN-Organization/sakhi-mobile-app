@@ -253,7 +253,7 @@ class RemoteMotherLinkRepositoryTest {
         Response.success(
           BeneficiaryDetailResponseDto(
             true, "OK",
-            BeneficiaryDetailDto("mother-1", listOf(ConsentRecordDto("ENROLLMENT", "REFUSED", null))),
+            BeneficiaryDetailDto("mother-1", consentRecords = listOf(ConsentRecordDto("ENROLLMENT", "REFUSED", null))),
           ),
         )
       },
@@ -262,7 +262,7 @@ class RemoteMotherLinkRepositoryTest {
 
     val empty = FakeBeneficiaryApi(
       detailResponse = {
-        Response.success(BeneficiaryDetailResponseDto(true, "OK", BeneficiaryDetailDto("mother-1", emptyList())))
+        Response.success(BeneficiaryDetailResponseDto(true, "OK", BeneficiaryDetailDto("mother-1", consentRecords = emptyList())))
       },
     )
     assertEquals(LinkedMotherConsent(false), repo(empty).getMotherConsent("mother-1"))

@@ -40,24 +40,21 @@ class AndroidConnectivityObserver @Inject constructor(
 
     val callback = object : ConnectivityManager.NetworkCallback() {
       override fun onAvailable(network: Network) {
-        trySend(hasValidatedInternet(manager))
+        trySend(hasInternetCapableNetwork(manager))
       }
 
       override fun onLost(network: Network) {
-        trySend(hasValidatedInternet(manager))
+        trySend(hasInternetCapableNetwork(manager))
       }
 
       override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
-        trySend(
-          capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
-        )
+        trySend(capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET))
       }
     }
 
     // Emit the current state up front so a collector started while already online/offline reacts
     // without waiting for the next change.
-    trySend(hasValidatedInternet(manager))
+    trySend(hasInternetCapableNetwork(manager))
 
     val request = NetworkRequest.Builder()
       .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
@@ -67,10 +64,14 @@ class AndroidConnectivityObserver @Inject constructor(
     awaitClose { manager.unregisterNetworkCallback(callback) }
   }.distinctUntilChanged()
 
-  private fun hasValidatedInternet(manager: ConnectivityManager): Boolean {
+  // Deliberately NOT requiring NET_CAPABILITY_VALIDATED -- see AndroidConnectivityChecker.isOnline()
+  // for the full rationale (VALIDATED's background probe can lag behind a genuinely usable
+  // connection on weak/rural mobile data, producing a false "offline" read with no visible
+  // feedback to the Sakhi). Kept in lockstep with that check so this reactive signal and the
+  // one-shot isOnline() never disagree about the same network state.
+  private fun hasInternetCapableNetwork(manager: ConnectivityManager): Boolean {
     val network = manager.activeNetwork ?: return false
     val capabilities = manager.getNetworkCapabilities(network) ?: return false
-    return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-      capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
   }
 }

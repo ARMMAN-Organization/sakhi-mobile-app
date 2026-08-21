@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfile
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfileRepository
+import org.armman.sakhi.data.previsithealth.BeneficiaryNotSyncedException
 import org.armman.sakhi.data.previsithealth.PreVisitHealthHistory
 import org.armman.sakhi.data.previsithealth.PreVisitHealthHistoryRepository
 import javax.inject.Inject
@@ -67,6 +68,12 @@ class PreVisitHealthHistoryViewModel @Inject constructor(
         _uiState.update { it.copy(isLoading = false, profile = profile, history = history) }
       } catch (e: CancellationException) {
         throw e
+      } catch (e: BeneficiaryNotSyncedException) {
+        // Not a failure — this beneficiary (or her schedule) hasn't synced to the server yet, so
+        // there is nothing to show. Per product decision, don't block her on connectivity: skip
+        // straight to the visit form rather than showing an error with a Retry button that would
+        // only ever fail the same way again until she's back online.
+        _events.trySend(PreVisitHealthHistoryEvent.NavigateToVisitForm)
       } catch (e: Exception) {
         // Generic error state for the UI; technical detail must not leak to users.
         _uiState.update { it.copy(isLoading = false, hasError = true) }

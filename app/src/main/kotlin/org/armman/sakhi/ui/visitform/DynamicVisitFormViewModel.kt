@@ -20,6 +20,8 @@ import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfileRepository
 import org.armman.sakhi.data.delivery.DeliveryFormDraftRepository
 import org.armman.sakhi.data.delivery.DeliverySessionRepository
 import org.armman.sakhi.data.delivery.DeliveryToNeonatalPrefill
+import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
+import org.armman.sakhi.data.forms.DeliveryQuestionCodes
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
@@ -54,14 +56,14 @@ internal const val FORM_CODE_MOTHER = "ANC_VISIT"
 internal const val FORM_CODE_INFANT = "INFANT_VISIT"
 
 /** CR-042: the delivery-session PP1/NN1/NN2 form codes — see [DynamicVisitFormViewModel.onFinish]
- * for why these two (unlike [FORM_CODE_INFANT]) now have a real submission contract. Internal, not
- * private, for the same reason as [FORM_CODE_MOTHER]/[FORM_CODE_INFANT] (test/screen visibility). */
+ * for their real submission contract. Internal, not private, for the same reason as
+ * [FORM_CODE_MOTHER]/[FORM_CODE_INFANT] (test/screen visibility). */
 internal const val FORM_CODE_POSTPARTUM = "POSTPARTUM_VISIT"
 internal const val FORM_CODE_NEONATAL = "NEONATAL_VISIT"
 
-/** Form codes [DynamicVisitFormViewModel.onFinish] actually submits — every other form code (as of
- * this pass, only [FORM_CODE_INFANT]) still fires [DynamicVisitFormEvent.ComingSoon]. */
-private val SUBMITTABLE_FORM_CODES = setOf(FORM_CODE_MOTHER, FORM_CODE_POSTPARTUM, FORM_CODE_NEONATAL)
+/** Form codes [DynamicVisitFormViewModel.onFinish] actually submits — every schema-driven visit
+ * form has a real submission contract now that [FORM_CODE_INFANT] has joined the other three. */
+private val SUBMITTABLE_FORM_CODES = setOf(FORM_CODE_MOTHER, FORM_CODE_POSTPARTUM, FORM_CODE_NEONATAL, FORM_CODE_INFANT)
 
 /** Temporary diagnostic tag for the "couldn't load this visit's data" report (CR-026
  * debugging) — load() had no logging on any of its three failure branches, so it was
@@ -121,10 +123,10 @@ sealed interface DynamicVisitFormEvent {
    * partial-save exists for this fetch+render pass, same as before. */
   data object ExitForm : DynamicVisitFormEvent
 
-  /** [FORM_CODE_INFANT] has no submission contract yet (ANC_VISIT/POSTPARTUM_VISIT/NEONATAL_VISIT
-   * do, see [DynamicVisitFormViewModel.onFinish]) — its last-section action button still surfaces
-   * this instead of silently doing nothing. Also still used by the standalone Referral tab's own
-   * submit stub (CR-028, out of scope for this pass). */
+  /** Still used by the standalone Referral tab's own submit stub (CR-028, out of scope for this
+   * pass) — its action button fires this instead of a real submission. All four visit form codes
+   * (ANC_VISIT/POSTPARTUM_VISIT/NEONATAL_VISIT/INFANT_VISIT) now have a real submission contract,
+   * see [DynamicVisitFormViewModel.onFinish]. */
   data object ComingSoon : DynamicVisitFormEvent
 
   /** The visit form submitted successfully — the screen shows a confirmation and exits. */
@@ -159,12 +161,10 @@ sealed interface DynamicVisitFormEvent {
  * auto-refresh-on-load behaviour as the registration flow) and renders it through the same generic
  * [org.armman.sakhi.ui.forms.DynamicFormField] the Mother/Child registration screens use.
  *
- * Scope for this pass is deliberately fetch + render only for [FORM_CODE_INFANT] (bharath,
- * 2026-08-07): no submission, no offline draft, no cross-field/numeric-range gating — that lands
- * with a real `POST /visits` + `POST /forms/{code}/submissions` contract later (mirrors
- * [org.armman.sakhi.data.visitform.VisitFormRepository]'s own `saveVisit`-not-called-yet note).
- * [FORM_CODE_MOTHER] has that contract already; [FORM_CODE_POSTPARTUM]/[FORM_CODE_NEONATAL] gained
- * it in this pass (CR-042) — see [onFinish]. What IS preserved from the retired flow, for the
+ * All four form codes now have a real `POST /visits` + `POST /forms/{code}/submissions`
+ * submission contract — see [onFinish]. [FORM_CODE_MOTHER] had it first; [FORM_CODE_POSTPARTUM]/
+ * [FORM_CODE_NEONATAL] gained it via CR-042, and [FORM_CODE_INFANT] gained it after starting as a
+ * fetch + render only pass (bharath, 2026-08-07). What IS preserved from the retired flow, for the
  * mother only, is FR-S-4.4's critical-condition safety check (see
  * [VisitCriticalConditionEvaluator]) and the carried-forward [org.armman.sakhi.data.visitform
  * .VisitContext] prefill of `rch_number`/`lmp` (mother only — the context shape has no infant
@@ -258,6 +258,7 @@ class DynamicVisitFormViewModel @Inject constructor(
       formAuditRepository.recordOpened(visitId, formCode)
       prefillDefaultVisitDate()
       if (formCode == FORM_CODE_MOTHER) prefillFromVisitContext()
+      if (formCode == FORM_CODE_INFANT) prefillFromChildRegistration()
       if (formCode == FORM_CODE_NEONATAL) prefillFromDeliveryVisit()
       recomputeDerivedFields()
       recheckCriticalCondition()
@@ -351,6 +352,62 @@ class DynamicVisitFormViewModel @Inject constructor(
     val deliverySubmissionLocalUuid = session.deliverySubmissionLocalUuid ?: return
     val deliveryAnswers = deliveryFormDraftRepository.getAnswers(deliverySubmissionLocalUuid) ?: return
     val prefill = DeliveryToNeonatalPrefill.singleValueAnswersFor(deliveryAnswers)
+    if (prefill.isEmpty()) return
+    _uiState.update { state ->
+      var answers = state.answers
+      prefill.forEach { (questionCode, value) ->
+        if (answers.valueOf(questionCode).isNullOrBlank()) {
+          answers = answers.withSingleValue(questionCode, value)
+        }
+      }
+      state.copy(answers = answers)
+    }
+  }
+
+  /**
+   * Prefills INFANT_VISIT's ("Tests" section, INC1/INC2/CCV — [FORM_CODE_INFANT]) identity fields
+   * from the child's own CHILD_REGISTRATION submission: `date_of_birth` (so
+   * [InfantVisitFormComputedFieldEvaluator] can derive `age_in_months` from it),
+   * `name_of_the_child`, `sex_of_the_infant`, `birth_weight_in_kg`,
+   * `length_of_the_baby_at_the_time_of_birth_in_cm`, and `premature_child` (derived from
+   * CHILD_REGISTRATION's `term_of_delivery` — pre_term -> preterm_lt_37_weeks, full_term/post_term
+   * -> full_term_gte_37_weeks, anything else/unrecognised -> dont_know).
+   *
+   * `rch_number` is deliberately left unmapped: CHILD_REGISTRATION's live schema has no literal
+   * "rch_number" field (confirmed against the real `GET /forms/CHILD_REGISTRATION/active-version`
+   * payload), and product/user has confirmed (2026-08-20) it stays a manual Sakhi entry for now —
+   * no source to wire it from.
+   *
+   * Best-effort, same degrade-gracefully contract as [prefillFromVisitContext]/
+   * [prefillFromDeliveryVisit]: no local CHILD_REGISTRATION draft/submission for this beneficiary
+   * (e.g. a remote-only enrolment with nothing synced to this device) just leaves every field
+   * blank and Sakhi-fillable rather than blocking the form. Only ever fills a currently-blank
+   * answer — never overwrites something already on the draft (a resumed in-progress visit, or a
+   * value the Sakhi already typed).
+   */
+  private suspend fun prefillFromChildRegistration() {
+    val regAnswers = beneficiaryProfileRepository.getChildRegistrationAnswers(beneficiaryId) ?: return
+    val prefill = mutableMapOf<String, String>()
+
+    regAnswers.valueOf(ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT)?.let {
+      prefill[DATE_OF_BIRTH_QUESTION_CODE] = it
+    }
+    regAnswers.valueOf(ChildRegistrationQuestionCodes.NAME_OF_THE_CHILD)?.let {
+      prefill[NAME_OF_CHILD_QUESTION_CODE] = it
+    }
+    regAnswers.valueOf(ChildRegistrationQuestionCodes.SEX_OF_CHILD)?.let { sex ->
+      SEX_VALUE_MAP[sex]?.let { prefill[SEX_OF_INFANT_QUESTION_CODE] = it }
+    }
+    regAnswers.valueOf(ChildRegistrationQuestionCodes.CHILD_WEIGHT_AT_BIRTH_KG)?.let {
+      prefill[BIRTH_WEIGHT_KG_QUESTION_CODE] = it
+    }
+    regAnswers.valueOf(ChildRegistrationQuestionCodes.CHILD_LENGTH_AT_BIRTH_CM)?.let {
+      prefill[BIRTH_LENGTH_CM_QUESTION_CODE] = it
+    }
+    regAnswers.valueOf(DeliveryQuestionCodes.TERM_OF_DELIVERY)?.let { term ->
+      prefill[PREMATURE_CHILD_QUESTION_CODE] = PREMATURE_VALUE_MAP[term] ?: VALUE_DONT_KNOW
+    }
+
     if (prefill.isEmpty()) return
     _uiState.update { state ->
       var answers = state.answers
@@ -557,14 +614,13 @@ class DynamicVisitFormViewModel @Inject constructor(
    * Real submit for [SUBMITTABLE_FORM_CODES] — [FORM_CODE_MOTHER] (`POST /visits` then
    * `POST /forms/ANC_VISIT/submissions`), and, since CR-042, [FORM_CODE_POSTPARTUM]/
    * [FORM_CODE_NEONATAL] (PP1/NN1/NN2, the same two-call sequence under their own resolved
-   * formCode) — via [VisitFormDraftRepository.submitDraft] (CR-026b), which saves locally first,
-   * then attempts the real submission immediately while online (identical outcome to the
-   * pre-CR-026b direct coordinator call), or queues it for the next manual Data Upload while
-   * offline. Once a PP1/NN submission actually succeeds, [org.armman.sakhi.data.visitform
-   * .VisitFormSubmissionCoordinator.submit] advances the beneficiary's [org.armman.sakhi.data
-   * .delivery.DeliverySessionEntity] on its own (CR-042 step advancement) — this ViewModel does not
-   * need to know that happened. [FORM_CODE_INFANT] has no submission contract yet, so its
-   * last-section action still fires [DynamicVisitFormEvent.ComingSoon].
+   * formCode), and now also [FORM_CODE_INFANT] — via [VisitFormDraftRepository.submitDraft]
+   * (CR-026b), which saves locally first, then attempts the real submission immediately while
+   * online (identical outcome to the pre-CR-026b direct coordinator call), or queues it for the
+   * next manual Data Upload while offline. Once a PP1/NN submission actually succeeds,
+   * [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator.submit] advances the
+   * beneficiary's [org.armman.sakhi.data.delivery.DeliverySessionEntity] on its own (CR-042 step
+   * advancement) — this ViewModel does not need to know that happened.
    */
   fun onFinish() {
     val state = _uiState.value
@@ -699,5 +755,33 @@ class DynamicVisitFormViewModel @Inject constructor(
     const val HAVE_YOU_BEEN_ABLE_TO_MEET_QUESTION_CODE = "have_you_been_able_to_meet_the_beneficiary_for_the_visit"
     const val IF_NO_MENTION_REASONS_QUESTION_CODE = "if_no_mention_reasons"
     const val VALUE_NO = "no"
+
+    // INFANT_VISIT's own "Tests" section question codes prefillFromChildRegistration() writes.
+    // Confirmed 2026-08-20 against the live GET /forms/INFANT_VISIT/active-version payload.
+    const val DATE_OF_BIRTH_QUESTION_CODE = "date_of_birth"
+    const val NAME_OF_CHILD_QUESTION_CODE = "name_of_the_child"
+    const val SEX_OF_INFANT_QUESTION_CODE = "sex_of_the_infant"
+    const val BIRTH_WEIGHT_KG_QUESTION_CODE = "birth_weight_in_kg"
+    const val BIRTH_LENGTH_CM_QUESTION_CODE = "length_of_the_baby_at_the_time_of_birth_in_cm"
+    const val PREMATURE_CHILD_QUESTION_CODE = "premature_child"
+    const val VALUE_DONT_KNOW = "dont_know"
+
+    // CHILD_REGISTRATION's `sex_of_child` (male/female/intersex_other) -> INFANT_VISIT's
+    // `sex_of_the_infant` (male/female/transgender) — not a verbatim copy, see
+    // ChildRegistrationQuestionCodes.SEX_OF_CHILD's own doc.
+    val SEX_VALUE_MAP = mapOf(
+      "male" to "male",
+      "female" to "female",
+      "intersex_other" to "transgender",
+    )
+
+    // CHILD_REGISTRATION's `term_of_delivery` (pre_term/full_term/post_term) -> INFANT_VISIT's
+    // `premature_child` (preterm_lt_37_weeks/full_term_gte_37_weeks/dont_know). post_term is still
+    // >= 37 weeks, so it maps to full_term_gte_37_weeks, not a third bucket.
+    val PREMATURE_VALUE_MAP = mapOf(
+      "pre_term" to "preterm_lt_37_weeks",
+      "full_term" to "full_term_gte_37_weeks",
+      "post_term" to "full_term_gte_37_weeks",
+    )
   }
 }
