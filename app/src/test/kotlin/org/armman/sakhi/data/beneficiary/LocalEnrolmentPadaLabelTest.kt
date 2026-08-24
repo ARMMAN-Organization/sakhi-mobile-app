@@ -48,6 +48,7 @@ class LocalEnrolmentPadaLabelTest {
       secureStore,
       RoomVisitScheduleRepository(FakeVisitScheduleDao()),
       forms,
+      LocalBeneficiaryStatusOverrideStore(FakeSecureKeyValueStore()),
     )
   }
 

@@ -106,6 +106,10 @@ class RoomVisitFormDraftRepositoryTest {
       // pre-CR-033 behaviour exactly.
       visitCodeFormResolver = VisitCodeFormResolver(FakeFormsApi(), FakeSecureKeyValueStore()),
       formAuditRepository = FakeFormAuditRepository(),
+      deliverySessionRepository = org.armman.sakhi.data.delivery.RoomDeliverySessionRepository(
+        org.armman.sakhi.data.delivery.FakeDeliverySessionDao(),
+      ),
+      childFormDraftDao = org.armman.sakhi.data.childregistration.FakeChildFormDraftDao(),
     )
     // Reuses the same dao/secureStore as the repository so runOne() sees the row submitDraft just
     // wrote — matching how the real Hilt graph wires a single instance of each.

@@ -423,3 +423,20 @@ data class HealthHistoryState(
     const val EXCLUSIVE_NONE_CODE = 1
   }
 }
+
+/**
+ * Mutually-exclusive option codes per Health History checkbox group (1-based; see arrays.xml).
+ * Selecting any code in a group's set clears every other selection in that same group. A
+ * top-level object (not nested inside [HealthHistoryState]'s companion object, which triggered a
+ * Kotlin incremental-compiler "Unresolved reference" false negative — CR fix, 2026-08-21) so it's
+ * unambiguously visible to both [org.armman.sakhi.ui.enrollment.EnrollmentViewModel] (enforces
+ * this on every toggle) and [org.armman.sakhi.ui.enrollment.steps.HealthHistoryStep] (greys out
+ * the conflicting rows so the exclusion is visible before the user taps).
+ */
+object HealthHistoryExclusiveOptions {
+  val ANC_CONDITIONS = setOf(1, 16) // Q43: No known condition / Don't know
+  val DELIVERY_COMPLICATIONS = setOf(4) // Q52: No complications
+  val SELF_CONDITIONS = setOf(1, 17) // Q58: No known condition / Don't know
+  val LONG_TERM_MEDS = setOf(1) // Q59: Not taking any long-term medication
+  val SUBSTANCE_USE = setOf(1, 7) // Q61: No / Don't know
+}

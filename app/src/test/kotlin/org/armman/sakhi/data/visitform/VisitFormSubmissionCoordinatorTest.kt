@@ -8,11 +8,14 @@ import org.armman.sakhi.data.audit.FormAuditEventType
 import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
+import org.armman.sakhi.data.childregistration.ChildFormDraftEntity
+import org.armman.sakhi.data.childregistration.FakeChildFormDraftDao
 import org.armman.sakhi.data.delivery.DeliverySessionEntity
 import org.armman.sakhi.data.delivery.DeliverySessionRepository
 import org.armman.sakhi.data.delivery.DeliverySessionStep
 import org.armman.sakhi.data.delivery.FakeDeliverySessionDao
 import org.armman.sakhi.data.delivery.RoomDeliverySessionRepository
+import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.CreateSubmissionResponseDto
 import org.armman.sakhi.data.forms.FakeFormSubmissionApi
 import org.armman.sakhi.data.forms.FakeFormsApi
@@ -65,6 +68,7 @@ class VisitFormSubmissionCoordinatorTest {
   private lateinit var formAuditRepository: FakeFormAuditRepository
   private lateinit var deliverySessionDao: FakeDeliverySessionDao
   private lateinit var deliverySessionRepository: DeliverySessionRepository
+  private lateinit var childFormDraftDao: FakeChildFormDraftDao
   private lateinit var coordinator: VisitFormSubmissionCoordinator
 
   private val session = UserSession(
@@ -96,6 +100,7 @@ class VisitFormSubmissionCoordinatorTest {
     formAuditRepository = FakeFormAuditRepository()
     deliverySessionDao = FakeDeliverySessionDao()
     deliverySessionRepository = RoomDeliverySessionRepository(deliverySessionDao)
+    childFormDraftDao = FakeChildFormDraftDao()
     coordinator = VisitFormSubmissionCoordinator(
       visitApi = visitApi,
       formSubmissionApi = formSubmissionApi,
@@ -108,6 +113,29 @@ class VisitFormSubmissionCoordinatorTest {
       visitCodeFormResolver = VisitCodeFormResolver(FakeFormsApi(), FakeSecureKeyValueStore()),
       formAuditRepository = formAuditRepository,
       deliverySessionRepository = deliverySessionRepository,
+      childFormDraftDao = childFormDraftDao,
+    )
+  }
+
+  /** CR-042 defense-in-depth gate: seeds a registered-child draft so an NN submission for
+   * [localBeneficiaryId] passes [VisitFormSubmissionCoordinator]'s
+   * NoRegisteredChildForNnVisit check — the real-world equivalent of Child Registration having
+   * actually been completed for this child before its NN visit is submitted. */
+  private suspend fun seedRegisteredChild(localBeneficiaryId: String = "ben-1") {
+    childFormDraftDao.upsert(
+      ChildFormDraftEntity(
+        localBeneficiaryId = localBeneficiaryId,
+        formCode = "CHILD_REGISTRATION",
+        formVersionId = "child-reg-version-1",
+        localSubmissionUuid = "child-reg-submission-$localBeneficiaryId",
+        syncStatus = EnrollmentSyncStatus.SYNCED,
+        createdAtEpochMillis = 1_000L,
+        lastAttemptAtEpochMillis = 1_000L,
+        retryCount = 0,
+        remoteBeneficiaryId = localBeneficiaryId,
+        remoteSubmissionId = null,
+        lastErrorMessage = null,
+      ),
     )
   }
 
@@ -290,6 +318,7 @@ class VisitFormSubmissionCoordinatorTest {
       visitCodeFormResolver = VisitCodeFormResolver(FakeFormsApi(), FakeSecureKeyValueStore()),
       formAuditRepository = FakeFormAuditRepository(),
       deliverySessionRepository = deliverySessionRepository,
+      childFormDraftDao = childFormDraftDao,
     )
 
     val result = loggedOutCoordinator.submit(
@@ -539,6 +568,7 @@ class VisitFormSubmissionCoordinatorTest {
   fun `submit() advances an NN delivery session to DONE when NN1 is submitted`() = runTest {
     seedDeliverySession(step = DeliverySessionStep.NN)
     seedNnSchedule("nn1-schedule", sequenceNo = 1)
+    seedRegisteredChild()
     visitApi.response = successfulVisitResponse()
     formSubmissionApi.response = successfulSubmissionResponse()
 
@@ -560,6 +590,7 @@ class VisitFormSubmissionCoordinatorTest {
   fun `submit() advances an NN delivery session to DONE when NN2 is submitted instead`() = runTest {
     seedDeliverySession(step = DeliverySessionStep.NN)
     seedNnSchedule("nn2-schedule", sequenceNo = 2)
+    seedRegisteredChild()
     visitApi.response = successfulVisitResponse()
     formSubmissionApi.response = successfulSubmissionResponse()
 
@@ -575,6 +606,30 @@ class VisitFormSubmissionCoordinatorTest {
       DeliverySessionStep.DONE,
       deliverySessionRepository.getBySessionUuid("delivery-session-1")?.step,
     )
+  }
+
+  @Test
+  fun `submit() rejects an NN visit with no registered child behind it`() = runTest {
+    // CR-042 defense in depth: an NN schedule row with no ChildFormDraftEntity behind it can only
+    // be a stale row from before the CR-042 defect fix shipped (wrongly anchored to the mother's
+    // own id by the old code) — this must never be allowed to complete.
+    seedDeliverySession(step = DeliverySessionStep.NN)
+    seedNnSchedule("nn1-schedule", sequenceNo = 1)
+    // Deliberately no seedRegisteredChild() call.
+    visitApi.response = successfulVisitResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    val result = coordinator.submit(
+      localScheduleUuid = "nn1-schedule",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = deliveryFormFilledOn,
+      localSubmissionUuid = "test-submission-uuid",
+    )
+
+    assertTrue(result.isFailure)
+    assertTrue(result.exceptionOrNull() is VisitFormSubmissionException.NoRegisteredChildForNnVisit)
+    assertEquals(0, visitApi.callCount)
   }
 
   @Test

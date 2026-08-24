@@ -34,6 +34,13 @@ private const val DAYS_PER_WEEK = 7L
 private const val SECOND_TRIMESTER_START_WEEK = 13L
 private const val WEEKLY_GAIN_MIN_KG = 0.2
 
+/** Tolerance for the weight-gain floor comparison. Both sides are accumulated in binary floating
+ * point (a 55.4-54.0 subtraction lands on 1.3999999999999986 while 7 * 0.2 lands on
+ * 1.4000000000000001), so a gain that exactly meets the target compared false and flagged a
+ * healthy mother [VALUE_SEVERE] -> a spurious referral. 1 gram is far below the precision of any
+ * field weighing scale, so it cannot mask a real shortfall. */
+private const val WEIGHT_GAIN_TOLERANCE_KG = 0.001
+
 private const val VALUE_NORMAL = "Normal"
 private const val VALUE_SEVERE = "Severe"
 
@@ -80,7 +87,12 @@ object VisitFormComputedFieldEvaluator {
 
   private fun bmi(answers: FormAnswers): String? {
     val heightCm = answers.valueOf(VisitFormQuestionCodes.HEIGHT_CM)?.toDoubleOrNull() ?: return null
-    val weightKg = answers.valueOf(VisitFormQuestionCodes.WEIGHT_KG)?.toDoubleOrNull() ?: return null
+    // Bug fix (2026-08-21): looks up every known weight-field spelling
+    // (VisitFormQuestionCodes.WEIGHT_KG_QUESTION_CODES) rather than the single ANC-only
+    // WEIGHT_KG constant, so this also finds POSTPARTUM_VISIT's own `current_weight_kg` answer —
+    // see that set's doc comment for why PP1 needed a second spelling here.
+    val weightKg = VisitFormQuestionCodes.WEIGHT_KG_QUESTION_CODES
+      .firstNotNullOfOrNull { code -> answers.valueOf(code)?.toDoubleOrNull() } ?: return null
     if (heightCm <= 0.0) return null
     val heightM = heightCm / 100.0
     val bmiValue = weightKg / (heightM * heightM)
@@ -113,6 +125,6 @@ object VisitFormComputedFieldEvaluator {
     val expectedMinGainKg = weeksInRange * WEEKLY_GAIN_MIN_KG
     val actualGainKg = currentWeightKg - baselineWeightKg
 
-    return if (actualGainKg < expectedMinGainKg) VALUE_SEVERE else VALUE_NORMAL
+    return if (actualGainKg < expectedMinGainKg - WEIGHT_GAIN_TOLERANCE_KG) VALUE_SEVERE else VALUE_NORMAL
   }
 }

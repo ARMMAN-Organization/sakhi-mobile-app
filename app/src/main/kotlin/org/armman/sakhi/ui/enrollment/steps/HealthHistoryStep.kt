@@ -26,6 +26,7 @@ import org.armman.sakhi.R
 import org.armman.sakhi.ui.components.AppTextField
 import org.armman.sakhi.ui.components.ValidationErrorBanner
 import org.armman.sakhi.ui.enrollment.HealthFieldError
+import org.armman.sakhi.ui.enrollment.HealthHistoryExclusiveOptions
 import org.armman.sakhi.ui.enrollment.HealthHistoryState
 import org.armman.sakhi.ui.enrollment.components.AppCheckboxGroup
 import org.armman.sakhi.ui.enrollment.components.AppDateField
@@ -173,6 +174,7 @@ fun HealthHistoryStep(
         codes = state.ancConditions,
         onToggle = actions.onAncCondition,
         error = requiredText(state.ancConditions.isEmpty(), banner),
+        exclusiveCodes = HealthHistoryExclusiveOptions.ANC_CONDITIONS,
       )
     }
     TdDoses(state = state, actions = actions)
@@ -224,6 +226,7 @@ fun HealthHistoryStep(
         codes = state.deliveryComplications,
         onToggle = actions.onDeliveryComplication,
         error = requiredText(state.deliveryComplications.isEmpty(), banner),
+        exclusiveCodes = HealthHistoryExclusiveOptions.DELIVERY_COMPLICATIONS,
       )
       DropdownField(
         stringResource(R.string.enrollment_hh_delivery_duration),
@@ -262,6 +265,7 @@ fun HealthHistoryStep(
       codes = state.selfConditions,
       onToggle = actions.onSelfCondition,
       error = requiredText(state.selfConditions.isEmpty(), banner),
+      exclusiveCodes = HealthHistoryExclusiveOptions.SELF_CONDITIONS,
     )
     CheckboxField(
       label = stringResource(R.string.enrollment_hh_long_term_meds),
@@ -269,6 +273,7 @@ fun HealthHistoryStep(
       codes = state.longTermMeds,
       onToggle = actions.onLongTermMed,
       error = requiredText(state.longTermMeds.isEmpty(), banner),
+      exclusiveCodes = HealthHistoryExclusiveOptions.LONG_TERM_MEDS,
     )
     DropdownField(
       stringResource(R.string.enrollment_hh_sickle_cell),
@@ -281,6 +286,7 @@ fun HealthHistoryStep(
       codes = state.substanceUse,
       onToggle = actions.onSubstanceUse,
       error = requiredText(state.substanceUse.isEmpty(), banner),
+      exclusiveCodes = HealthHistoryExclusiveOptions.SUBSTANCE_USE,
     )
     YesNoField(
       label = stringResource(R.string.enrollment_hh_family_history),
@@ -398,14 +404,42 @@ private fun YesNoField(label: String, value: Boolean?, onSelected: (Boolean) -> 
 }
 
 @Composable
-private fun CheckboxField(label: String, arrayRes: Int, codes: Set<Int>, onToggle: (Int) -> Unit, error: String?) {
+private fun CheckboxField(
+  label: String,
+  arrayRes: Int,
+  codes: Set<Int>,
+  onToggle: (Int) -> Unit,
+  error: String?,
+  exclusiveCodes: Set<Int> = emptySet(),
+) {
   AppCheckboxGroup(
     label = label,
     options = stringArrayResource(arrayRes).toList(),
     checkedIndices = codes.map { it - 1 }.toSet(),
     onToggle = { onToggle(it + 1) },
     errorText = error,
+    enabled = { index -> isCheckboxOptionEnabled(index + 1, codes, exclusiveCodes) },
   )
+}
+
+/**
+ * A row stays enabled if its own code is already checked (so it can be unchecked), or if
+ * checking it would not conflict with the current selection: once any code in
+ * [exclusiveCodes] (e.g. "No" / "Don't know") is checked, every other row is disabled, and
+ * once any normal (non-exclusive) code is checked, the [exclusiveCodes] rows are disabled.
+ * Mirrors the mutual-exclusion rule enforced on toggle by
+ * [org.armman.sakhi.ui.enrollment.EnrollmentViewModel]'s `toggleMulti`, but as a visible
+ * greyed-out state so the exclusion doesn't rely on the user noticing another box uncheck.
+ */
+internal fun isCheckboxOptionEnabled(code: Int, codes: Set<Int>, exclusiveCodes: Set<Int>): Boolean {
+  if (code in codes || exclusiveCodes.isEmpty()) return true
+  val hasExclusiveSelected = codes.any { it in exclusiveCodes }
+  val hasNormalSelected = codes.any { it !in exclusiveCodes }
+  // An exclusive row ("No" / "Don't know") is mutually exclusive with EVERY other row, including
+  // the other exclusive ones — "No" and "Don't know" are themselves contradictory answers, so a
+  // checked "No" must grey out "Don't know" too, not just the real-answer rows.
+  if (hasExclusiveSelected) return false
+  return if (code in exclusiveCodes) !hasNormalSelected else true
 }
 
 @Composable

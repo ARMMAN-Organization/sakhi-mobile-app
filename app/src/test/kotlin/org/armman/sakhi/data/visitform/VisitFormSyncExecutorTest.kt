@@ -102,6 +102,10 @@ class VisitFormSyncExecutorTest {
       // pre-CR-033 behaviour exactly.
       visitCodeFormResolver = VisitCodeFormResolver(FakeFormsApi(), FakeSecureKeyValueStore()),
       formAuditRepository = FakeFormAuditRepository(),
+      deliverySessionRepository = org.armman.sakhi.data.delivery.RoomDeliverySessionRepository(
+        org.armman.sakhi.data.delivery.FakeDeliverySessionDao(),
+      ),
+      childFormDraftDao = org.armman.sakhi.data.childregistration.FakeChildFormDraftDao(),
     )
     executor = VisitFormSyncExecutor(dao, secureStore, coordinator)
   }

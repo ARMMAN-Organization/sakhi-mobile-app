@@ -110,7 +110,7 @@ class VisitScheduleSyncExecutor @Inject constructor(
         // A replay the server already has is a success from the device's point of view, but it must
         // still return the IDs. If it does not, the rows stay unsynced and a later pass retries.
         response.code() == HTTP_CONFLICT -> {
-          Log.w(TAG, "uploadSchedules(beneficiary=$serverBeneficiaryId): 409 conflict")
+          Log.w(TAG, "uploadSchedules(beneficiary=$serverBeneficiaryId): conflict, already on server")
           BatchOutcome.PERMANENT
         }
         response.code() in HTTP_BAD_REQUEST until HTTP_SERVER_ERROR_FLOOR -> {

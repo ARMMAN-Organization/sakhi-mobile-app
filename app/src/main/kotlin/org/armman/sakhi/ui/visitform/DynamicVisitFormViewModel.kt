@@ -23,6 +23,8 @@ import org.armman.sakhi.data.delivery.DeliveryToNeonatalPrefill
 import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
 import org.armman.sakhi.data.forms.DeliveryQuestionCodes
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormCrossFieldRule
+import org.armman.sakhi.data.forms.FormCrossFieldValidator
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
 import org.armman.sakhi.data.forms.FormFieldInputType
@@ -55,6 +57,15 @@ import javax.inject.Inject
 internal const val FORM_CODE_MOTHER = "ANC_VISIT"
 internal const val FORM_CODE_INFANT = "INFANT_VISIT"
 
+/** Bug fix (2026-08-22): the backend's live `/forms/visit-code-form-map` now resolves
+ * `VisitCodeType.INC`/`INC_HR` to `"INC_VISIT"` and `CCV`/`CCV_HR` to `"CCV_VISIT"` as genuinely
+ * distinct form codes (see [org.armman.sakhi.data.forms.VisitCodeFormResolver]) rather than the
+ * old `"INFANT_VISIT"` alias. Their schema content is still a direct copy of INFANT_VISIT's
+ * (CR-033, `docs/test-cases/visit-form.md`), so every INFANT_VISIT-only behaviour below
+ * (child-registration prefill, computed-field evaluation, risk assessment, submission,
+ * Summary tab) needs to fire for all three codes until real INC/CCV-specific schemas ship. */
+internal val FORM_CODES_INFANT_FAMILY = setOf(FORM_CODE_INFANT, "INC_VISIT", "CCV_VISIT")
+
 /** CR-042: the delivery-session PP1/NN1/NN2 form codes — see [DynamicVisitFormViewModel.onFinish]
  * for their real submission contract. Internal, not private, for the same reason as
  * [FORM_CODE_MOTHER]/[FORM_CODE_INFANT] (test/screen visibility). */
@@ -63,7 +74,7 @@ internal const val FORM_CODE_NEONATAL = "NEONATAL_VISIT"
 
 /** Form codes [DynamicVisitFormViewModel.onFinish] actually submits — every schema-driven visit
  * form has a real submission contract now that [FORM_CODE_INFANT] has joined the other three. */
-private val SUBMITTABLE_FORM_CODES = setOf(FORM_CODE_MOTHER, FORM_CODE_POSTPARTUM, FORM_CODE_NEONATAL, FORM_CODE_INFANT)
+private val SUBMITTABLE_FORM_CODES = setOf(FORM_CODE_MOTHER, FORM_CODE_POSTPARTUM, FORM_CODE_NEONATAL) + FORM_CODES_INFANT_FAMILY
 
 /** Temporary diagnostic tag for the "couldn't load this visit's data" report (CR-026
  * debugging) — load() had no logging on any of its three failure branches, so it was
@@ -247,7 +258,7 @@ class DynamicVisitFormViewModel @Inject constructor(
         Log.d(
           TAG,
           "DynamicVisitFormViewModel.load field: questionCode='${field.questionCode}' " +
-            "label='${field.label}' visibleWhen=${field.visibleWhen}",
+            "label='${field.label}' computedFrom='${field.computedFrom}' visibleWhen=${field.visibleWhen}",
         )
       }
       _uiState.update { it.copy(isLoading = false, formCode = formCode, version = version) }
@@ -258,8 +269,16 @@ class DynamicVisitFormViewModel @Inject constructor(
       formAuditRepository.recordOpened(visitId, formCode)
       prefillDefaultVisitDate()
       if (formCode == FORM_CODE_MOTHER) prefillFromVisitContext()
-      if (formCode == FORM_CODE_INFANT) prefillFromChildRegistration()
+      if (formCode in FORM_CODES_INFANT_FAMILY) {
+        prefillFromChildRegistration()
+        prefillVisitTypeLabel()
+      }
       if (formCode == FORM_CODE_NEONATAL) prefillFromDeliveryVisit()
+      // Bug fix (2026-08-21): PP1 declares no height field of its own (confirmed against the live
+      // postpartum-visit.json schema) but its "Current BMI" computedFrom field needs one — see
+      // prefillHeightForPostpartum()'s own doc for why this is a narrow height-only prefill rather
+      // than reusing prefillFromVisitContext() wholesale.
+      if (formCode == FORM_CODE_POSTPARTUM) prefillHeightForPostpartum()
       recomputeDerivedFields()
       recheckCriticalCondition()
     }
@@ -309,9 +328,17 @@ class DynamicVisitFormViewModel @Inject constructor(
         answers = answers.withSingleValue(VisitFormQuestionCodes.LMP, context.lmp.toString())
       }
       // Spec row 2: "Autopopulated based on the respective visit name" (ANC1/ANC2/... or
-      // HRV1/HRV2/...) — carried forward from VisitContext, same as RCH number/LMP above.
-      if (answers.valueOf(VISIT_TYPE_QUESTION_CODE).isNullOrBlank() && context.visitTypeLabel.isNotBlank()) {
-        answers = answers.withSingleValue(VISIT_TYPE_QUESTION_CODE, context.visitTypeLabel)
+      // HRV1/HRV2/...). Bug fix (2026-08-21): this used to read context.visitTypeLabel, but
+      // VisitFormRepository is still StaticVisitFormRepository (a stub) whose visitTypeLabel is
+      // hardcoded to "ANC1" for any beneficiary/visit not in its small fixture table — so a real
+      // ANC2 (or later) visit silently showed "ANC1" here. [visitLabel] (this ViewModel's own nav
+      // arg, sourced end-to-end from the schedule row's real visitCode — see
+      // ProfileVisitMapper.label / AppNavHost's visit.label — and already proven correct, since
+      // it's what renders the screen's own "ANC2 Form" title) is the real value; use it instead
+      // once VisitFormRepository has a genuine backend implementation, this can be revisited to
+      // prefer context.visitTypeLabel if that ever needs to differ from the schedule's own label.
+      if (answers.valueOf(VISIT_TYPE_QUESTION_CODE).isNullOrBlank() && visitLabel.isNotBlank()) {
+        answers = answers.withSingleValue(VISIT_TYPE_QUESTION_CODE, visitLabel)
       }
       // Spec row 12: "Open only in first visit and auto populate in the rest" — a non-null
       // heightCm means a PRIOR visit already captured it (see StaticVisitFormRepository's
@@ -326,6 +353,37 @@ class DynamicVisitFormViewModel @Inject constructor(
         comorbidities = context.comorbidities,
         registrationWeightKg = context.registrationWeightKg,
       )
+    }
+  }
+
+  /**
+   * Bug fix (found via manual QA on spec row 28 "Current BMI", 2026-08-21): POSTPARTUM_VISIT's own
+   * schema declares no height field at all — a woman's height doesn't change postpartum, so PP1
+   * relies on whatever ANC already captured, the same [org.armman.sakhi.data.visitform
+   * .VisitContext.heightCm] carried-forward value [prefillFromVisitContext] uses for ANC visits
+   * after the first. This is a DELIBERATELY narrower copy of that function rather than a call to
+   * it directly: [prefillFromVisitContext] also seeds `rch_number`/`lmp`/the visit-type label,
+   * none of which exist on PP1's schema, and pushing them into PP1's answers risked either being
+   * silently dropped or, worse, rejected by backend payload validation for fields PP1 never
+   * declared. Best-effort, same degrade-gracefully contract as [prefillFromVisitContext]: a
+   * context fetch failure here doesn't block the (already-loaded) PP1 form.
+   */
+  private suspend fun prefillHeightForPostpartum() {
+    val context = try {
+      visitFormRepository.getVisitContext(beneficiaryId, visitId)
+    } catch (e: NoSuchElementException) {
+      return
+    }
+    val heightFromContext = context.heightCm ?: return
+    _uiState.update { state ->
+      if (state.answers.valueOf(VisitFormQuestionCodes.HEIGHT_CM).isNullOrBlank()) {
+        state.copy(
+          answers = state.answers.withSingleValue(VisitFormQuestionCodes.HEIGHT_CM, heightFromContext.toString()),
+          heightLockedFromContext = true,
+        )
+      } else {
+        state
+      }
     }
   }
 
@@ -365,6 +423,26 @@ class DynamicVisitFormViewModel @Inject constructor(
   }
 
   /**
+   * Bug fix (2026-08-22): INFANT_VISIT/INC_VISIT/CCV_VISIT's own "visit_type" field (Tests
+   * section, same spec row 2 concept ANC/HRV forms already get via [prefillFromVisitContext])
+   * was never populated for the infant family — that prefill only ever ran for [FORM_CODE_MOTHER].
+   * A narrow, standalone prefill rather than reusing [prefillFromVisitContext] wholesale, same
+   * reasoning as [prefillHeightForPostpartum]: that function also seeds `rch_number`/`lmp`, which
+   * don't exist on the infant schema. [visitLabel] is the same nav-arg source
+   * [prefillFromVisitContext] already uses (see its own doc for why, over
+   * [org.armman.sakhi.data.visitform.VisitContext.visitTypeLabel]).
+   */
+  private fun prefillVisitTypeLabel() {
+    _uiState.update { state ->
+      if (state.answers.valueOf(VISIT_TYPE_QUESTION_CODE).isNullOrBlank() && visitLabel.isNotBlank()) {
+        state.copy(answers = state.answers.withSingleValue(VISIT_TYPE_QUESTION_CODE, visitLabel))
+      } else {
+        state
+      }
+    }
+  }
+
+  /**
    * Prefills INFANT_VISIT's ("Tests" section, INC1/INC2/CCV — [FORM_CODE_INFANT]) identity fields
    * from the child's own CHILD_REGISTRATION submission: `date_of_birth` (so
    * [InfantVisitFormComputedFieldEvaluator] can derive `age_in_months` from it),
@@ -386,7 +464,16 @@ class DynamicVisitFormViewModel @Inject constructor(
    * value the Sakhi already typed).
    */
   private suspend fun prefillFromChildRegistration() {
-    val regAnswers = beneficiaryProfileRepository.getChildRegistrationAnswers(beneficiaryId) ?: return
+    val regAnswers = beneficiaryProfileRepository.getChildRegistrationAnswers(beneficiaryId)
+    // Temporary diagnostic for the "Age in months not auto-filled on INC1" report — confirms
+    // whether the local CHILD_REGISTRATION lookup found anything at all for this beneficiaryId
+    // before we even try to read date_of_birth_of_infant out of it.
+    Log.d(
+      TAG,
+      "DynamicVisitFormViewModel.prefillFromChildRegistration($beneficiaryId): " +
+        "getChildRegistrationAnswers returned ${if (regAnswers == null) "null" else "answers"}",
+    )
+    if (regAnswers == null) return
     val prefill = mutableMapOf<String, String>()
 
     regAnswers.valueOf(ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT)?.let {
@@ -408,6 +495,9 @@ class DynamicVisitFormViewModel @Inject constructor(
       prefill[PREMATURE_CHILD_QUESTION_CODE] = PREMATURE_VALUE_MAP[term] ?: VALUE_DONT_KNOW
     }
 
+    // Temporary diagnostic — exactly which of the 6 possible fields resolved to a usable value
+    // this time, most importantly date_of_birth (the one age_in_months depends on).
+    Log.d(TAG, "DynamicVisitFormViewModel.prefillFromChildRegistration($beneficiaryId): prefill map = $prefill")
     if (prefill.isEmpty()) return
     _uiState.update { state ->
       var answers = state.answers
@@ -460,7 +550,7 @@ class DynamicVisitFormViewModel @Inject constructor(
    * [InfantVisitRiskAssessment]'s doc. Always empty for ANC_VISIT (mother keeps her own
    * [testsFindings]/[overallRiskLevel] path above). */
   fun infantKnownRisks(): List<InfantVisitRiskFinding> =
-    if (_uiState.value.formCode == FORM_CODE_INFANT) {
+    if (_uiState.value.formCode in FORM_CODES_INFANT_FAMILY) {
       InfantVisitRiskAssessment.buildKnownRisks(_uiState.value.answers)
     } else {
       emptyList()
@@ -577,7 +667,13 @@ class DynamicVisitFormViewModel @Inject constructor(
           visitDate,
           state.registrationWeightKg,
         )
-        FORM_CODE_INFANT -> InfantVisitFormComputedFieldEvaluator.compute(computedFrom, answers, visitDate)
+        in FORM_CODES_INFANT_FAMILY -> InfantVisitFormComputedFieldEvaluator.compute(computedFrom, answers, visitDate)
+        FORM_CODE_POSTPARTUM -> VisitFormComputedFieldEvaluator.compute(
+          computedFrom,
+          answers,
+          visitDate,
+          state.registrationWeightKg,
+        )
         else -> null
       }
       answers = answers.withSingleValue(field.questionCode, value)
@@ -721,11 +817,24 @@ class DynamicVisitFormViewModel @Inject constructor(
     return fieldsAnsweredAndInRange(fieldsInSection(section))
   }
 
-  /** Whether every currently-visible required field has an answer and every `number` field with a
-   * `numericRange` satisfies it — gates the final Submit button. */
+  /** The schema's own `validationJson` cross-field rules (`EXCLUSIVE_OPTION`, `LTE`, etc.)
+   * currently violated by the answers so far — same helper every sibling dynamic form ViewModel
+   * exposes (e.g. [org.armman.sakhi.ui.delivery.DeliverySessionViewModel.crossFieldViolations]).
+   * Needed here specifically because [org.armman.sakhi.data.forms.FormMultiSelectExclusivity]'s
+   * checkbox-greying only prevents a NEW conflicting tap — it can't undo a conflicting answer that
+   * arrived some other way (an older draft, a backend-restored answer), so submission needs its
+   * own guard against whatever the backend has declared for this form version. */
+  fun crossFieldViolations(): List<FormCrossFieldRule> {
+    val version = _uiState.value.version ?: return emptyList()
+    return FormCrossFieldValidator.violatedRules(version.validationJson, _uiState.value.answers)
+  }
+
+  /** Whether every currently-visible required field has an answer, every `number` field with a
+   * `numericRange` satisfies it, and no `validationJson` cross-field rule is violated — gates the
+   * final Submit button. */
   fun isReadyToSubmit(): Boolean {
     if (_uiState.value.version == null) return false
-    return fieldsAnsweredAndInRange(visibleFields())
+    return fieldsAnsweredAndInRange(visibleFields()) && crossFieldViolations().isEmpty()
   }
 
   /** Every schema section — for either ANC_VISIT or INFANT_VISIT — buckets under

@@ -26,7 +26,7 @@ class VisitScheduleSyncExecutorTest {
     dao = FakeVisitScheduleDao()
     repository = RoomVisitScheduleRepository(dao)
     api = FakeVisitScheduleApi()
-    executor = VisitScheduleSyncExecutor(repository, api)
+    executor = VisitScheduleSyncExecutor(repository, api, org.armman.sakhi.data.visitform.FakeVisitFormSyncScheduler())
   }
 
   // SY-1

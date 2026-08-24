@@ -59,6 +59,15 @@ object VisitFormQuestionCodes {
   const val HEIGHT_CM = "height_of_the_woman_in_cm"
   const val WEIGHT_KG = "current_weight_of_the_woman_in_kg"
 
+  /** Bug fix (found in manual QA, 2026-08-21): POSTPARTUM_VISIT's own weight field is
+   * `current_weight_kg` — a DIFFERENT question_code from ANC_VISIT's [WEIGHT_KG]
+   * (`current_weight_of_the_woman_in_kg`), confirmed against the live `postpartum-visit.json`
+   * schema. [VisitFormComputedFieldEvaluator]'s BMI formula only ever looked up [WEIGHT_KG], so
+   * "Current BMI" silently never computed on PP1 even once routed there — same
+   * multi-spelling-resilience pattern as [org.armman.sakhi.data.forms.REGISTRATION_DATE_QUESTION_CODES]
+   * and [VISIT_DATE_QUESTION_CODES] above. */
+  val WEIGHT_KG_QUESTION_CODES: Set<String> = setOf(WEIGHT_KG, "current_weight_kg")
+
   /** `value_code`s the danger-sign/swelling rules match on. */
   object ValueCode {
     const val DIZZINESS = "dizziness"

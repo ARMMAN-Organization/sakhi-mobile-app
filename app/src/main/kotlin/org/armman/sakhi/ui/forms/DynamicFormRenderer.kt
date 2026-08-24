@@ -94,9 +94,23 @@ private const val VALUE_NO = "no"
  * ("3.2"), unlike a count field like household members. Kept as local literals (matching the
  * "Date of visit" precedent above), not an import from `ChildRegistrationQuestionCodes`, so this
  * generic renderer doesn't pick up a dependency on the child-registration flow for one field.
- * Every other `number` field keeps the existing digits-only behaviour. */
+ * Every other `number` field keeps the existing digits-only behaviour.
+ *
+ * Bug fix (found in manual QA, 2026-08-21): the DELIVERY_VISIT form's own
+ * `child{1,2,3}_birth_weight_kg` / `child{1,2,3}_birth_length_cm` fields (see
+ * [org.armman.sakhi.data.forms.DeliveryQuestionCodes.childBirthWeightKg]/`.childBirthLengthCm`) are
+ * the exact same kind of field — 0.5–6 kg birth weight, a fractional cm length — but were missing
+ * from this set entirely, so the Sakhi could only type whole numbers on the Delivery form (e.g.
+ * "1" instead of "0.5"). CHILD_REGISTRATION's own `child_weight_at_birth_in_kg` already worked;
+ * these three pairs did not. */
 private val DECIMAL_NUMBER_QUESTION_CODES = setOf(
   "child_weight_at_birth_in_kg",
+  "child1_birth_weight_kg",
+  "child2_birth_weight_kg",
+  "child3_birth_weight_kg",
+  "child1_birth_length_cm",
+  "child2_birth_length_cm",
+  "child3_birth_length_cm",
 )
 
 /** The Consent tab's affirmation items. The schema types them as yes/no `radio`s, but the design
@@ -193,6 +207,11 @@ fun DynamicFormField(
    * but shows the plain value with no "Auto-calculated" placeholder (bharath, 2026-08-08). Empty
    * for every caller except the Visit Form. */
   readOnlyQuestionCodes: Set<String> = emptySet(),
+  /** The hosting form's `form_code` (e.g. `"POSTPARTUM_VISIT"`), forwarded to
+   * [FormMultiSelectExclusivity.isDisabled] so a form-scoped exclusive-option rule (a
+   * `question_code` another form's schema reuses for an unrelated field) only applies here, not
+   * everywhere else that reuses the same code. Null for every caller except the Visit Form. */
+  formCode: String? = null,
 ) {
   val singleValue = answers.valueOf(field.questionCode).orEmpty()
   val multiValue = answers.multiValueOf(field.questionCode)
@@ -257,6 +276,7 @@ fun DynamicFormField(
       onCaptureImage = onCaptureImage,
       serverErrorText = errorText,
       readOnlyQuestionCodes = readOnlyQuestionCodes,
+      formCode = formCode,
     )
     if (errorText != null && !rendersErrorInline) {
       FieldErrorText(errorText)
@@ -310,6 +330,13 @@ private val ISO_TO_DISPLAY_DATE_FORMATTER = DateTimeFormatter.ofPattern("dd MMM 
 private fun formatIfIsoDate(value: String): String =
   runCatching { LocalDate.parse(value).format(ISO_TO_DISPLAY_DATE_FORMATTER) }.getOrDefault(value)
 
+/** Renders a [FormNumericRange] bound for the "must be between X and Y" error message. Bounds are
+ * [Double] to support fractional ranges (e.g. 0.5–6 kg birth weight); `%d`-style truncation would
+ * turn "0.5" into "0" (see the bug this fixes). A whole-number bound like 6.0 still prints as
+ * "6", not "6.0", to match the pre-existing integer-range message wording. */
+private fun formatRangeBound(value: Double): String =
+  if (value == value.toLong().toDouble()) value.toLong().toString() else value.toString()
+
 /** Inline error line shown under a field whose widget has no native error slot (select, radio,
  * checkbox, geography, media, image, read-only). Matches the [AppTextInputField] error tone. */
 @Composable
@@ -347,6 +374,7 @@ private fun DynamicFormFieldBody(
   onCaptureImage: () -> Unit,
   serverErrorText: String?,
   readOnlyQuestionCodes: Set<String> = emptySet(),
+  formCode: String? = null,
 ) {
   val ageFromDobEditable = field.questionCode in AGE_FROM_DOB_QUESTION_CODES &&
     !isAgeFromDobReadOnly(answers)
@@ -431,11 +459,13 @@ private fun DynamicFormFieldBody(
           }
         singleValue.isNotBlank() && !FormNumericRangeValidator.isWithinRange(field.numericRange, singleValue) ->
           // A missing `min` reads as 0, which is accurate here: the input filter accepts digits
-          // only, so no negative value can reach this field anyway.
+          // only, so no negative value can reach this field anyway. Bounds are formatted via
+          // formatRangeBound (not `.toInt()`) so a fractional min like 0.5 (e.g. delivery form's
+          // birth weight field, 0.5-6 kg) shows correctly instead of truncating to "0".
           stringResource(
             R.string.enrollment_error_number_range,
-            field.numericRange?.min?.toInt() ?: 0,
-            field.numericRange?.max?.toInt() ?: 0,
+            formatRangeBound(field.numericRange?.min ?: 0.0),
+            formatRangeBound(field.numericRange?.max ?: 0.0),
           )
         else -> null
       }
@@ -501,14 +531,15 @@ private fun DynamicFormFieldBody(
       // won't offer an out-of-range date, and any value that got in another way (older draft,
       // backend-restored answer) shows the matching message. Server error still wins.
       val bounds = FormDateRuleset.boundsFor(
-        field.questionCode,
-        answers,
-        registrationDate,
-        beneficiaryRegistrationDate,
-        motherLmpDate,
+        questionCode = field.questionCode,
+        answers = answers,
+        registrationDate = registrationDate,
+        formCode = formCode,
+        beneficiaryRegistrationDate = beneficiaryRegistrationDate,
+        motherLmpDate = motherLmpDate,
       )
       val localError = FormDateRuleset
-        .violationFor(field.questionCode, answers, registrationDate)
+        .violationFor(field.questionCode, answers, registrationDate, formCode)
         ?.let { stringResource(it.messageRes()) }
       AppDateField(
         label = field.label,
@@ -593,7 +624,8 @@ private fun DynamicFormFieldBody(
         // unchecking is always possible.
         enabled = { index ->
           val code = options.getOrNull(index)?.valueCode
-          code == null || !FormMultiSelectExclusivity.isDisabled(field.questionCode, code, multiValue)
+          code == null ||
+            !FormMultiSelectExclusivity.isDisabled(field.questionCode, code, multiValue, formCode)
         },
         required = required,
       )

@@ -581,8 +581,16 @@ class DynamicChildRegistrationViewModel @Inject constructor(
         FormNumericRangeValidator.isWithinRange(field.numericRange, entered)
       }
 
+    // Bug fix: same gap as DynamicMotherRegistrationViewModel's own date gate — the
+    // non-renderable date fields (registration_date and its typo twin, see
+    // ChildNonRenderableQuestionCodes) are filtered out of `fields` by visibleFields(), so a
+    // future value from an older draft or a backend-restored answer reached submit ungated.
+    // Union, not replacement: the visible fields still gate exactly as before.
+    val hiddenDateFields = state.version?.schemaJson.orEmpty().filter {
+      it.questionCode in ChildNonRenderableQuestionCodes.ALL && it !in fields
+    }
     val allDatesValid =
-      FormDateRuleset.allDatesValid(fields, state.answers, registrationDate)
+      FormDateRuleset.allDatesValid(fields + hiddenDateFields, state.answers, registrationDate)
 
     return allRequiredAnswered && allRangesValid && allDatesValid
   }

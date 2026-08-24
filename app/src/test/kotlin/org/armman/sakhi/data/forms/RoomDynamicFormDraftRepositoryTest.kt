@@ -97,7 +97,7 @@ class RoomDynamicFormDraftRepositoryTest {
     syncExecutor = DynamicFormSyncExecutor(dao, secureStore, coordinator, scheduleRepository, FakeVisitScheduleSyncScheduler())
     val rules = HardcodedRuleSource()
     visitScheduleApi = FakeVisitScheduleApi()
-    val visitScheduleSyncExecutor = VisitScheduleSyncExecutor(scheduleRepository, visitScheduleApi)
+    val visitScheduleSyncExecutor = VisitScheduleSyncExecutor(scheduleRepository, visitScheduleApi, org.armman.sakhi.data.visitform.FakeVisitFormSyncScheduler())
     val scheduleTrigger = MotherEnrolmentScheduleTrigger(
       coordinator = VisitScheduleCoordinator(
         repository = scheduleRepository,

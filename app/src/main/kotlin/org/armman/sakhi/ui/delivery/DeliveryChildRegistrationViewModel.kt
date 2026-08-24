@@ -23,6 +23,7 @@ import org.armman.sakhi.data.delivery.DeliverySessionStep
 import org.armman.sakhi.data.delivery.DeliveryToChildRegistrationPrefill
 import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormComputedFieldEvaluator
 import org.armman.sakhi.data.forms.FormCrossFieldRule
 import org.armman.sakhi.data.forms.FormCrossFieldValidator
 import org.armman.sakhi.data.forms.FormFieldInputType
@@ -219,7 +220,27 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
           serverBeneficiaryId = serverBeneficiaryId,
         )
       }
+      // Bug fix (2026-08-21): `current_age_of_infant_in_days` ("Age of infant") is declared
+      // `computedFrom: "CHILD_AGE_MONTHS"` on the live CHILD_REGISTRATION schema (see
+      // FormComputedFieldEvaluator's own doc on that token) and derives from
+      // `date_of_birth_of_infant`, which `initialAnswers` above already prefilled from the
+      // Delivery form's date of delivery. But unlike DynamicChildRegistrationViewModel (the
+      // standalone registration path), this ViewModel never actually evaluated any
+      // `computedFrom` field — so the age field stayed blank on open even though its source DOB
+      // was already there. Mirrors DynamicChildRegistrationViewModel.recomputeDerivedFields().
+      recomputeDerivedFields()
     }
+  }
+
+  private fun recomputeDerivedFields() {
+    val version = _uiState.value.version ?: return
+    var answers = _uiState.value.answers
+    version.schemaJson.forEach { field ->
+      val computedFrom = field.computedFrom ?: return@forEach
+      val value = FormComputedFieldEvaluator.compute(computedFrom, answers, LocalDate.now())
+      answers = answers.withSingleValue(field.questionCode, value)
+    }
+    _uiState.update { it.copy(answers = answers) }
   }
 
   /**
@@ -252,6 +273,7 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
       val updatedAnswers = previousAnswers.withSingleValue(questionCode, value)
       it.copy(answers = FormHiddenFieldReset.apply(fields, previousAnswers, updatedAnswers))
     }
+    recomputeDerivedFields()
   }
 
   fun setMultiAnswer(questionCode: String, values: List<String>) {
@@ -261,6 +283,7 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
       val updatedAnswers = previousAnswers.withMultiValue(questionCode, values)
       it.copy(answers = FormHiddenFieldReset.apply(fields, previousAnswers, updatedAnswers))
     }
+    recomputeDerivedFields()
   }
 
   fun setCapturedImage(questionCode: String, uri: String?) {

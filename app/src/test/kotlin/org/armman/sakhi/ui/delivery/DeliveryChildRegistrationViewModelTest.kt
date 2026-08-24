@@ -295,7 +295,7 @@ class DeliveryChildRegistrationViewModelTest {
   }
 
   @Test
-  fun `load() resolves childIndex 1 and serverBeneficiaryId from child2BeneficiaryId for the second twin`() {
+  fun `load() resolves childIndex 1 and serverBeneficiaryId from child2BeneficiaryId for the second twin`() = runTest {
     deliverySessionRepository.save(
       session(nextChildIndexToRegister = 1, child1BeneficiaryId = "child-1", child2BeneficiaryId = "child-2"),
     )
@@ -310,7 +310,7 @@ class DeliveryChildRegistrationViewModelTest {
   }
 
   @Test
-  fun `load() sets hasError when the session's step index has no corresponding child id`() {
+  fun `load() sets hasError when the session's step index has no corresponding child id`() = runTest {
     deliverySessionRepository.save(
       session(nextChildIndexToRegister = 1, child1BeneficiaryId = "child-1", child2BeneficiaryId = null),
     )
@@ -323,7 +323,7 @@ class DeliveryChildRegistrationViewModelTest {
   }
 
   @Test
-  fun `load() prefills answers from the stored delivery answers via DeliveryToChildRegistrationPrefill`() {
+  fun `load() prefills answers from the stored delivery answers via DeliveryToChildRegistrationPrefill`() = runTest {
     deliverySessionRepository.save(session())
     deliveryFormDraftRepository.answersToReturn = FormAnswers(
       singleValues = mapOf(DeliveryQuestionCodes.DATE_OF_DELIVERY to "2026-08-01"),
@@ -342,7 +342,7 @@ class DeliveryChildRegistrationViewModelTest {
   }
 
   @Test
-  fun `load() still succeeds with a degraded prefill when the delivery answers payload is gone`() {
+  fun `load() still succeeds with a degraded prefill when the delivery answers payload is gone`() = runTest {
     deliverySessionRepository.save(session())
     deliveryFormDraftRepository.answersToReturn = null
     formsRepository.version = versionWith(fields = emptyList())
@@ -432,7 +432,7 @@ class DeliveryChildRegistrationViewModelTest {
   }
 
   @Test
-  fun `visibleFields excludes WHO_ARE_YOU_REGISTERING and every ChildNonRenderableQuestionCodes entry`() {
+  fun `visibleFields excludes WHO_ARE_YOU_REGISTERING and every ChildNonRenderableQuestionCodes entry`() = runTest {
     deliverySessionRepository.save(session())
     formsRepository.version = versionWith(
       fields = listOf(
@@ -556,7 +556,7 @@ class DeliveryChildRegistrationViewModelTest {
   }
 
   @Test
-  fun `markMediaComplete gates isReadyToSubmit for a required MEDIA field`() {
+  fun `markMediaComplete gates isReadyToSubmit for a required MEDIA field`() = runTest {
     deliverySessionRepository.save(session())
     formsRepository.version = versionWith(
       fields = listOf(
@@ -582,7 +582,7 @@ class DeliveryChildRegistrationViewModelTest {
    * .DynamicChildRegistrationViewModel.markMediaComplete], which this was supposed to mirror.
    */
   @Test
-  fun `markMediaComplete also writes the answer, not just the mediaCompleted set`() {
+  fun `markMediaComplete also writes the answer, not just the mediaCompleted set`() = runTest {
     deliverySessionRepository.save(session())
     formsRepository.version = versionWith(
       fields = listOf(
@@ -603,7 +603,7 @@ class DeliveryChildRegistrationViewModelTest {
    * this ViewModel never did, so it submitted blank. Covers both published spellings.
    */
   @Test
-  fun `load() auto-fills the hidden registration-date field with today, either spelling`() {
+  fun `load() auto-fills the hidden registration-date field with today, either spelling`() = runTest {
     deliverySessionRepository.save(session())
     formsRepository.version = versionWith(fields = listOf(textField(REGISTRATION_DATE_QUESTION_CODE)))
 
@@ -614,7 +614,7 @@ class DeliveryChildRegistrationViewModelTest {
   }
 
   @Test
-  fun `load() auto-fills the corrected registration_date spelling too, not just the typo`() {
+  fun `load() auto-fills the corrected registration_date spelling too, not just the typo`() = runTest {
     // The backend has published both spellings across schema versions (typo on CHILD_REGISTRATION
     // v2, corrected later) — this proves the fill isn't hardcoded to just the typo spelling.
     deliverySessionRepository.save(session())
@@ -636,7 +636,7 @@ class DeliveryChildRegistrationViewModelTest {
    * ViewModel never called that resolver at all until this fix, so it submitted blank.
    */
   @Test
-  fun `load() auto-selects project_name from the Sakhi's own profile`() {
+  fun `load() auto-selects project_name from the Sakhi's own profile`() = runTest {
     fakeCurrentUserRepository.profile = fakeCurrentUserRepository.profile?.copy(projectName = "Kokan Project")
     deliverySessionRepository.save(session())
     formsRepository.version = versionWith(fields = listOf(textField(GeographyQuestionCodes.PROJECT_NAME)))
@@ -661,7 +661,7 @@ class DeliveryChildRegistrationViewModelTest {
   }
 
   @Test
-  fun `sections() returns distinct schema sections in first-appearance order, falling back for untagged fields`() {
+  fun `sections() returns distinct schema sections in first-appearance order, falling back for untagged fields`() = runTest {
     deliverySessionRepository.save(session())
     formsRepository.version = versionWith(
       fields = listOf(
@@ -681,7 +681,7 @@ class DeliveryChildRegistrationViewModelTest {
   }
 
   @Test
-  fun `fieldsInSection returns only that section's visible fields, in schema order`() {
+  fun `fieldsInSection returns only that section's visible fields, in schema order`() = runTest {
     deliverySessionRepository.save(session())
     formsRepository.version = versionWith(
       fields = listOf(
@@ -700,7 +700,7 @@ class DeliveryChildRegistrationViewModelTest {
   }
 
   @Test
-  fun `isSectionReady is false while a required field in that section is unanswered, true once answered`() {
+  fun `isSectionReady is false while a required field in that section is unanswered, true once answered`() = runTest {
     deliverySessionRepository.save(session())
     formsRepository.version = versionWith(
       fields = listOf(

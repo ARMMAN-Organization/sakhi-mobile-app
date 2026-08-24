@@ -61,6 +61,7 @@ class LocalBeneficiaryRepositoryTest {
       secureStore,
       schedules,
       FakeFormsRepository(),
+      LocalBeneficiaryStatusOverrideStore(FakeSecureKeyValueStore()),
     )
     repository = LocalBeneficiaryRepository(localEnrolments)
   }

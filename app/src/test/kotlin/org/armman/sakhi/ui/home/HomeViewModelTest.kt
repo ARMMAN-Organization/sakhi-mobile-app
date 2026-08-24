@@ -265,11 +265,21 @@ class HomeViewModelTest {
     dispatcher.scheduler.advanceUntilIdle()
     assertEquals(HomeUiState.Error, viewModel.uiState.value)
 
+    // `uiState` is a combine(...).stateIn(...) over `_uiState` (see HomeViewModel.uiState), not
+    // `_uiState.asStateFlow()`, so the transient Loading is only observable to a real collector —
+    // sampling `.value` once the scheduler settles can only ever show the terminal state.
+    // Collecting asserts the retry passes THROUGH Loading on its way to Success.
+    val observed = mutableListOf<HomeUiState>()
+    val collectJob = backgroundScope.launch(dispatcher) { viewModel.uiState.collect { observed += it } }
+    dispatcher.scheduler.runCurrent()
+    observed.clear()
+
     repository.error = null
     viewModel.loadSummary()
-    assertEquals(HomeUiState.Loading, viewModel.uiState.value)
     dispatcher.scheduler.advanceUntilIdle()
+    collectJob.cancel()
 
+    assertTrue("expected a Loading before the reload resolved, saw $observed", observed.contains(HomeUiState.Loading))
     assertTrue(viewModel.uiState.value is HomeUiState.Success)
   }
 

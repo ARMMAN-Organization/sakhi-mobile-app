@@ -644,11 +644,12 @@ class EnrollmentViewModel @Inject constructor(
   )
 
   private companion object {
-    // Mutually-exclusive option codes per multi-select (1-based; see arrays.xml).
-    val ANC_EXCLUSIVE = setOf(1, 16) // Q43: No known condition / Don't know
-    val SELF_CONDITION_EXCLUSIVE = setOf(1, 17) // Q58: No known condition / Don't know
-    val SUBSTANCE_EXCLUSIVE = setOf(1, 7) // Q61: No / Don't know
-    val MEDS_EXCLUSIVE = setOf(1) // Q59: Not taking any long-term medication
-    val COMPLICATIONS_EXCLUSIVE = setOf(4) // Q52: No complications
+    // Mutually-exclusive option codes per multi-select — single source of truth in
+    // HealthHistoryExclusiveOptions, shared with the UI's disabled-row logic.
+    val ANC_EXCLUSIVE = HealthHistoryExclusiveOptions.ANC_CONDITIONS
+    val SELF_CONDITION_EXCLUSIVE = HealthHistoryExclusiveOptions.SELF_CONDITIONS
+    val SUBSTANCE_EXCLUSIVE = HealthHistoryExclusiveOptions.SUBSTANCE_USE
+    val MEDS_EXCLUSIVE = HealthHistoryExclusiveOptions.LONG_TERM_MEDS
+    val COMPLICATIONS_EXCLUSIVE = HealthHistoryExclusiveOptions.DELIVERY_COMPLICATIONS
   }
 }

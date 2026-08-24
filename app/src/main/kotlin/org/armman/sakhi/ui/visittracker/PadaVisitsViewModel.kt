@@ -1,15 +1,16 @@
 package org.armman.sakhi.ui.visittracker
 
+import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.armman.sakhi.data.visit.Visit
@@ -57,13 +58,25 @@ class PadaVisitsViewModel @Inject constructor(
   private val _uiState = MutableStateFlow(PadaVisitsUiState(pada = padaName))
   val uiState: StateFlow<PadaVisitsUiState> = _uiState.asStateFlow()
 
-  /** Emits every keystroke; [SEARCH_DEBOUNCE_MS] later the latest value triggers a real reload. */
-  private val searchQueryChanges = MutableSharedFlow<String>(extraBufferCapacity = 1)
+  /**
+   * Holds the latest keystroke; [SEARCH_DEBOUNCE_MS] later that value triggers a real reload.
+   *
+   * Bug fix: this was a `MutableSharedFlow(extraBufferCapacity = 1)` written with `tryEmit`, which
+   * silently DROPS an emission once the single buffer slot is full. Two keystrokes closer together
+   * than the collector's turnaround (i.e. ordinary typing) meant the second was thrown away, and
+   * `debounce` then settled on the STALE prefix — so a Sakhi typing "Sunita Sharma" could get the
+   * results for "Sun". Since the search is exact-match server-side, that returns nothing and reads
+   * as "beneficiary not found". A StateFlow always retains the newest value (conflating rather than
+   * dropping), which is exactly the "latest wins" semantics debounce needs. `drop(1)` skips the
+   * initial "" so this doesn't fire a duplicate no-op fetch on top of `loadVisits()`.
+   */
+  private val searchQueryChanges = MutableStateFlow("")
 
   init {
     loadVisits()
     viewModelScope.launch {
       searchQueryChanges
+        .drop(1)
         .debounce(SEARCH_DEBOUNCE_MS)
         .distinctUntilChanged()
         .collect { fetchVisits(it) }
@@ -82,7 +95,7 @@ class PadaVisitsViewModel @Inject constructor(
   /** Updates the input immediately; the network reload is debounced (see [searchQueryChanges]). */
   fun onSearchQueryChanged(query: String) {
     _uiState.update { it.copy(searchQuery = query) }
-    searchQueryChanges.tryEmit(query)
+    searchQueryChanges.value = query
   }
 
   private suspend fun fetchVisits(search: String) {
@@ -103,7 +116,10 @@ class PadaVisitsViewModel @Inject constructor(
         )
       }
     } catch (e: Exception) {
-      // Generic error state for the UI; technical detail must not leak to users.
+      // Generic error state for the UI; technical detail must not leak to users. The real cause
+      // is still logged (not swallowed) — this was a silent catch-all with no trace at all, so a
+      // failed load here was previously undiagnosable from a bug report alone.
+      Log.e(TAG, "fetchVisits(padaId=$padaId, search='$search') failed: ${e::class.simpleName} — ${e.message}", e)
       _uiState.update { it.copy(isLoading = false, hasError = true) }
     }
   }
@@ -113,3 +129,5 @@ class PadaVisitsViewModel @Inject constructor(
     const val NAV_ARG_PADA_NAME = "padaName"
   }
 }
+
+private const val TAG = "PadaVisitsTracker"

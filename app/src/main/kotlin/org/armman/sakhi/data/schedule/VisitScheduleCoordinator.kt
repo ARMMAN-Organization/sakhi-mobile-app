@@ -95,12 +95,19 @@ class VisitScheduleCoordinator @Inject constructor(
   }
 
   /**
-   * Delivery form submitted — three effects, in this order:
+   * Delivery form submitted — two effects, in this order:
    *
    * 1. **Every open ANC visit lapses** (FR-S-3.7), regardless of window position. Done first so a
    *    schedule can never briefly show both an open ANC visit and a PP visit.
    * 2. The PP series is generated, anchored to the delivery date.
-   * 3. The NN series is generated, if child registration has not already produced it.
+   *
+   * NN is deliberately NOT generated here (CR-042 defect fix): NN belongs to the CHILD's own
+   * record, not the mother's, and the SRS requires child registration before NN1/NN2 exist at all
+   * ("First register child then NN1, NN2..." — INC visit logic doc). Generating NN against this
+   * mother's [ScheduleContext.localBeneficiaryId] let NN1/NN2 complete with no child ever
+   * registered, which is the bug this fix closes. NN is now generated only from
+   * [onChildRegistered], called by `DeliveryChildRegistrationSubmissionCoordinator` once the child
+   * is actually registered, anchored to the child's own local beneficiary id.
    *
    * Lapsing runs even when PP already exists, because it is a state change rather than a
    * generation — a delivery recorded twice must still leave no open ANC visits.
@@ -122,7 +129,8 @@ class VisitScheduleCoordinator @Inject constructor(
     return DeliveryScheduleResult(
       lapsedAncVisits = lapsed,
       ppVisitsGenerated = ppGenerated,
-      nnVisitsGenerated = generateNnIfAbsent(context),
+      // CR-042 fix: NN no longer generated here — see this function's own doc comment above.
+      nnVisitsGenerated = 0,
     )
   }
 

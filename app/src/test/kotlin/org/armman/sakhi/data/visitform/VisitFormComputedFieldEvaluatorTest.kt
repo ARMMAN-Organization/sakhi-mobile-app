@@ -93,4 +93,53 @@ class VisitFormComputedFieldEvaluatorTest {
 
     assertNull(result)
   }
+
+  @Test
+  fun `BMI computes for ANC_VISIT using its own WEIGHT_KG question code`() {
+    val answers = FormAnswers(
+      singleValues = mapOf(
+        VisitFormQuestionCodes.HEIGHT_CM to "160",
+        VisitFormQuestionCodes.WEIGHT_KG to "64.0",
+      ),
+    )
+
+    val result = VisitFormComputedFieldEvaluator.compute("BMI", answers, lmp)
+
+    assertEquals("25.0", result)
+  }
+
+  @Test
+  fun `BMI computes for POSTPARTUM_VISIT using its own current_weight_kg question code`() {
+    // Bug fix regression test (2026-08-21): PP1's own schema uses "current_weight_kg", a
+    // different question_code from ANC's WEIGHT_KG constant - BMI silently never computed on
+    // PP1 before WEIGHT_KG_QUESTION_CODES existed.
+    val answers = FormAnswers(
+      singleValues = mapOf(
+        VisitFormQuestionCodes.HEIGHT_CM to "160",
+        "current_weight_kg" to "64.0",
+      ),
+    )
+
+    val result = VisitFormComputedFieldEvaluator.compute("BMI", answers, lmp)
+
+    assertEquals("25.0", result)
+  }
+
+  @Test
+  fun `BMI is null without a height answer`() {
+    val answers = FormAnswers(singleValues = mapOf("current_weight_kg" to "64.0"))
+
+    val result = VisitFormComputedFieldEvaluator.compute("BMI", answers, lmp)
+
+    assertNull(result)
+  }
+
+  @Test
+  fun `BMI is null without any known weight answer`() {
+    val answers = FormAnswers(singleValues = mapOf(VisitFormQuestionCodes.HEIGHT_CM to "160"))
+
+    val result = VisitFormComputedFieldEvaluator.compute("BMI", answers, lmp)
+
+    assertNull(result)
+  }
 }

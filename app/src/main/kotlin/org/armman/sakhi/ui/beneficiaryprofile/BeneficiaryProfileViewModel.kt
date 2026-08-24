@@ -16,6 +16,7 @@ import org.armman.sakhi.data.beneficiary.BeneficiaryStatus
 import org.armman.sakhi.data.beneficiary.BeneficiaryType
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfile
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfileRepository
+import org.armman.sakhi.data.delivery.DeliverySessionEntity
 import org.armman.sakhi.data.delivery.DeliverySessionRepository
 import org.armman.sakhi.data.delivery.DeliverySessionStep
 import org.armman.sakhi.data.forms.SubmitErrorCopy
@@ -217,7 +218,7 @@ class BeneficiaryProfileViewModel @Inject constructor(
         DeliveryButtonState.ChildRegistrationPending(activeSession.localSessionUuid)
       DeliverySessionStep.PP1 ->
         resolveResumeVisit(VisitCodeType.PP, sequenceNo = 1) ?: DeliveryButtonState.Completed
-      DeliverySessionStep.NN -> resolveNnResumeVisit() ?: DeliveryButtonState.Completed
+      DeliverySessionStep.NN -> resolveNnResumeVisit(activeSession) ?: DeliveryButtonState.Completed
       // DONE is excluded by DeliverySessionRepository.getActiveForBeneficiary's own contract (see
       // its doc), so this branch is unreachable in practice — folded into the same fallback as a
       // null session rather than given its own dead code path.
@@ -238,17 +239,37 @@ class BeneficiaryProfileViewModel @Inject constructor(
     }.getOrNull()
 
   /**
-   * Best-effort NN resume target for [DeliverySessionStep.NN] — currently unreachable (nothing yet
-   * transitions a session to this step; see [DeliveryButtonState.ResumeVisit]'s doc), so this is a
-   * documented heuristic rather than the exact [org.armman.sakhi.data.schedule.sameSessionNnVisit]
-   * match: that selector needs the delivery form's own `deliveryFormFilledOn`, which
-   * [org.armman.sakhi.data.delivery.DeliverySessionEntity] does not currently store. Once an NN
-   * step-setter exists, prefer threading that date through instead of this "earliest open NN"
-   * fallback.
+   * Best-effort NN resume target for [DeliverySessionStep.NN].
+   *
+   * Stale-comment fix (2026-08-21): this used to say the [DeliverySessionStep.NN] step was
+   * "currently unreachable" and that [org.armman.sakhi.data.delivery.DeliverySessionEntity] didn't
+   * store `deliveryFormFilledOn` — both were wrong even before the CR-042 defect fix:
+   * [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator.advanceDeliverySessionIfDue]
+   * already transitions PP1 -> NN, and `deliveryFormFilledOn` has been a real column on that
+   * entity the whole time.
+   *
+   * CR-042 defect fix (2026-08-21): NN now generates anchored to the CHILD's own local beneficiary
+   * id, never the mother's (see [org.armman.sakhi.data.schedule.VisitScheduleCoordinator]
+   * .onDeliveryRecorded's doc) — so looking this up against [beneficiaryId] (this mother's own
+   * profile id) would never find it post-fix. [session]'s child1/2/3BeneficiaryId columns are the
+   * correct anchor: [org.armman.sakhi.data.delivery.DeliveryChildRegistrationSubmissionCoordinator]
+   * reuses each child's serverBeneficiaryId as its localBeneficiaryId too (see that class's own
+   * doc), so those columns are valid local ids to query against directly, no re-resolution needed.
+   * Still an "earliest open NN across all registered children" heuristic rather than an exact
+   * [org.armman.sakhi.data.schedule.sameSessionNnVisit] match — fine in practice since at most one
+   * child's NN can be open while the session sits at this step for a single-birth delivery; a
+   * twin/triplet delivery with more than one child mid-NN simultaneously is not handled precisely,
+   * same limitation the original heuristic already had.
    */
-  private suspend fun resolveNnResumeVisit(): DeliveryButtonState.ResumeVisit? =
+  private suspend fun resolveNnResumeVisit(session: DeliverySessionEntity): DeliveryButtonState.ResumeVisit? =
     runCatching {
-      visitScheduleRepository.getActiveForBeneficiary(beneficiaryId)
+      val childBeneficiaryIds = listOfNotNull(
+        session.child1BeneficiaryId,
+        session.child2BeneficiaryId,
+        session.child3BeneficiaryId,
+      )
+      childBeneficiaryIds
+        .flatMap { visitScheduleRepository.getActiveForBeneficiary(it) }
         .filter { it.visitType == VisitCodeType.NN && it.status != VisitScheduleStatus.COMPLETED }
         .minByOrNull(VisitScheduleEntity::scheduledDate)
         ?.let { DeliveryButtonState.ResumeVisit(it.localScheduleUuid, it.visitCode) }

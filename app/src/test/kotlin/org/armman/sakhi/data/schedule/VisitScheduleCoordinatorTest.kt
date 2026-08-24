@@ -90,16 +90,26 @@ class VisitScheduleCoordinatorTest {
     assertEquals(11, stored.count { it.visitType == VisitCodeType.INC })
   }
 
-  /** TR-3 — one submission, three effects, all applied. */
+  /**
+   * TR-3 — one submission, two effects, both applied. NN is deliberately NOT one of them (CR-042
+   * defect fix, 2026-08-21): NN used to generate here, anchored to the MOTHER's own
+   * localBeneficiaryId, which let NN1/NN2 complete with no child ever registered — violating the
+   * SRS's "register child then NN1, NN2" precondition. NN now only ever generates from
+   * [VisitScheduleCoordinator.onChildRegistered], anchored to the child's own id, once
+   * DeliveryChildRegistrationSubmissionCoordinator actually registers that child — see
+   * `NN generated at child registration is not generated again at delivery` below, and
+   * DeliveryChildRegistrationSubmissionCoordinatorTest's own schedule-generation coverage.
+   */
   @Test
-  fun `TR-3 recording a delivery lapses open ANC visits and generates PP and NN`() = runTest {
+  fun `TR-3 recording a delivery lapses open ANC visits and generates PP, but not NN`() = runTest {
     coordinator.onMotherEnrolled(motherContext())
 
     val result = coordinator.onDeliveryRecorded(deliveryContext())
 
     assertEquals(10, result.lapsedAncVisits)
     assertEquals(5, result.ppVisitsGenerated)
-    assertEquals(2, result.nnVisitsGenerated)
+    assertEquals(0, result.nnVisitsGenerated)
+    assertTrue(repository.getForBeneficiary(BENEFICIARY).none { it.visitType == VisitCodeType.NN })
 
     val stored = repository.getForBeneficiary(BENEFICIARY)
     assertTrue(

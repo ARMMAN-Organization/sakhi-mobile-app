@@ -61,11 +61,32 @@ class RoomDeliveryChildRegistrationDraftRepositoryTest {
     val sessionStore = SessionStore(FakeSecureKeyValueStore())
     sessionStore.saveSession(session)
     val formAuditRepository = FakeFormAuditRepository()
+    val visitScheduleRepositoryForChildRegistration = org.armman.sakhi.data.schedule.RoomVisitScheduleRepository(
+      org.armman.sakhi.data.schedule.FakeVisitScheduleDao(),
+    )
+    val visitScheduleCoordinatorForChildRegistration = org.armman.sakhi.data.schedule.VisitScheduleCoordinator(
+      repository = visitScheduleRepositoryForChildRegistration,
+      ancGenerator = org.armman.sakhi.data.schedule.AncScheduleGenerator(org.armman.sakhi.data.schedule.HardcodedRuleSource()),
+      ppGenerator = org.armman.sakhi.data.schedule.PpScheduleGenerator(org.armman.sakhi.data.schedule.HardcodedRuleSource()),
+      nnGenerator = org.armman.sakhi.data.schedule.NnScheduleGenerator(org.armman.sakhi.data.schedule.HardcodedRuleSource()),
+      incGenerator = org.armman.sakhi.data.schedule.IncScheduleGenerator(org.armman.sakhi.data.schedule.HardcodedRuleSource()),
+      ccvGenerator = org.armman.sakhi.data.schedule.CcvScheduleGenerator(org.armman.sakhi.data.schedule.HardcodedRuleSource()),
+    )
+    val visitScheduleSyncExecutorForChildRegistration = org.armman.sakhi.data.schedule.VisitScheduleSyncExecutor(
+      visitScheduleRepositoryForChildRegistration,
+      org.armman.sakhi.data.schedule.FakeVisitScheduleApi(),
+      org.armman.sakhi.data.visitform.FakeVisitFormSyncScheduler(),
+    )
     val coordinator = DeliveryChildRegistrationSubmissionCoordinator(
       formSubmissionApi = formSubmissionApi,
       deliverySessionRepository = deliverySessionRepository,
       sessionStore = sessionStore,
       formAuditRepository = formAuditRepository,
+      childFormDraftDao = org.armman.sakhi.data.childregistration.FakeChildFormDraftDao(),
+      secureStore = secureStore,
+      visitScheduleCoordinator = visitScheduleCoordinatorForChildRegistration,
+      visitScheduleRepository = visitScheduleRepositoryForChildRegistration,
+      visitScheduleSyncExecutor = visitScheduleSyncExecutorForChildRegistration,
     )
     val syncExecutor = DeliveryChildRegistrationSyncExecutor(dao, secureStore, coordinator)
     repository = RoomDeliveryChildRegistrationDraftRepository(

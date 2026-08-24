@@ -20,9 +20,12 @@ import org.armman.sakhi.data.delivery.DeliveryFormDraftRepository
 import org.armman.sakhi.data.delivery.DeliveryFormSubmitResult
 import org.armman.sakhi.data.delivery.DeliverySessionEntity
 import org.armman.sakhi.data.delivery.DeliverySessionRepository
+import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
 import org.armman.sakhi.data.forms.FakeFormsApi
 import org.armman.sakhi.data.forms.FakeFormsRepository
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormCrossFieldRule
+import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
 import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.forms.FormVersion
@@ -40,6 +43,7 @@ import org.armman.sakhi.data.visitform.VisitFormSubmitResult
 import java.time.LocalDate
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -55,17 +59,23 @@ class DynamicVisitFormViewModelTest {
   private class FakeBeneficiaryProfileRepository(
     private val profilesById: MutableMap<String, BeneficiaryProfile> = mutableMapOf(),
   ) : BeneficiaryProfileRepository {
+    var childRegistrationAnswersById: MutableMap<String, FormAnswers> = mutableMapOf()
+
     fun put(id: String, profile: BeneficiaryProfile) {
       profilesById[id] = profile
     }
 
     override suspend fun getBeneficiary(id: String): BeneficiaryProfile =
       profilesById[id] ?: throw NoSuchElementException("no beneficiary $id")
+
+    override suspend fun getChildRegistrationAnswers(id: String): FormAnswers? = childRegistrationAnswersById[id]
   }
 
-  private class FakeVisitFormRepository : VisitFormRepository {
+  private class FakeVisitFormRepository(
+    private val context: VisitContext? = null,
+  ) : VisitFormRepository {
     override suspend fun getVisitContext(beneficiaryId: String, visitId: String): VisitContext =
-      throw NoSuchElementException("no context for test")
+      context ?: throw NoSuchElementException("no context for test")
 
     override suspend fun canStartVisit(beneficiaryId: String): Boolean = true
   }
@@ -195,6 +205,19 @@ class DynamicVisitFormViewModelTest {
 
   private fun versionWithFields(fields: List<FormFieldSchema>) = infantVersion().copy(schemaJson = fields)
 
+  private fun versionWithFields(fields: List<FormFieldSchema>, validationJson: List<FormCrossFieldRule>) =
+    infantVersion().copy(schemaJson = fields, validationJson = validationJson)
+
+  private fun multiselectField(questionCode: String, vararg valueCodes: String) = FormFieldSchema(
+    label = questionCode,
+    required = true,
+    inputTypeRaw = "multiselect",
+    questionCode = questionCode,
+    options = valueCodes.mapIndexed { index, code ->
+      FormFieldOption(label = code, sortOrder = index, valueCode = code)
+    },
+  )
+
   private fun dateField(questionCode: String) = FormFieldSchema(
     label = "Actual visit date",
     required = true,
@@ -202,10 +225,14 @@ class DynamicVisitFormViewModelTest {
     questionCode = questionCode,
   )
 
-  private fun buildViewModel(beneficiaryId: String = "beneficiary-1", visitId: String = "visit-1") =
+  private fun buildViewModel(
+    beneficiaryId: String = "beneficiary-1",
+    visitId: String = "visit-1",
+    visitFormRepository: VisitFormRepository = FakeVisitFormRepository(),
+  ) =
     DynamicVisitFormViewModel(
       formsRepository = formsRepository,
-      visitFormRepository = FakeVisitFormRepository(),
+      visitFormRepository = visitFormRepository,
       beneficiaryProfileRepository = beneficiaryProfileRepository,
       visitFormDraftRepository = FakeVisitFormDraftRepository(),
       visitScheduleRepository = visitScheduleRepository,
@@ -288,6 +315,74 @@ class DynamicVisitFormViewModelTest {
     )
   }
 
+  // --- Bug fix (2026-08-22): INC_VISIT/CCV_VISIT are their own form codes now (the backend's
+  // live visit-code-form-map no longer aliases them to INFANT_VISIT), so every FORM_CODE_INFANT-
+  // only behaviour (child-registration prefill, age_in_months computed field) must also fire for
+  // them via FORM_CODES_INFANT_FAMILY — this is exactly the "age in months not auto-filled on
+  // INC1" report. ---
+
+  @Test
+  fun `load() prefills child details and computes age_in_months for INC_VISIT`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "INC1",
+      visitType = VisitCodeType.INC,
+    )
+    val dob = LocalDate.now().minusMonths(3)
+    beneficiaryProfileRepository.childRegistrationAnswersById["beneficiary-1"] =
+      FormAnswers().withSingleValue(ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT, dob.toString())
+    formsRepository.version = versionWithFields(
+      listOf(
+        dateField("date_of_birth"),
+        FormFieldSchema(
+          label = "Age in months",
+          required = false,
+          inputTypeRaw = "number",
+          questionCode = "age_in_months",
+          computedFrom = "CHILD_AGE_MONTHS",
+        ),
+      ),
+    )
+
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals("INC_VISIT", viewModel.uiState.value.formCode)
+    assertEquals(
+      dob.toString(),
+      viewModel.uiState.value.answers.valueOf("date_of_birth"),
+    )
+    assertEquals("3", viewModel.uiState.value.answers.valueOf("age_in_months"))
+  }
+
+  @Test
+  fun `load() prefills child details for CCV_VISIT`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "CCV1",
+      visitType = VisitCodeType.CCV,
+    )
+    val dob = LocalDate.now().minusMonths(6)
+    beneficiaryProfileRepository.childRegistrationAnswersById["beneficiary-1"] =
+      FormAnswers().withSingleValue(ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT, dob.toString())
+    formsRepository.version = versionWithFields(
+      listOf(dateField("date_of_birth")),
+    )
+
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals("CCV_VISIT", viewModel.uiState.value.formCode)
+    assertEquals(
+      dob.toString(),
+      viewModel.uiState.value.answers.valueOf("date_of_birth"),
+    )
+  }
+
   // --- Visit-date auto-fill (spec: "Actual visit date... Should automatically select today's
   // date", Postpartum I-IV and Neonate Visit 1 & 2, plus the pre-existing ANC/INFANT behaviour) ---
 
@@ -365,5 +460,137 @@ class DynamicVisitFormViewModelTest {
     testDispatcher.scheduler.advanceUntilIdle()
 
     assertNull(viewModel.uiState.value.answers.valueOf(VisitFormQuestionCodes.DATE_OF_VISIT))
+  }
+
+  // --- PP1 "Current BMI" auto-calculation (spec row 28: BMI = weight / height(m)^2) ---
+
+  private fun postpartumContext(heightCm: Int?) = VisitContext(
+    visitTypeLabel = "PP1",
+    rchNumber = "",
+    lmp = LocalDate.of(2026, 1, 1),
+    heightCm = heightCm,
+    previousHb = null,
+    advisedDeliveryPlace = null,
+    sickleCell = null,
+    registrationWeightKg = null,
+  )
+
+  @Test
+  fun `load() carries forward height and computes BMI on POSTPARTUM_VISIT`() {
+    // Bug fix regression test (2026-08-21): before this fix, POSTPARTUM_VISIT had no dispatch
+    // branch in recomputeDerivedFields() at all, and no height carry-forward of its own — "Current
+    // BMI" silently stayed unset on every PP1 form. This exercises both fixes together.
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "PP1",
+      visitType = VisitCodeType.PP,
+    )
+    formsRepository.version = versionWithFields(
+      listOf(
+        FormFieldSchema(
+          label = "Current weight (kg)",
+          required = true,
+          inputTypeRaw = "number",
+          questionCode = "current_weight_kg",
+        ),
+        FormFieldSchema(
+          label = "Current BMI",
+          required = true,
+          inputTypeRaw = "number",
+          questionCode = "current_bmi",
+          computedFrom = "BMI",
+        ),
+      ),
+    )
+
+    val viewModel = buildViewModel(visitFormRepository = FakeVisitFormRepository(postpartumContext(heightCm = 160)))
+    testDispatcher.scheduler.advanceUntilIdle()
+    viewModel.setAnswer("current_weight_kg", "64.0")
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals("160", viewModel.uiState.value.answers.valueOf(VisitFormQuestionCodes.HEIGHT_CM))
+    assertTrue(viewModel.uiState.value.heightLockedFromContext)
+    assertEquals("25.0", viewModel.uiState.value.answers.valueOf("current_bmi"))
+  }
+
+  @Test
+  fun `load() leaves BMI unset on POSTPARTUM_VISIT when no prior height is on file`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "PP1",
+      visitType = VisitCodeType.PP,
+    )
+    formsRepository.version = versionWithFields(
+      listOf(
+        FormFieldSchema(
+          label = "Current BMI",
+          required = true,
+          inputTypeRaw = "number",
+          questionCode = "current_bmi",
+          computedFrom = "BMI",
+        ),
+      ),
+    )
+
+    val viewModel = buildViewModel(visitFormRepository = FakeVisitFormRepository(postpartumContext(heightCm = null)))
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertNull(viewModel.uiState.value.answers.valueOf(VisitFormQuestionCodes.HEIGHT_CM))
+    assertNull(viewModel.uiState.value.answers.valueOf("current_bmi"))
+  }
+
+  // --- Submit gating on validationJson EXCLUSIVE_OPTION rules (see FormMultiSelectExclusivity's
+  // doc — the checkbox-greying alone can't undo a conflicting answer that arrived some other way,
+  // e.g. a legacy draft, so isReadyToSubmit() needs its own guard, same as every sibling dynamic
+  // form ViewModel via crossFieldViolations()/FormCrossFieldValidator) ---
+
+  @Test
+  fun `isReadyToSubmit is false when an EXCLUSIVE_OPTION rule is violated`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = versionWithFields(
+      listOf(multiselectField("urine_test", "normal", "infection", "sugar", "protein")),
+      validationJson = listOf(
+        FormCrossFieldRule(
+          rule = "EXCLUSIVE_OPTION",
+          fields = emptyList(),
+          field = "urine_test",
+          exclusiveValues = listOf("normal"),
+        ),
+      ),
+    )
+
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+    viewModel.setMultiAnswer("urine_test", listOf("normal", "infection"))
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertFalse(viewModel.isReadyToSubmit())
+  }
+
+  @Test
+  fun `isReadyToSubmit is true once the EXCLUSIVE_OPTION conflict is resolved`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = versionWithFields(
+      listOf(multiselectField("urine_test", "normal", "infection", "sugar", "protein")),
+      validationJson = listOf(
+        FormCrossFieldRule(
+          rule = "EXCLUSIVE_OPTION",
+          fields = emptyList(),
+          field = "urine_test",
+          exclusiveValues = listOf("normal"),
+        ),
+      ),
+    )
+
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+    viewModel.setMultiAnswer("urine_test", listOf("infection"))
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertTrue(viewModel.isReadyToSubmit())
   }
 }

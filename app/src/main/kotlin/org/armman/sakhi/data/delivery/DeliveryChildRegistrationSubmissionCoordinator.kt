@@ -1,13 +1,26 @@
 package org.armman.sakhi.data.delivery
 
 import org.armman.sakhi.data.audit.FormAuditRepository
+import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
+import org.armman.sakhi.data.childregistration.ChildFormDraftDao
+import org.armman.sakhi.data.childregistration.ChildFormDraftEntity
+import org.armman.sakhi.data.childregistration.ChildFormDraftPayload
+import org.armman.sakhi.data.childregistration.childFormDraftGson
+import org.armman.sakhi.data.childregistration.childFormDraftPayloadKey
 import org.armman.sakhi.data.enrollment.ApiErrorParser
+import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
+import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
 import org.armman.sakhi.data.forms.CreateSubmissionRequestDto
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormSubmissionApi
 import org.armman.sakhi.data.forms.SubmitErrorCopy
+import org.armman.sakhi.data.schedule.ScheduleContext
+import org.armman.sakhi.data.schedule.VisitScheduleCoordinator
+import org.armman.sakhi.data.schedule.VisitScheduleRepository
+import org.armman.sakhi.data.schedule.VisitScheduleSyncExecutor
 import java.time.Instant
+import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -64,6 +77,11 @@ class DeliveryChildRegistrationSubmissionCoordinator @Inject constructor(
   private val deliverySessionRepository: DeliverySessionRepository,
   private val sessionStore: SessionStore,
   private val formAuditRepository: FormAuditRepository,
+  private val childFormDraftDao: ChildFormDraftDao,
+  private val secureStore: SecureKeyValueStore,
+  private val visitScheduleCoordinator: VisitScheduleCoordinator,
+  private val visitScheduleRepository: VisitScheduleRepository,
+  private val visitScheduleSyncExecutor: VisitScheduleSyncExecutor,
 ) {
 
   /**
@@ -83,6 +101,13 @@ class DeliveryChildRegistrationSubmissionCoordinator @Inject constructor(
     answers: FormAnswers,
   ): Result<Unit> = runCatching {
     sessionStore.readSession() ?: throw DeliveryChildRegistrationSubmissionException.NoActiveSession
+
+    // CR-042 defect fix: fetched up front (not just inside advanceSessionAfterChildRegistered) so
+    // deliveryFormFilledOn is available for this child's own schedule generation below, and so a
+    // genuinely missing session row fails loudly via NoActiveDeliverySession instead of this
+    // submission silently doing nothing to advance the session afterwards.
+    val session = deliverySessionRepository.getBySessionUuid(localSessionUuid)
+      ?: throw DeliveryChildRegistrationSubmissionException.NoActiveDeliverySession
 
     val submissionRequest = CreateSubmissionRequestDto(
       formVersionId = formVersionId,
@@ -105,13 +130,135 @@ class DeliveryChildRegistrationSubmissionCoordinator @Inject constructor(
 
     formAuditRepository.recordSubmitted(localSubmissionUuid, FORM_CODE_CHILD_REGISTRATION)
 
-    advanceSessionAfterChildRegistered(localSessionUuid)
+    // CR-042 defect fix (part 1 of 2): this child previously had NO local beneficiary record at
+    // all — invisible on My Beneficiaries, and with nothing for a schedule to anchor to but the
+    // mother's own id. serverBeneficiaryId is reused as the local id too, same "known id, don't
+    // mint or re-resolve one" convention this class's own doc already established for the
+    // submission above — idempotent across a retry, and matches this child's real
+    // beneficiary-service id from its very first local row.
+    saveChildDraftLocally(
+      localBeneficiaryId = serverBeneficiaryId,
+      formVersionId = formVersionId,
+      localSubmissionUuid = localSubmissionUuid,
+      answers = answers,
+      deliveryFormFilledOn = session.deliveryFormFilledOn,
+    )
+
+    // CR-042 defect fix (part 2 of 2): generate this child's own NN + INC schedule now, anchored
+    // to ITS OWN local id — never the mother's (see VisitScheduleCoordinator.onDeliveryRecorded's
+    // doc for why NN no longer generates there). Best-effort: a schedule can be regenerated later,
+    // a lost registration cannot — same stance ChildEnrolmentScheduleTrigger already takes for the
+    // standalone (non-delivery-linked) registration flow.
+    generateChildSchedule(
+      localBeneficiaryId = serverBeneficiaryId,
+      answers = answers,
+      deliveryFormFilledOn = session.deliveryFormFilledOn,
+    )
+
+    // This whole submit() already required backend connectivity to get this far, so push the
+    // freshly generated NN/INC schedule up immediately too — without this it sits unsynced until
+    // the Sakhi's next manual Data Upload even though nothing is stopping it from going now.
+    // Mirrors RoomDynamicFormDraftRepository's/RoomDeliveryFormDraftRepository's CR-022/CR-042
+    // pattern for MOTHER_REGISTRATION/DELIVERY_VISIT, which this coordinator never had.
+    // Best-effort: any failure here leaves the schedule PENDING for the next Data Upload exactly
+    // as before, and must never turn a successful child registration into a reported failure.
+    runCatching { visitScheduleSyncExecutor.run() }
+
+    advanceSessionAfterChildRegistered(session)
   }
 
-  /** No-op (not an error) if the session row is somehow already gone — defensive only, mirrors
-   * every other best-effort session read in this package. */
-  private suspend fun advanceSessionAfterChildRegistered(localSessionUuid: String) {
-    val session = deliverySessionRepository.getBySessionUuid(localSessionUuid) ?: return
+  /** Persists this child's own local draft row + encrypted answers payload — the same hybrid split
+   * [org.armman.sakhi.data.childregistration.RoomChildFormDraftRepository] uses for a standalone
+   * registration, so [org.armman.sakhi.data.beneficiary.LocalEnrolmentBeneficiarySource] (which
+   * reads [ChildFormDraftDao] directly) surfaces this child on My Beneficiaries exactly like any
+   * other. `syncStatus = SYNCED` because, unlike the standalone flow's save-then-sync split, the
+   * submission above has already succeeded by the time this runs — there is no separate sync step
+   * left to queue. [deliveryFormFilledOn] falls back to today only for a pre-migration session row
+   * that predates that column ever being populated — see [DeliverySessionEntity] for why that
+   * should not happen in practice. */
+  private suspend fun saveChildDraftLocally(
+    localBeneficiaryId: String,
+    formVersionId: String,
+    localSubmissionUuid: String,
+    answers: FormAnswers,
+    deliveryFormFilledOn: LocalDate?,
+  ) {
+    val payload = ChildFormDraftPayload(
+      answers = answers,
+      registrationDateIso = (deliveryFormFilledOn ?: LocalDate.now()).toString(),
+    )
+    secureStore.putString(childFormDraftPayloadKey(localBeneficiaryId), childFormDraftGson.toJson(payload))
+
+    val now = Instant.now().toEpochMilli()
+    childFormDraftDao.upsert(
+      ChildFormDraftEntity(
+        localBeneficiaryId = localBeneficiaryId,
+        formCode = FORM_CODE_CHILD_REGISTRATION,
+        formVersionId = formVersionId,
+        localSubmissionUuid = localSubmissionUuid,
+        syncStatus = EnrollmentSyncStatus.SYNCED,
+        createdAtEpochMillis = now,
+        lastAttemptAtEpochMillis = now,
+        retryCount = 0,
+        remoteBeneficiaryId = localBeneficiaryId,
+        remoteSubmissionId = null,
+        lastErrorMessage = null,
+      ),
+    )
+  }
+
+  /** Generates NN + INC for this child, anchored to its own [localBeneficiaryId] — never the
+   * mother's. No-op if [deliveryFormFilledOn] is null (pre-migration session row) or this child's
+   * own date-of-birth answer is missing/unparseable: a malformed answer must not lose a
+   * registration the Sakhi has already completed, same stance as
+   * [org.armman.sakhi.data.schedule.ChildEnrolmentScheduleTrigger.generateFor]. Passes `dob` as
+   * both [ScheduleContext.dob] and [ScheduleContext.deliveryDate] deliberately: for a newborn
+   * registered through THIS delivery-linked flow the two are the same date, and setting
+   * [ScheduleContext.deliveryDate] (alongside [deliveryFormFilledOn]) is what makes
+   * [VisitScheduleCoordinator.onChildRegistered] generate NN at all — see that function's
+   * `hasDeliveryDetails` gate. */
+  private suspend fun generateChildSchedule(
+    localBeneficiaryId: String,
+    answers: FormAnswers,
+    deliveryFormFilledOn: LocalDate?,
+  ) {
+    if (deliveryFormFilledOn == null) return
+    val dob = answers.valueOf(ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT)
+      ?.takeIf { it.isNotBlank() }
+      ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+      ?: return
+
+    runCatching {
+      visitScheduleCoordinator.onChildRegistered(
+        ScheduleContext(
+          localBeneficiaryId = localBeneficiaryId,
+          registrationDate = deliveryFormFilledOn,
+          dob = dob,
+          deliveryDate = dob,
+          deliveryFormFilledOn = deliveryFormFilledOn,
+        ),
+      )
+
+      // BUG FIX (found in QA 2026-08-21): VisitScheduleCoordinator's own backfillServerBeneficiaryId
+      // only stamps serverBeneficiaryId onto freshly generated rows by copying it off an EXISTING
+      // row for that same beneficiary that already has one — it assumes a beneficiary always syncs
+      // to the backend as a separate, earlier step before any schedule is ever generated for them
+      // (true for the mother, and for the standalone child-registration flow, both of which sync
+      // via their own background executor first). This child has no earlier synced row to copy
+      // from — its very first schedule rows are the ones just generated above — so without this
+      // explicit attach, NN1/NN2/INC1 all save with serverBeneficiaryId = null and
+      // VisitFormSubmissionCoordinator.submit rejects them with NotYetSynced even on a perfectly
+      // good connection, since that check is a data-completeness gate, not a live connectivity
+      // check. localBeneficiaryId IS the server id here (see this class's own doc on why they're
+      // the same value), so this is not a network call — it's known immediately, unconditionally.
+      visitScheduleRepository.attachServerBeneficiaryId(localBeneficiaryId, localBeneficiaryId)
+    }
+  }
+
+  /** Advances [session]'s step now that one more child is registered — takes the already-fetched
+   * row (see [submit]) rather than re-reading it, since a re-read here could race a concurrent
+   * update and silently revert [nextChildIndexToRegister]. */
+  private suspend fun advanceSessionAfterChildRegistered(session: DeliverySessionEntity) {
     val totalChildren = listOfNotNull(
       session.child1BeneficiaryId,
       session.child2BeneficiaryId,

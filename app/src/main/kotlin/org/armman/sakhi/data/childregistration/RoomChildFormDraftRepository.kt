@@ -8,6 +8,7 @@ import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.schedule.ChildEnrolmentScheduleTrigger
+import org.armman.sakhi.data.schedule.VisitScheduleSyncExecutor
 import java.time.Instant
 import java.time.LocalDate
 import javax.inject.Inject
@@ -38,6 +39,7 @@ class RoomChildFormDraftRepository @Inject constructor(
   private val connectivityChecker: ConnectivityChecker,
   private val syncExecutor: ChildFormSyncExecutor,
   private val scheduleTrigger: ChildEnrolmentScheduleTrigger,
+  private val visitScheduleSyncExecutor: VisitScheduleSyncExecutor,
 ) : ChildFormDraftRepository {
 
   override suspend fun saveDraft(
@@ -81,7 +83,20 @@ class RoomChildFormDraftRepository @Inject constructor(
       return ChildFormSubmitResult.QueuedOffline
     }
 
-    return when (val result = syncExecutor.runOne(localBeneficiaryId)) {
+    val result = syncExecutor.runOne(localBeneficiaryId)
+
+    // We already have a live connection right now, so push the freshly generated INC/NN schedule
+    // up immediately too — without this it would sit unsynced until the Sakhi's next manual Data
+    // Upload even though nothing is stopping it from going now. Mirrors
+    // RoomDynamicFormDraftRepository's/RoomDeliveryFormDraftRepository's CR-022/CR-042 pattern for
+    // MOTHER_REGISTRATION/DELIVERY_VISIT, which this repository never had. Best-effort: any
+    // failure here leaves the schedule PENDING for the next Data Upload exactly as before, and
+    // must never turn a successful child registration into a reported failure.
+    if (formCode == CHILD_REGISTRATION_FORM_CODE && result is ChildFormSyncItemResult.Synced) {
+      runCatching { visitScheduleSyncExecutor.run() }
+    }
+
+    return when (result) {
       is ChildFormSyncItemResult.Synced -> ChildFormSubmitResult.Synced
       is ChildFormSyncItemResult.DuplicateConflict -> ChildFormSubmitResult.DuplicateConflict
       is ChildFormSyncItemResult.Failed -> ChildFormSubmitResult.Failed(result.message)

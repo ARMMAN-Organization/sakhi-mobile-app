@@ -8,14 +8,28 @@ import org.armman.sakhi.data.audit.FormAuditEventType
 import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
+import org.armman.sakhi.data.childregistration.FakeChildFormDraftDao
+import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
+import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
 import org.armman.sakhi.data.forms.CreateSubmissionResponseDto
 import org.armman.sakhi.data.forms.FakeFormSubmissionApi
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.SubmissionResponseData
+import org.armman.sakhi.data.schedule.AncScheduleGenerator
+import org.armman.sakhi.data.schedule.CcvScheduleGenerator
+import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
+import org.armman.sakhi.data.schedule.HardcodedRuleSource
+import org.armman.sakhi.data.schedule.IncScheduleGenerator
+import org.armman.sakhi.data.schedule.NnScheduleGenerator
+import org.armman.sakhi.data.schedule.PpScheduleGenerator
+import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
+import org.armman.sakhi.data.schedule.VisitCodeType
+import org.armman.sakhi.data.schedule.VisitScheduleCoordinator
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.time.LocalDate
 import retrofit2.Response
 
 /**
@@ -29,8 +43,14 @@ class DeliveryChildRegistrationSubmissionCoordinatorTest {
   private lateinit var formSubmissionApi: FakeFormSubmissionApi
   private lateinit var deliverySessionDao: FakeDeliverySessionDao
   private lateinit var deliverySessionRepository: DeliverySessionRepository
+  private lateinit var secureStore: FakeSecureKeyValueStore
   private lateinit var sessionStore: SessionStore
   private lateinit var formAuditRepository: FakeFormAuditRepository
+  private lateinit var childFormDraftDao: FakeChildFormDraftDao
+  private lateinit var visitScheduleDao: FakeVisitScheduleDao
+  private lateinit var visitScheduleRepository: RoomVisitScheduleRepository
+  private lateinit var visitScheduleCoordinator: VisitScheduleCoordinator
+  private lateinit var visitScheduleSyncExecutor: org.armman.sakhi.data.schedule.VisitScheduleSyncExecutor
   private lateinit var coordinator: DeliveryChildRegistrationSubmissionCoordinator
 
   private val session = UserSession(
@@ -51,14 +71,37 @@ class DeliveryChildRegistrationSubmissionCoordinatorTest {
     formSubmissionApi = FakeFormSubmissionApi()
     deliverySessionDao = FakeDeliverySessionDao()
     deliverySessionRepository = RoomDeliverySessionRepository(deliverySessionDao)
-    sessionStore = SessionStore(FakeSecureKeyValueStore())
+    secureStore = FakeSecureKeyValueStore()
+    sessionStore = SessionStore(secureStore)
     sessionStore.saveSession(session)
     formAuditRepository = FakeFormAuditRepository()
+    childFormDraftDao = FakeChildFormDraftDao()
+    visitScheduleDao = FakeVisitScheduleDao()
+    visitScheduleRepository = RoomVisitScheduleRepository(visitScheduleDao)
+    val rules = HardcodedRuleSource()
+    visitScheduleCoordinator = VisitScheduleCoordinator(
+      repository = visitScheduleRepository,
+      ancGenerator = AncScheduleGenerator(rules),
+      ppGenerator = PpScheduleGenerator(rules),
+      nnGenerator = NnScheduleGenerator(rules),
+      incGenerator = IncScheduleGenerator(rules),
+      ccvGenerator = CcvScheduleGenerator(rules),
+    )
+    visitScheduleSyncExecutor = org.armman.sakhi.data.schedule.VisitScheduleSyncExecutor(
+      visitScheduleRepository,
+      org.armman.sakhi.data.schedule.FakeVisitScheduleApi(),
+      org.armman.sakhi.data.visitform.FakeVisitFormSyncScheduler(),
+    )
     coordinator = DeliveryChildRegistrationSubmissionCoordinator(
       formSubmissionApi = formSubmissionApi,
       deliverySessionRepository = deliverySessionRepository,
       sessionStore = sessionStore,
       formAuditRepository = formAuditRepository,
+      childFormDraftDao = childFormDraftDao,
+      secureStore = secureStore,
+      visitScheduleCoordinator = visitScheduleCoordinator,
+      visitScheduleRepository = visitScheduleRepository,
+      visitScheduleSyncExecutor = visitScheduleSyncExecutor,
     )
   }
 
@@ -68,12 +111,14 @@ class DeliveryChildRegistrationSubmissionCoordinatorTest {
     child2: String? = null,
     child3: String? = null,
     nextChildIndexToRegister: Int = 0,
+    deliveryFormFilledOn: LocalDate? = null,
   ): DeliverySessionEntity {
     val entity = DeliverySessionEntity(
       localSessionUuid = localSessionUuid,
       localBeneficiaryId = "mother-1",
       step = DeliverySessionStep.CHILD_REGISTRATION,
       deliverySubmissionLocalUuid = "delivery-submission-1",
+      deliveryFormFilledOn = deliveryFormFilledOn,
       child1BeneficiaryId = child1,
       child2BeneficiaryId = child2,
       child3BeneficiaryId = child3,
@@ -93,12 +138,13 @@ class DeliveryChildRegistrationSubmissionCoordinatorTest {
     localSessionUuid: String = "session-1",
     serverBeneficiaryId: String = "child-a",
     localSubmissionUuid: String = "child-reg-submission-1",
+    answersOverride: FormAnswers = answers,
   ) = coordinator.submit(
     localSessionUuid = localSessionUuid,
     serverBeneficiaryId = serverBeneficiaryId,
     localSubmissionUuid = localSubmissionUuid,
     formVersionId = "child-reg-version-1",
-    answers = answers,
+    answers = answersOverride,
   )
 
   @Test
@@ -195,6 +241,11 @@ class DeliveryChildRegistrationSubmissionCoordinatorTest {
       deliverySessionRepository = deliverySessionRepository,
       sessionStore = loggedOutSessionStore,
       formAuditRepository = formAuditRepository,
+      childFormDraftDao = childFormDraftDao,
+      secureStore = secureStore,
+      visitScheduleCoordinator = visitScheduleCoordinator,
+      visitScheduleRepository = visitScheduleRepository,
+      visitScheduleSyncExecutor = visitScheduleSyncExecutor,
     )
     seedSession()
     formSubmissionApi.response = successResponse()
@@ -212,13 +263,87 @@ class DeliveryChildRegistrationSubmissionCoordinatorTest {
   }
 
   @Test
-  fun `submit() is a no-op on the session row when no session exists for localSessionUuid`() = runTest {
-    // Deliberately no seedSession() call.
+  fun `submit() fails with NoActiveDeliverySession when no session exists for localSessionUuid`() = runTest {
+    // Deliberately no seedSession() call. CR-042 defect fix: this used to silently no-op (the
+    // session read only happened inside advanceSessionAfterChildRegistered, after the form had
+    // already been submitted to the backend with nothing local to show for it) — now the session
+    // is required up front, since deliveryFormFilledOn from it drives this child's own schedule
+    // generation below.
     formSubmissionApi.response = successResponse()
 
     val result = submit(localSessionUuid = "missing-session")
 
-    assertTrue(result.isSuccess)
+    assertTrue(result.isFailure)
+    assertTrue(result.exceptionOrNull() is DeliveryChildRegistrationSubmissionException.NoActiveDeliverySession)
     assertEquals(null, deliverySessionRepository.getBySessionUuid("missing-session"))
+  }
+
+  // ---- CR-042 defect fix: local child draft + own-anchored schedule ----------------------------
+
+  @Test
+  fun `submit() saves a local child draft so the child appears on My Beneficiaries`() = runTest {
+    seedSession(child1 = "child-a")
+    formSubmissionApi.response = successResponse()
+
+    submit(serverBeneficiaryId = "child-a")
+
+    val draft = childFormDraftDao.getByLocalBeneficiaryId("child-a")
+    assertTrue("Expected a local ChildFormDraftEntity for the auto-created child", draft != null)
+    assertEquals(EnrollmentSyncStatus.SYNCED, draft!!.syncStatus)
+    assertEquals("child-a", draft.remoteBeneficiaryId)
+    assertEquals("CHILD_REGISTRATION", draft.formCode)
+  }
+
+  @Test
+  fun `submit() generates NN and INC anchored to the child's own id, not the mother's`() = runTest {
+    val dob = LocalDate.of(2026, 6, 1)
+    val deliveryFormFilledOn = dob.plusDays(2)
+    seedSession(child1 = "child-a", deliveryFormFilledOn = deliveryFormFilledOn)
+    formSubmissionApi.response = successResponse()
+
+    submit(
+      serverBeneficiaryId = "child-a",
+      answersOverride = FormAnswers(
+        singleValues = mapOf(
+          "name_of_the_child" to "Test Baby",
+          ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT to dob.toString(),
+        ),
+      ),
+    )
+
+    val childSchedule = visitScheduleRepository.getForBeneficiary("child-a")
+    assertEquals(2, childSchedule.count { it.visitType == VisitCodeType.NN })
+    assertTrue(childSchedule.any { it.visitType == VisitCodeType.INC })
+    // The bug this fixes: NN/INC must never land on the mother's own local id.
+    assertTrue(visitScheduleRepository.getForBeneficiary("mother-1").none { it.visitType == VisitCodeType.NN })
+    // Regression test for the "hasn't finished syncing yet" bug found in manual QA: a freshly
+    // generated row for a brand-new beneficiary has no earlier synced row to backfill from, so it
+    // must be explicitly stamped here rather than relying on VisitScheduleCoordinator's own
+    // backfill.
+    assertTrue(childSchedule.all { it.serverBeneficiaryId == "child-a" })
+  }
+
+  @Test
+  fun `submit() does not crash and generates no schedule when deliveryFormFilledOn is missing`() = runTest {
+    val dob = LocalDate.of(2026, 6, 1)
+    // Deliberately no deliveryFormFilledOn — a pre-migration session row.
+    seedSession(child1 = "child-a", deliveryFormFilledOn = null)
+    formSubmissionApi.response = successResponse()
+
+    val result = submit(
+      serverBeneficiaryId = "child-a",
+      answersOverride = FormAnswers(
+        singleValues = mapOf(
+          "name_of_the_child" to "Test Baby",
+          ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT to dob.toString(),
+        ),
+      ),
+    )
+
+    assertTrue(result.isSuccess)
+    assertTrue(visitScheduleRepository.getForBeneficiary("child-a").isEmpty())
+    // The draft still saves even when the schedule can't be generated yet — a missing schedule is
+    // fixable later, a lost registration is not.
+    assertTrue(childFormDraftDao.getByLocalBeneficiaryId("child-a") != null)
   }
 }

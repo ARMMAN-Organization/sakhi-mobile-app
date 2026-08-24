@@ -216,11 +216,33 @@ class DeliverySessionViewModelTest {
     assertEquals(LocalDate.of(2026, 8, 15), deliveryFormDraftRepository.lastDeliveryFormFilledOn)
   }
 
-  /** [DeliveryQuestionCodes.DELIVERY_FORM_FILLED_ON]'s own fallback contract: an unanswered
-   * (non-required) filled-on date reuses [DeliveryQuestionCodes.DATE_OF_DELIVERY] rather than
-   * defaulting to today. */
+  /**
+   * [DeliveryQuestionCodes.DELIVERY_FORM_FILLED_ON]'s real fallback contract, per that constant's
+   * own doc: the fallback to [DeliveryQuestionCodes.DATE_OF_DELIVERY] is for the field being
+   * ABSENT from the schema ("if a schema republish ever drops this field"), not merely unanswered.
+   * While the field IS present, `prefillTodayDateFields` seeds it with today on load — it is "the
+   * date the Sakhi is filling this form", so today is the correct value and the fallback is
+   * unreachable by design. This asserts the absent-field path, which is the one that can happen.
+   */
   @Test
-  fun `onSubmit falls back deliveryFormFilledOn to deliveryDate when the field is unanswered`() = runTest {
+  fun `onSubmit falls back deliveryFormFilledOn to deliveryDate when the schema omits the field`() = runTest {
+    formsRepository.version = versionWith(
+      fields = listOf(dateField(DeliveryQuestionCodes.DATE_OF_DELIVERY)),
+    )
+    val viewModel = buildViewModel()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.setAnswer(DeliveryQuestionCodes.DATE_OF_DELIVERY, "2026-08-01")
+    viewModel.onSubmit()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(LocalDate.of(2026, 8, 1), deliveryFormDraftRepository.lastDeliveryFormFilledOn)
+  }
+
+  /** The companion to the above: while the field IS in the schema and the Sakhi leaves it alone,
+   * it carries today's prefill rather than the delivery date. */
+  @Test
+  fun `onSubmit uses today's prefilled deliveryFormFilledOn when the schema carries the field`() = runTest {
     formsRepository.version = versionWith(
       fields = listOf(
         dateField(DeliveryQuestionCodes.DATE_OF_DELIVERY),
@@ -234,7 +256,7 @@ class DeliverySessionViewModelTest {
     viewModel.onSubmit()
     dispatcher.scheduler.advanceUntilIdle()
 
-    assertEquals(LocalDate.of(2026, 8, 1), deliveryFormDraftRepository.lastDeliveryFormFilledOn)
+    assertEquals(LocalDate.now(), deliveryFormDraftRepository.lastDeliveryFormFilledOn)
   }
 
   @Test
