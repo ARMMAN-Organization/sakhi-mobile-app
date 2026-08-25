@@ -110,6 +110,7 @@ class RoomVisitFormDraftRepositoryTest {
         org.armman.sakhi.data.delivery.FakeDeliverySessionDao(),
       ),
       childFormDraftDao = org.armman.sakhi.data.childregistration.FakeChildFormDraftDao(),
+      riskAssessmentApi = FakeRiskAssessmentApi(),
     )
     // Reuses the same dao/secureStore as the repository so runOne() sees the row submitDraft just
     // wrote — matching how the real Hilt graph wires a single instance of each.

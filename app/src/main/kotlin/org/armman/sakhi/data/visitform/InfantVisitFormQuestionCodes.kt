@@ -11,7 +11,9 @@ import org.armman.sakhi.data.forms.FormAnswers
  * that object — INFANT_VISIT's schema is entirely separate from ANC_VISIT's.
  */
 object InfantVisitFormQuestionCodes {
-  /** Q "Is the baby showing any danger signs since last visit?" — multiselect. */
+  /** Q "Is the baby showing any danger signs since last visit?" — multiselect. Confirmed identical
+   * `question_code` across INFANT_VISIT/INC_VISIT/CCV_VISIT (2026-08-24 schema dump). Do NOT use
+   * for NEONATAL_VISIT — see [DANGER_SIGNS_NEONATAL]; that form uses a different, shorter code. */
   const val DANGER_SIGNS = "is_the_baby_showing_any_danger_signs_since_last_visit"
 
   /** Q "Nutritional status (Wasting)" — `computedFrom: NUTRITIONAL_ZSCORE`, see
@@ -39,6 +41,51 @@ object InfantVisitFormQuestionCodes {
   /** Q "Feeding concerns" — multiselect. */
   const val FEEDING_CONCERNS = "feeding_concerns"
 
+  /**
+   * Remaining infant clinical-risk-grading inputs the infant GoRules pack
+   * ([org.armman.sakhi.data.rules.RuleSetIds.RISK_INFANT]) reads — confirmed against a live
+   * `GET /forms/{INFANT_VISIT,INC_VISIT,CCV_VISIT,NEONATAL_VISIT}/active-version` dump
+   * 2026-08-24. Codes are identical across INFANT_VISIT/INC_VISIT/CCV_VISIT for every field below
+   * except birth weight and danger signs, which NEONATAL_VISIT spells differently — see each
+   * constant's own doc.
+   */
+  const val AGE_IN_MONTHS = "age_in_months"
+
+  /** Birth weight — INFANT_VISIT/INC_VISIT/CCV_VISIT spelling. NEONATAL_VISIT uses
+   * [BIRTH_WEIGHT_KG_NEONATAL] (`birth_weight_kg`, no "_in") instead — confirmed as genuinely
+   * different `question_code`s per form in the 2026-08-24 dump, not a typo either way. */
+  const val BIRTH_WEIGHT_IN_KG = "birth_weight_in_kg"
+
+  /** NEONATAL_VISIT's own birth-weight field — see [BIRTH_WEIGHT_IN_KG]'s doc. */
+  const val BIRTH_WEIGHT_KG_NEONATAL = "birth_weight_kg"
+
+  /** Child temperature — confirmed spelling per the live schema (`temprature`, not `temperature`);
+   * do not "fix" this typo, the pack reads it exactly as spelled. NOT present on NEONATAL_VISIT's
+   * schema at all (confirmed 2026-08-24) — that form has no temperature field to read. */
+  const val CHILD_TEMPERATURE_F = "child_temprature_in_f"
+
+  /** Respiratory rate, ages 2-12 months only per its own `question_code`. NOT present on
+   * NEONATAL_VISIT's schema (confirmed 2026-08-24) — no respiratory-rate field on that form. */
+  const val CHILD_RESPIRATORY_RATE = "child_respiratory_rate_2_12_months"
+
+  /** MUAC. NOT present on NEONATAL_VISIT's schema (confirmed 2026-08-24) — no MUAC field on that
+   * form (it has [InfantVisitFormQuestionCodes] current_length_cm/current_weight_kg instead, which
+   * the infant risk pack does not read). */
+  const val MUAC_CM = "muac_in_cms"
+
+  /** Present on all four forms (INFANT_VISIT/INC_VISIT/CCV_VISIT/NEONATAL_VISIT), same code. */
+  const val CURRENT_FEEDING_PRACTICE = "current_feeding_practice"
+
+  /** NEONATAL_VISIT only. */
+  const val UMBILICAL_CORD_CARE = "umbilical_cord_care"
+
+  /** NEONATAL_VISIT's own danger-signs field — a genuinely different, shorter `question_code`
+   * from [DANGER_SIGNS] (INFANT_VISIT/INC_VISIT/CCV_VISIT's field), confirmed in the 2026-08-24
+   * schema dump — backend's assumed pack-input name (`danger_signs`) turned out to be exactly
+   * right for this form, not a mismatch like the PP/ANC weight-field spelling drift elsewhere in
+   * this codebase. */
+  const val DANGER_SIGNS_NEONATAL = "danger_signs"
+
   /** `value_code`s [InfantVisitRiskAssessment] matches on — the "no risk" sentinel for each
    * multiselect/select field, verified against the same live schema response. */
   object ValueCode {
@@ -55,6 +102,10 @@ object InfantVisitFormQuestionCodes {
     const val NUTRITION_SEVERELY_STUNTED = "severely_stunted"
     const val NUTRITION_MUW = "muw"
     const val NUTRITION_SUW = "suw"
+
+    /** NEONATAL_VISIT's own danger-signs multiselect "no risk" sentinel — confirmed distinct
+     * spelling (no "and") from [NO_ABNORMAL_SIGNS_SYMPTOMS], per the 2026-08-24 schema dump. */
+    const val NO_ABNORMAL_SIGNS_SYMPTOMS_NEONATAL = "no_abnormal_signs_symptoms"
   }
 }
 

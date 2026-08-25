@@ -48,6 +48,14 @@ import org.armman.sakhi.data.visitform.VisitFormRiskFinding
 import org.armman.sakhi.data.visitform.VisitFormRepository
 import org.armman.sakhi.data.visitform.VisitFormDraftRepository
 import org.armman.sakhi.data.visitform.VisitFormSubmitResult
+import org.armman.sakhi.data.visitform.AncRiskAnswerMapper
+import org.armman.sakhi.data.visitform.AncRiskRegistrationResolver
+import org.armman.sakhi.data.visitform.InfantRiskAnswerMapper
+import org.armman.sakhi.data.visitform.RiskConditionFieldMap
+import org.armman.sakhi.data.rules.GoRulesRiskAdapter
+import org.armman.sakhi.data.rules.RiskConditionIds
+import org.armman.sakhi.data.rules.RiskGrade
+import org.armman.sakhi.data.rules.RiskGradingResult
 import java.time.LocalDate
 import javax.inject.Inject
 
@@ -125,6 +133,24 @@ data class DynamicVisitFormUiState(
   val referralDate: LocalDate? = null,
   val referralFacility: String? = null,
   val referralType: String? = null,
+  /** Offline high-risk rule evaluation (CR — real-time field highlighting), evaluated live as
+   * relevant fields are filled — see [DynamicVisitFormViewModel.recheckGoRulesRisk]'s doc. Null
+   * until the first successful evaluation (no cached rule pack yet, or nothing relevant answered
+   * yet); NOT cleared back to null on a later failed re-evaluation, same one-way-forward
+   * philosophy as [criticalCondition] — a Sakhi who has already seen a highlight shouldn't see it
+   * silently vanish because a transient re-evaluation had no cached pack that instant. */
+  val goRulesRiskResult: RiskGradingResult? = null,
+  /** `question_code` -> the worst (highest [RiskConditionFinding.gradeRank]) [RiskGrade] to
+   * visually highlight right now, derived from [goRulesRiskResult] via [RiskConditionFieldMap] —
+   * every condition graded MILD or worse whose code has a confirmed field mapping. A field mapped
+   * from more than one condition (e.g. both HYPERTENSION and HYPOTENSION point at the systolic BP
+   * field) shows whichever grade is clinically worse, never overwritten by whichever condition
+   * happens to iterate last. See [RiskConditionFieldMap]'s doc for which conditions are
+   * deliberately unmapped (and therefore never appear here even if graded high-risk). Consumed by
+   * [org.armman.sakhi.ui.forms.DynamicFormField]'s `riskGrade` param for the field-level
+   * highlight + [org.armman.sakhi.ui.components.RiskBadge] chip (Option B, 2026-08-24 design
+   * decision — see the published mockup discussion; not yet reflected in the Figma source). */
+  val highlightedFieldGrades: Map<String, RiskGrade> = emptyMap(),
 )
 
 /** One-shot events the screen reacts to (navigation/toast), mirroring the retired hand-coded
@@ -193,6 +219,8 @@ class DynamicVisitFormViewModel @Inject constructor(
   private val formAuditRepository: FormAuditRepository,
   private val deliverySessionRepository: DeliverySessionRepository,
   private val deliveryFormDraftRepository: DeliveryFormDraftRepository,
+  private val goRulesRiskAdapter: GoRulesRiskAdapter,
+  private val ancRiskRegistrationResolver: AncRiskRegistrationResolver,
   savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -620,6 +648,7 @@ class DynamicVisitFormViewModel @Inject constructor(
     }
     recomputeDerivedFields()
     recheckCriticalCondition()
+    recheckGoRulesRisk()
   }
 
   fun setMultiAnswer(questionCode: String, values: List<String>) {
@@ -631,6 +660,7 @@ class DynamicVisitFormViewModel @Inject constructor(
     }
     recomputeDerivedFields()
     recheckCriticalCondition()
+    recheckGoRulesRisk()
   }
 
   /** See [org.armman.sakhi.ui.forms.DynamicMotherRegistrationViewModel.markMediaComplete] — same
@@ -693,6 +723,90 @@ class DynamicVisitFormViewModel @Inject constructor(
     _uiState.update { it.copy(criticalCondition = condition) }
   }
 
+  /**
+   * Grades [answers] against whichever GoRules risk pack [formCode] maps to (ANC_VISIT ->
+   * mother/ANC pack; NEONATAL_VISIT/INFANT_VISIT/INC_VISIT/CCV_VISIT -> the shared infant pack
+   * under the matching [InfantRiskAnswerMapper.InfantFormFamily]) — null for any other form code
+   * (e.g. POSTPARTUM_VISIT, which has no risk-grading pack at all, same as
+   * [org.armman.sakhi.data.rules.GoRulesRiskAdapter] never having a PP variant to call).
+   *
+   * Shared by [recheckGoRulesRisk] (fired live, on every answer change, for real-time field
+   * highlighting) and [onFinish] (fired once more at submit time, against the complete final
+   * answer set, for the visit-level result attached to the local submission record — Phase 5).
+   * Deliberately NOT memoized/cached between those two call sites: the submit-time call is meant
+   * to be the authoritative one, re-evaluated fresh rather than trusting whatever the last live
+   * per-field recompute happened to produce (which could in principle be stale if a prior
+   * evaluation silently no-opped for lack of a cached rule pack at that instant).
+   */
+  private suspend fun evaluateGoRulesRisk(formCode: String, answers: FormAnswers): RiskGradingResult? = when {
+    formCode == FORM_CODE_MOTHER -> {
+      val input = AncRiskAnswerMapper.toRuleInput(answers)
+      ancRiskRegistrationResolver.addRegistrationFields(input, beneficiaryId)
+      goRulesRiskAdapter.gradeAncRisk(input)
+    }
+    formCode == FORM_CODE_NEONATAL -> goRulesRiskAdapter.gradeInfantRisk(
+      InfantRiskAnswerMapper.toRuleInput(answers, InfantRiskAnswerMapper.InfantFormFamily.NEONATAL),
+    )
+    formCode == FORM_CODE_INFANT -> goRulesRiskAdapter.gradeInfantRisk(
+      InfantRiskAnswerMapper.toRuleInput(answers, InfantRiskAnswerMapper.InfantFormFamily.INFANT),
+    )
+    formCode == "INC_VISIT" -> goRulesRiskAdapter.gradeInfantRisk(
+      InfantRiskAnswerMapper.toRuleInput(answers, InfantRiskAnswerMapper.InfantFormFamily.INC),
+    )
+    formCode == "CCV_VISIT" -> goRulesRiskAdapter.gradeInfantRisk(
+      InfantRiskAnswerMapper.toRuleInput(answers, InfantRiskAnswerMapper.InfantFormFamily.CCV),
+    )
+    else -> null
+  }
+
+  /**
+   * Offline high-risk rule evaluation (CR — real-time field highlighting), fired on every answer
+   * change alongside [recheckCriticalCondition] — the whole point of this CR over the pre-existing
+   * Summary-tab-only [testsFindings]/[infantKnownRisks] is that grading happens live as each field
+   * is filled, not only when the Sakhi reaches Summary.
+   *
+   * Launched fire-and-forget in [viewModelScope]: [GoRulesRiskAdapter] never throws (evaluate
+   * failures return null, same "no cached rule -> nothing changes" contract every other
+   * offline-first read in this app follows), so there's nothing here to catch or surface as an
+   * error — a failed/unavailable evaluation just means [DynamicVisitFormUiState.goRulesRiskResult]
+   * doesn't update this time, exactly like a stale/never-fetched rule pack for scheduling falls
+   * back silently rather than blocking the Sakhi.
+   *
+   * NEONATAL_VISIT is intentionally handled here even though it's not in [FORM_CODES_INFANT_FAMILY]
+   * (that set is for the *shared-schema* infant family; NEONATAL_VISIT has its own distinct
+   * schema) — [InfantRiskAnswerMapper.InfantFormFamily] already models this exact distinction.
+   */
+  private fun recheckGoRulesRisk() {
+    val state = _uiState.value
+    val formCode = state.formCode ?: return
+    viewModelScope.launch {
+      val result = evaluateGoRulesRisk(formCode, state.answers) ?: return@launch
+
+      val conditionMap = if (formCode == FORM_CODE_MOTHER) RiskConditionIds.ANC else RiskConditionIds.INFANT
+      val fieldMap = if (formCode == FORM_CODE_MOTHER) RiskConditionFieldMap.ANC else RiskConditionFieldMap.INFANT
+      val idToCode = conditionMap.entries.associate { (code, id) -> id to code }
+      // Worst-grade-wins per field: a field mapped from >1 condition (e.g. BP systolic under both
+      // HYPERTENSION and HYPOTENSION) must not have its highlight silently downgraded depending on
+      // map/list iteration order.
+      val highlighted = mutableMapOf<String, RiskGrade>()
+      val highlightedRank = mutableMapOf<String, Int>()
+      result.conditions
+        .filter { it.grade != RiskGrade.NORMAL && it.grade != RiskGrade.UNKNOWN }
+        .forEach { finding ->
+          val code = idToCode[finding.riskConditionId] ?: return@forEach
+          fieldMap[code].orEmpty().forEach { questionCode ->
+            val currentRank = highlightedRank[questionCode]
+            if (currentRank == null || finding.gradeRank > currentRank) {
+              highlightedRank[questionCode] = finding.gradeRank
+              highlighted[questionCode] = finding.grade
+            }
+          }
+        }
+
+      _uiState.update { it.copy(goRulesRiskResult = result, highlightedFieldGrades = highlighted) }
+    }
+  }
+
   /** FR-S-4.4 Option B: closing the banner discards the in-memory draft and exits — no partial
    * save, same as the retired hand-coded flow. There is nothing else to discard here (no draft
    * repository this pass), so this is just the state reset + the exit event. */
@@ -717,6 +831,12 @@ class DynamicVisitFormViewModel @Inject constructor(
    * [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator.submit] advances the
    * beneficiary's [org.armman.sakhi.data.delivery.DeliverySessionEntity] on its own (CR-042 step
    * advancement) — this ViewModel does not need to know that happened.
+   *
+   * Phase 5 (CR — offline high-risk rule evaluation): also computes the final, authoritative
+   * [org.armman.sakhi.data.rules.RiskGradingResult] via [evaluateGoRulesRisk] and passes it to
+   * [VisitFormDraftRepository.submitDraft] so it's persisted with the local draft — works fully
+   * offline, independent of whether the network submission below succeeds, fails, or queues. Not
+   * yet forwarded to the backend itself (see [VisitFormDraftPayload.riskResult]'s doc).
    */
   fun onFinish() {
     val state = _uiState.value
@@ -729,12 +849,18 @@ class DynamicVisitFormViewModel @Inject constructor(
 
     _uiState.update { it.copy(isSubmitting = true) }
     viewModelScope.launch {
+      val formCode = state.formCode.orEmpty()
+      val finalAnswers = _uiState.value.answers
+      // Phase 5: one last, authoritative grading against the complete final answers — see
+      // evaluateGoRulesRisk's doc for why this isn't just state.goRulesRiskResult reused as-is.
+      val finalRiskResult = evaluateGoRulesRisk(formCode, finalAnswers)
       val result = visitFormDraftRepository.submitDraft(
         localScheduleUuid = visitId,
-        formCode = state.formCode.orEmpty(),
+        formCode = formCode,
         formVersionId = version.id,
-        answers = _uiState.value.answers,
+        answers = finalAnswers,
         visitDate = visitDate,
+        riskResult = finalRiskResult,
       )
       _uiState.update { it.copy(isSubmitting = false) }
       when (result) {

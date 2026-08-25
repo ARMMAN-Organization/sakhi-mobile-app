@@ -14,6 +14,7 @@ import org.armman.sakhi.data.forms.FormSubmissionApi
 import org.armman.sakhi.data.forms.SubmitErrorCopy
 import org.armman.sakhi.data.forms.VisitCodeFormResolver
 import org.armman.sakhi.data.lookup.LookupRepository
+import org.armman.sakhi.data.rules.RuleSetIds
 import org.armman.sakhi.data.schedule.VisitCodeType
 import org.armman.sakhi.data.schedule.VisitScheduleEntity
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
@@ -153,6 +154,7 @@ class VisitFormSubmissionCoordinator @Inject constructor(
   private val formAuditRepository: FormAuditRepository,
   private val deliverySessionRepository: DeliverySessionRepository,
   private val childFormDraftDao: ChildFormDraftDao,
+  private val riskAssessmentApi: RiskAssessmentApi,
 ) {
 
   suspend fun submit(
@@ -265,6 +267,7 @@ class VisitFormSubmissionCoordinator @Inject constructor(
         formCode = formCode,
       )
     }
+    val serverSubmissionId = submissionResponse.body()?.data?.id
 
     // CR-035: logged only on success, immediately after the submission call succeeds.
     formAuditRepository.recordSubmitted(localScheduleUuid, formCode)
@@ -273,6 +276,105 @@ class VisitFormSubmissionCoordinator @Inject constructor(
     // CR-042: only after the form submission above has actually succeeded — see this class's own
     // doc for why a generic hook here, rather than a PP/NN-specific coordinator, is correct.
     advanceDeliverySessionIfDue(schedule)
+
+    // Phase 5 (CR — offline high-risk rule evaluation): only after the form submission above has
+    // actually succeeded, same as advanceDeliverySessionIfDue — see triggerRiskAssessment's own
+    // doc for why a failure here never fails this whole submit() call.
+    triggerRiskAssessment(
+      formCode = formCode,
+      serverBeneficiaryId = serverBeneficiaryId,
+      visitId = visitId,
+      serverSubmissionId = serverSubmissionId,
+      answers = answers,
+    )
+  }
+
+  /**
+   * `POST /risk-assessments` (backend-confirmed 2026-08-24, closing item 4 of
+   * `backend-prompt-risk-grading-ondevice.md`) — the same call `visit-form-service` already makes
+   * server-side today after a visit-linked submission; this app also calls it directly so the
+   * authoritative server-side grading happens the moment sync completes, not only whenever that
+   * internal trigger runs. Idempotent by `submissionId` per backend, so calling this on every
+   * `submit()` attempt (including retries) is safe — never re-evaluates twice for the same
+   * submission.
+   *
+   * `formCode -> riskPhase`: confirmed by backend 2026-08-24 — `INFANT_VISIT` sends `"INC"`, not
+   * a distinct/missing phase. Traced reason: per the seed file's own comment, `INFANT_VISIT` IS
+   * `INC_VISIT` under its pre-rename name ("Same schema content as INFANT_VISIT... INC_VISIT is
+   * the name new client code should move to") — same phase, not two related-but-distinct ones.
+   * Functionally confirmed too: `riskPhase` is a server-side filter key
+   * (`findConditionIdsByPhase(phase)` against `risk_conditions.phase`), and every infant-pack
+   * condition is seeded with `phase: 'INC'` — none as `NN`, so sending `NN` (or `CCV`) for an
+   * `INFANT_VISIT` submission would resolve zero condition ids and fail the assessment. `INC` is
+   * also the only value inside backend's `NO_IMPROVEMENT_PHASES = {NN, INC, CCV}` set that
+   * correctly preserves the "3 consecutive visits, no improvement" referral-escalation logic for
+   * this form — any other value would silently disable it.
+   *
+   * Best-effort, not submission-blocking: by the time this runs, `POST /visits` and
+   * `POST /forms/:formCode/submissions` have both already succeeded and the local schedule is
+   * already marked COMPLETED — a failure here (network drop, unexpected 4xx/5xx) must not flip an
+   * otherwise-successful visit submission to Failed/retryable, especially since backend's own
+   * server-side trigger likely already fired for the exact same submission regardless of whether
+   * this call succeeds. Failures are swallowed via [runCatching] and left for a future explicit
+   * retry mechanism if one proves necessary — none exists yet.
+   */
+  private suspend fun triggerRiskAssessment(
+    formCode: String,
+    serverBeneficiaryId: String,
+    visitId: String,
+    serverSubmissionId: String?,
+    answers: FormAnswers,
+  ) {
+    val riskPhase = riskPhaseFor(formCode) ?: return
+    val ruleSetId = riskRuleSetIdFor(formCode) ?: return
+    if (serverSubmissionId == null) {
+      Log.w(TAG, "triggerRiskAssessment($formCode): no server submissionId returned, skipping")
+      return
+    }
+
+    runCatching {
+      riskAssessmentApi.createRiskAssessment(
+        CreateRiskAssessmentRequestDto(
+          beneficiaryId = serverBeneficiaryId,
+          visitId = visitId,
+          submissionId = serverSubmissionId,
+          ruleSetId = ruleSetId,
+          riskPhase = riskPhase,
+          answers = answers.singleValues + answers.multiValues,
+        ),
+      )
+    }.onFailure { error ->
+      Log.w(TAG, "triggerRiskAssessment($formCode) failed — visit submission still succeeded", error)
+    }.onSuccess { response ->
+      if (!response.isSuccessful) {
+        Log.w(
+          TAG,
+          "triggerRiskAssessment($formCode): HTTP ${response.code()} — ${response.errorBody()?.string()}",
+        )
+      }
+    }
+  }
+
+  /** See [triggerRiskAssessment]'s doc for why `INFANT_VISIT` returns null here rather than a
+   * guessed value. */
+  private fun riskPhaseFor(formCode: String): String? = when (formCode) {
+    "ANC_VISIT" -> "ANC"
+    "NEONATAL_VISIT" -> "NN"
+    // INFANT_VISIT IS INC_VISIT under its pre-rename name (confirmed by backend 2026-08-24) —
+    // same phase, same condition set, not a guess. See this function's doc.
+    "INC_VISIT", "INFANT_VISIT" -> "INC"
+    "CCV_VISIT" -> "CCV"
+    else -> null
+  }
+
+  /** Rule-SET id (not a published-version id) for whichever risk pack grades [formCode] — mirrors
+   * [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel.evaluateGoRulesRisk]'s own
+   * formCode -> pack dispatch, kept as its own small function here since that ViewModel function
+   * isn't reachable from this coordinator. */
+  private fun riskRuleSetIdFor(formCode: String): String? = when (formCode) {
+    "ANC_VISIT" -> RuleSetIds.RISK_ANC
+    "NEONATAL_VISIT", "INC_VISIT", "INFANT_VISIT", "CCV_VISIT" -> RuleSetIds.RISK_INFANT
+    else -> null
   }
 
   /**

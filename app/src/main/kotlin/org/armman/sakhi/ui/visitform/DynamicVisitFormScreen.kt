@@ -797,6 +797,7 @@ private fun DynamicVisitFormFieldList(
           takePictureLauncher.launch(uri)
         },
         formCode = state.formCode,
+        riskGrade = state.highlightedFieldGrades[field.questionCode],
       )
     }
   }

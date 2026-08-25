@@ -9,6 +9,7 @@ import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.forms.SubmitErrorCopy
+import org.armman.sakhi.data.rules.RiskGradingResult
 import java.time.Instant
 import java.time.LocalDate
 import javax.inject.Inject
@@ -42,8 +43,9 @@ class RoomVisitFormDraftRepository @Inject constructor(
     formVersionId: String,
     answers: FormAnswers,
     visitDate: LocalDate,
+    riskResult: RiskGradingResult?,
   ): VisitFormSubmitResult {
-    saveLocally(localScheduleUuid, formCode, formVersionId, answers, visitDate)
+    saveLocally(localScheduleUuid, formCode, formVersionId, answers, visitDate, riskResult)
 
     // Offline: saved and queued for the Sakhi's next Data Upload tap. Nothing scheduled here —
     // same SRS §3A.1 manual-trigger rule every other queue in this app follows.
@@ -89,11 +91,12 @@ class RoomVisitFormDraftRepository @Inject constructor(
     formVersionId: String,
     answers: FormAnswers,
     visitDate: LocalDate,
+    riskResult: RiskGradingResult?,
   ) {
     // CR-035: unconditional — runs before the online/offline branch in submitDraft, so both the
     // online-success and offline-queued paths get a SAVED event.
     formAuditRepository.recordSaved(localScheduleUuid, formCode)
-    val payload = VisitFormDraftPayload(answers = answers)
+    val payload = VisitFormDraftPayload(answers = answers, riskResult = riskResult)
     secureStore.putString(visitFormDraftPayloadKey(localScheduleUuid), visitFormDraftGson.toJson(payload))
 
     val existing = dao.getByLocalScheduleUuid(localScheduleUuid)

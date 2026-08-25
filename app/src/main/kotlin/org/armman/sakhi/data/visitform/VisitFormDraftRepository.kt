@@ -3,6 +3,7 @@ package org.armman.sakhi.data.visitform
 import kotlinx.coroutines.flow.Flow
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormUploadRecord
+import org.armman.sakhi.data.rules.RiskGradingResult
 import java.time.LocalDate
 
 /**
@@ -29,6 +30,13 @@ interface VisitFormDraftRepository {
     formVersionId: String,
     answers: FormAnswers,
     visitDate: LocalDate,
+    /** Phase 5 (CR — offline high-risk rule evaluation): the final visit-level [RiskGradingResult],
+     * computed by the caller against the complete final answers right before this call — see
+     * [VisitFormDraftPayload.riskResult]'s doc for why this isn't recomputed here. Null for form
+     * codes with no risk-grading pack ([org.armman.sakhi.data.rules.GoRulesRiskAdapter]) or when
+     * evaluation itself returned null. Stored locally alongside the draft; not yet forwarded to
+     * the backend (no confirmed submission-API field for it yet). */
+    riskResult: RiskGradingResult? = null,
   ): VisitFormSubmitResult
 
   /** All CR-026b visit-form drafts, newest first, for the Home screen's "Forms Uploaded"

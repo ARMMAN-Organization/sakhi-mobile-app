@@ -114,6 +114,7 @@ class VisitFormSubmissionCoordinatorTest {
       formAuditRepository = formAuditRepository,
       deliverySessionRepository = deliverySessionRepository,
       childFormDraftDao = childFormDraftDao,
+      riskAssessmentApi = FakeRiskAssessmentApi(),
     )
   }
 
@@ -319,6 +320,7 @@ class VisitFormSubmissionCoordinatorTest {
       formAuditRepository = FakeFormAuditRepository(),
       deliverySessionRepository = deliverySessionRepository,
       childFormDraftDao = childFormDraftDao,
+      riskAssessmentApi = FakeRiskAssessmentApi(),
     )
 
     val result = loggedOutCoordinator.submit(

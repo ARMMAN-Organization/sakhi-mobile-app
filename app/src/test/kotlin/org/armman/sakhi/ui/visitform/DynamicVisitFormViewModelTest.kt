@@ -139,6 +139,39 @@ class DynamicVisitFormViewModelTest {
     override suspend fun getAnswers(localSubmissionUuid: String): FormAnswers? = null
   }
 
+  /** No cached risk pack, so [org.armman.sakhi.data.rules.GoRulesRiskAdapter] returns null
+   * before reaching the evaluator — see the ctor wiring comment in buildViewModel(). */
+  private class NoRuleCachedRuleSetRepository : org.armman.sakhi.data.rules.RuleSetRepository {
+    override suspend fun getPublishedRuleSet(
+      ruleSetId: String,
+    ): org.armman.sakhi.data.rules.CachedRuleSet? = null
+
+    override suspend fun prefetchRuleSets(ruleSetIds: List<String>) = Unit
+  }
+
+  /** Paired with [NoRuleCachedRuleSetRepository]: proves the adapter never reaches evaluation. */
+  private class NeverCalledRuleEvaluator : org.armman.sakhi.data.rules.RuleEvaluator {
+    override suspend fun evaluate(
+      rulesJson: com.google.gson.JsonObject,
+      context: com.google.gson.JsonObject,
+    ): com.google.gson.JsonObject? = error("no risk pack cached — evaluate should never be reached")
+  }
+
+  /** Real [org.armman.sakhi.data.beneficiary.LocalEnrolmentBeneficiarySource] over the same fakes
+   * the beneficiary tests use; AncRiskRegistrationResolver degrades to a no-op when it finds no
+   * local registration answers, which is exactly this test's situation. */
+  private fun localEnrolmentBeneficiarySource() =
+    org.armman.sakhi.data.beneficiary.LocalEnrolmentBeneficiarySource(
+      org.armman.sakhi.data.forms.FakeDynamicFormDraftDao(),
+      org.armman.sakhi.data.childregistration.FakeChildFormDraftDao(),
+      FakeSecureKeyValueStore(),
+      org.armman.sakhi.data.schedule.RoomVisitScheduleRepository(
+        org.armman.sakhi.data.schedule.FakeVisitScheduleDao(),
+      ),
+      FakeFormsRepository(),
+      org.armman.sakhi.data.beneficiary.LocalBeneficiaryStatusOverrideStore(FakeSecureKeyValueStore()),
+    )
+
   /** Never exercised by the load()-only tests here — onFinish() is out of scope. */
   private class FakeVisitFormDraftRepository : VisitFormDraftRepository {
     override suspend fun submitDraft(
@@ -147,6 +180,7 @@ class DynamicVisitFormViewModelTest {
       formVersionId: String,
       answers: FormAnswers,
       visitDate: java.time.LocalDate,
+      riskResult: org.armman.sakhi.data.rules.RiskGradingResult?,
     ): VisitFormSubmitResult = throw NotImplementedError("not exercised by these tests")
 
     override suspend fun getUploadRecords(): List<FormUploadRecord> = emptyList()
@@ -240,6 +274,17 @@ class DynamicVisitFormViewModelTest {
       formAuditRepository = formAuditRepository,
       deliverySessionRepository = deliverySessionRepository,
       deliveryFormDraftRepository = deliveryFormDraftRepository,
+      // Risk grading is not exercised by the load()-only tests here: NoRuleCachedRepository
+      // returns no cached pack, so GoRulesRiskAdapter short-circuits before ever reaching the
+      // evaluator (which throws if called). Same "never exercised, fail loudly if that changes"
+      // convention as FakeDeliveryFormDraftRepository above.
+      goRulesRiskAdapter = org.armman.sakhi.data.rules.GoRulesRiskAdapter(
+        NoRuleCachedRuleSetRepository(),
+        NeverCalledRuleEvaluator(),
+      ),
+      ancRiskRegistrationResolver = org.armman.sakhi.data.visitform.AncRiskRegistrationResolver(
+        localEnrolmentBeneficiarySource(),
+      ),
       savedStateHandle = SavedStateHandle(
         mapOf(
           "beneficiaryId" to beneficiaryId,

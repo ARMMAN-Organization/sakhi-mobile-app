@@ -171,6 +171,7 @@ class CombinedUploadRecordsSourceTest {
       formVersionId: String,
       answers: FormAnswers,
       visitDate: LocalDate,
+      riskResult: org.armman.sakhi.data.rules.RiskGradingResult?,
     ): VisitFormSubmitResult = VisitFormSubmitResult.Synced
 
     override suspend fun getUploadRecords(): List<FormUploadRecord> = records.value

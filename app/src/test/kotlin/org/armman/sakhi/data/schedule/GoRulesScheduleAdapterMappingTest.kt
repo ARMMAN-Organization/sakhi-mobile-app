@@ -38,6 +38,8 @@ class GoRulesScheduleAdapterMappingTest {
         versionNo = "test",
         rulesJson = JsonObject(),
       )
+
+      override suspend fun prefetchRuleSets(ruleSetIds: List<String>) = Unit
     },
     ruleEvaluator = FakeRuleEvaluator(JsonParser.parseString(responseJson).asJsonObject),
   )
@@ -241,6 +243,7 @@ class GoRulesScheduleAdapterMappingTest {
     val adapter = GoRulesScheduleAdapter(
       ruleSetRepository = object : RuleSetRepository {
         override suspend fun getPublishedRuleSet(ruleSetId: String): CachedRuleSet? = null // not fetched yet
+        override suspend fun prefetchRuleSets(ruleSetIds: List<String>) = Unit
       },
       ruleEvaluator = FakeRuleEvaluator(JsonObject()),
     )

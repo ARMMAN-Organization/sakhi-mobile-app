@@ -5,6 +5,7 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import org.armman.sakhi.data.visitform.RiskAssessmentApi
 import org.armman.sakhi.data.visitform.RoomVisitFormDraftRepository
 import org.armman.sakhi.data.visitform.StaticVisitFormRepository
 import org.armman.sakhi.data.visitform.VisitApi
@@ -40,5 +41,12 @@ abstract class VisitFormModule {
     @Provides
     @Singleton
     fun provideVisitApi(retrofit: Retrofit): VisitApi = retrofit.create(VisitApi::class.java)
+
+    /** Phase 5 (CR — offline high-risk rule evaluation): `POST /risk-assessments`, confirmed open
+     * to SAKHI by backend 2026-08-24 — see [RiskAssessmentApi]'s doc. */
+    @Provides
+    @Singleton
+    fun provideRiskAssessmentApi(retrofit: Retrofit): RiskAssessmentApi =
+      retrofit.create(RiskAssessmentApi::class.java)
   }
 }

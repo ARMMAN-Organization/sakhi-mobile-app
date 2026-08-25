@@ -517,6 +517,7 @@ class VisitScheduleCoordinatorTest {
   /** Never returns a cached rule — simulates a phone that hasn't fetched the HR pack yet. */
   private class NoRuleCachedRepository : RuleSetRepository {
     override suspend fun getPublishedRuleSet(ruleSetId: String): CachedRuleSet? = null
+    override suspend fun prefetchRuleSets(ruleSetIds: List<String>) = Unit
   }
 
   /** Never actually called in the "rule unavailable" scenarios above — the adapter returns
@@ -536,6 +537,7 @@ class VisitScheduleCoordinatorTest {
       versionNo = "test",
       rulesJson = JsonObject(),
     )
+    override suspend fun prefetchRuleSets(ruleSetIds: List<String>) = Unit
   }
 
   private class FixedRuleEvaluator(private val response: JsonObject) : RuleEvaluator {

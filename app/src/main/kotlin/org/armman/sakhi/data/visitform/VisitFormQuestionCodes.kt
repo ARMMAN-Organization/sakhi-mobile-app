@@ -41,6 +41,37 @@ object VisitFormQuestionCodes {
   const val HAEMOGLOBIN = "haemoglobin_hb_g_dl"
   const val BLOOD_GLUCOSE = "blood_glucose_in_mg_dl"
 
+  /**
+   * The remaining ANC_VISIT clinical-risk-grading inputs the mother/ANC GoRules pack
+   * ([org.armman.sakhi.data.rules.RuleSetIds.RISK_ANC]) reads — confirmed against a live
+   * `GET /forms/ANC_VISIT/active-version` dump 2026-08-24 (not just the API reference the earlier
+   * constants above were verified against; same form, later confirmation pass, all consistent).
+   * [GESTATIONAL_WEIGHT_GAIN]'s `question_code` matches
+   * [org.armman.sakhi.data.visitform.VisitFormComputedFieldEvaluator]'s `GESTATIONAL_WEIGHT_GAIN`
+   * `computedFrom` token exactly — same field, now confirmed by name as well as by token.
+   */
+  const val MID_UPPER_ARM_CIRCUMFERENCE_CM = "mid_upper_arm_circumference_in_cm"
+  const val BODY_TEMPERATURE_F = "body_temperature_in_f"
+  const val FETAL_HEART_RATE = "fetal_heart_rate"
+  const val GESTATIONAL_WEIGHT_GAIN = "gestational_weight_gain"
+  const val CHECK_PALM_AND_NAILS = "check_palm_and_nails"
+  const val CHECK_SCLERA_EYES = "check_sclera_eyes"
+  const val CHECK_SKIN = "check_skin"
+  const val URINE_TEST = "urine_test"
+
+  /**
+   * The two raw ANC_VISIT fields backend's updated ANC risk pack will derive `fundalHeightDeviationCm`
+   * from itself (confirmed 2026-08-24: `fundal_height_in_cm - current_gestational_age_in_weeks`,
+   * the standard obstetric GA-in-weeks-approximates-fundal-height-in-cm approximation) — both
+   * confirmed numeric, on `ANC_VISIT`, against the same live schema dump. Sent by
+   * [AncRiskAnswerMapper] ahead of that pack update landing (harmless extra field the current pack
+   * simply doesn't read yet, same "partial input is safe" contract every other field here relies
+   * on) so real-time on-device highlighting picks up FUNDAL_HEIGHT the moment the new pack version
+   * is fetched — no second app change needed once backend ships it.
+   */
+  const val FUNDAL_HEIGHT_CM = "fundal_height_in_cm"
+  const val CURRENT_GESTATIONAL_AGE_WEEKS = "current_gestational_age_in_weeks"
+
   /** Q "Have you been experiencing any of these since the last visit?" — multiselect danger signs. */
   const val DANGER_SIGNS = "have_you_been_experiencing_any_of_these_since_the_last_visit"
 
@@ -65,7 +96,11 @@ object VisitFormQuestionCodes {
    * schema. [VisitFormComputedFieldEvaluator]'s BMI formula only ever looked up [WEIGHT_KG], so
    * "Current BMI" silently never computed on PP1 even once routed there — same
    * multi-spelling-resilience pattern as [org.armman.sakhi.data.forms.REGISTRATION_DATE_QUESTION_CODES]
-   * and [VISIT_DATE_QUESTION_CODES] above. */
+   * and [VISIT_DATE_QUESTION_CODES] above. NOTE: POSTPARTUM_VISIT also uses `body_temperature_f`/
+   * `current_muac_cm` for its own temperature/MUAC fields — different codes again from
+   * [BODY_TEMPERATURE_F]/[MID_UPPER_ARM_CIRCUMFERENCE_CM] above, confirmed in the same 2026-08-24
+   * schema dump. Not wired anywhere yet since PP isn't one of the forms risk grading is linked to
+   * for this CR — flagging so nobody assumes ANC's spellings carry over if that ever changes. */
   val WEIGHT_KG_QUESTION_CODES: Set<String> = setOf(WEIGHT_KG, "current_weight_kg")
 
   /** `value_code`s the danger-sign/swelling rules match on. */

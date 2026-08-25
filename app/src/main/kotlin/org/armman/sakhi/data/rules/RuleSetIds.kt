@@ -3,12 +3,15 @@ package org.armman.sakhi.data.rules
 import org.armman.sakhi.data.schedule.VisitCodeType
 
 /**
- * The GoRules `ruleSetId`s seeded on `develop` for Milestone 3 scheduling (CR-032).
+ * The GoRules `ruleSetId`s seeded on `develop` for Milestone 3 scheduling (CR-032) and risk
+ * grading (offline high-risk rule evaluation CR).
  *
- * Source: rules-service seed data, confirmed by the backend team 2026-08-12. Each entry pairs
- * with a published `v1` rule version one digit higher in the UUID's last position (e.g. ANC's
- * `...331` set pairs with rule version `...332`) — the app never needs the version id directly,
- * [RuleSetApi.getPublishedVersion] resolves "whatever is currently published" for a given set.
+ * Source: rules-service seed data, confirmed by the backend team 2026-08-12 (SCHEDULE) and
+ * 2026-08-24 (RISK). Every id below is now fetched the same way — [RuleSetApi.getPublishedVersionId]
+ * resolves "whatever is currently published" for a given set, then [RuleSetApi.getRuleVersionContent]
+ * fetches that version's `rulesJson`, both via [RuleSetRepository.getPublishedRuleSet]. Neither
+ * category needs a separate fixed-version constant anymore (see the removed `RISK_ANC_VERSION`/
+ * `RISK_INFANT_VERSION` history below).
  *
  * ⚠ **Environment risk.** These are fixed values baked into the backend's `seed.ts`, not rows the
  * database generates on its own — they only resolve if that seed script has actually been run on
@@ -20,6 +23,14 @@ import org.armman.sakhi.data.schedule.VisitCodeType
  * `versionNo v1-hardcoded`) that predates this design — its `rulesJson` is just a note that
  * scheduling logic still lives in [org.armman.sakhi.data.schedule.HardcodedRuleSource]. It is
  * unrelated to the seven real packs below and must never be wired to anything.
+ *
+ * ✅ **Resolved 2026-08-24 — the ADMIN-only issue and the RISK no-rulesJson stub are both fixed.**
+ * Previously `RuleSetApi.getPublishedVersion` (`GET /admin/rules/:setId`) was ADMIN-only, so every
+ * SCHEDULE id below 403'd for SAKHI; and RISK's fetch-by-version-id call
+ * (`GET /rules/versions/:versionId`) deliberately never returned `rulesJson`. Both were confirmed
+ * against a live backend instance and replaced by [RuleSetApi]'s three current endpoints — see
+ * that interface's class doc for the full contract. No caller needs to special-case SCHEDULE vs
+ * RISK anymore; both fetch through [RuleSetRepository.getPublishedRuleSet] identically.
  */
 object RuleSetIds {
   const val ANC = "33333333-3333-4333-8333-333333333331"
@@ -47,6 +58,28 @@ object RuleSetIds {
    * own id, NOT in the 33333333-... schedule-pack family. Nothing in this app calls it yet.
    */
   const val ESCALATION = "44444444-4444-4444-8444-444444444441"
+
+  /**
+   * Mother/ANC clinical risk grading (offline high-risk rule evaluation CR). Rule set
+   * `55555555-...551`. Confirmed live and wired server-side to `ANC_VISIT` on dev 2026-08-24.
+   *
+   * Fetched the same way as [ANC]/[PP]/etc. above via [RuleSetRepository.getPublishedRuleSet] —
+   * as of 2026-08-24 this resolves "whatever's newly published" automatically, the same as every
+   * SCHEDULE id. (Previously this app fetched RISK by a fixed version-id constant instead, because
+   * the only non-admin endpoint available at the time couldn't resolve "latest for a set" — that
+   * endpoint never actually returned `rulesJson` either, so on-device RISK grading was silently
+   * broken the whole time. Both limitations are resolved; see [RuleSetApi]'s class doc.)
+   */
+  const val RISK_ANC = "55555555-5555-4555-8555-555555555551"
+
+  /**
+   * Infant/neonatal clinical risk grading (offline high-risk rule evaluation CR). Rule set
+   * `55555555-...561`. Confirmed live and wired server-side to
+   * `INFANT_VISIT`/`INC_VISIT`/`CCV_VISIT`/`NEONATAL_VISIT` on dev 2026-08-24.
+   *
+   * Same fetch path and history as [RISK_ANC] — see that constant's doc.
+   */
+  const val RISK_INFANT = "55555555-5555-4555-8555-555555555561"
 
   /**
    * Maps a [VisitCodeType] family to the rule set that schedules it. HR variants

@@ -6,6 +6,7 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusEvent
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -69,9 +71,18 @@ import org.armman.sakhi.ui.enrollment.components.AppTextInputField
 import org.armman.sakhi.ui.enrollment.components.AppTimeField
 import org.armman.sakhi.ui.enrollment.components.formatTimeOfDay
 import org.armman.sakhi.ui.enrollment.components.parseTimeOfDayOrNull
+import org.armman.sakhi.data.beneficiary.RiskLevel
+import org.armman.sakhi.data.rules.RiskGrade
+import org.armman.sakhi.ui.components.RiskBadge
 import org.armman.sakhi.ui.components.SecondaryButton
 import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG400
+import org.armman.sakhi.ui.theme.RiskHigh
+import org.armman.sakhi.ui.theme.RiskHighSurface
+import org.armman.sakhi.ui.theme.RiskMild
+import org.armman.sakhi.ui.theme.RiskMildSurface
+import org.armman.sakhi.ui.theme.RiskModerate
+import org.armman.sakhi.ui.theme.RiskModerateSurface
 import org.armman.sakhi.ui.theme.StatusSuccess
 import org.armman.sakhi.ui.theme.VideoPlaceholderSurface
 import org.armman.sakhi.ui.theme.White
@@ -111,6 +122,18 @@ private val DECIMAL_NUMBER_QUESTION_CODES = setOf(
   "child1_birth_length_cm",
   "child2_birth_length_cm",
   "child3_birth_length_cm",
+  // Found in manual QA while testing the offline risk-grading CR (2026-08-24): these clinical
+  // vitals have integer `numericRange` bounds in the schema (e.g. Hb 1-18, MUAC 10-40, temp
+  // 94-105), but real-world readings are routinely fractional (Hb "10.4" g/dl, MUAC "11.5" cm,
+  // temperature "98.6" °F) — same underlying bug as the birth-weight/length fields above, just
+  // undiscovered until the risk-grading feature made typing an exact reading matter. Blood
+  // glucose (mg/dl) and fetal heart rate (bpm) are deliberately NOT added here — both are
+  // conventionally recorded as whole numbers in practice, unlike these three.
+  "haemoglobin_hb_g_dl",
+  "mid_upper_arm_circumference_in_cm",
+  "body_temperature_in_f",
+  "muac_in_cms",
+  "child_temprature_in_f",
 )
 
 /** The Consent tab's affirmation items. The schema types them as yes/no `radio`s, but the design
@@ -212,6 +235,15 @@ fun DynamicFormField(
    * `question_code` another form's schema reuses for an unrelated field) only applies here, not
    * everywhere else that reuses the same code. Null for every caller except the Visit Form. */
   formCode: String? = null,
+  /** Offline high-risk rule evaluation (CR — real-time field highlighting): the worst grade
+   * [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel.recheckGoRulesRisk] found for this
+   * field right now, or null if the field isn't currently flagged. Deliberately kept visually and
+   * semantically separate from [errorText] (2026-08-24 design decision, "Option B" — see the
+   * published mockup): a real validation error always wins the field's border/background (an
+   * invalid value can't be meaningfully risk-graded), but the [RiskBadge] chip and the error line
+   * can coexist below the same field. NORMAL/UNKNOWN grades never reach this param — the ViewModel
+   * only ever surfaces MILD/MODERATE/SEVERE here. Null for every caller except the Visit Form. */
+  riskGrade: RiskGrade? = null,
 ) {
   val singleValue = answers.valueOf(field.questionCode).orEmpty()
   val multiValue = answers.multiValueOf(field.questionCode)
@@ -252,11 +284,30 @@ fun DynamicFormField(
     if (hasFocus && imeVisible) bringIntoViewRequester.bringIntoView()
   }
 
+  // Risk highlight (Option B): a colored surface-wash + border wrapped around the WHOLE field —
+  // label, input widget and all — rather than reaching into every individual widget's own
+  // border/background (NUMBER's AppTextInputField, RADIO/CHECKBOX/SELECT's own boxes, etc.). One
+  // wrap point here covers every FormFieldInputType uniformly and leaves every widget in
+  // ui/enrollment/components/FormFields.kt completely untouched, so this can't regress the
+  // enrollment flow those widgets are shared with. No risk grade -> zero-cost Modifier, pixel
+  // identical to before this param existed.
+  val riskStyle = riskGrade?.highlightStyle()
   Column(
     modifier = modifier
       .bringIntoViewRequester(bringIntoViewRequester)
       // `hasFocus`, not `isFocused`: the focus sits on the child widget, not on this Column.
-      .onFocusEvent { hasFocus = it.hasFocus },
+      .onFocusEvent { hasFocus = it.hasFocus }
+      .then(
+        if (riskStyle != null) {
+          Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(riskStyle.surface, RoundedCornerShape(10.dp))
+            .border(1.4.dp, riskStyle.border, RoundedCornerShape(10.dp))
+            .padding(10.dp)
+        } else {
+          Modifier
+        },
+      ),
     verticalArrangement = Arrangement.spacedBy(4.dp),
   ) {
     DynamicFormFieldBody(
@@ -281,7 +332,23 @@ fun DynamicFormField(
     if (errorText != null && !rendersErrorInline) {
       FieldErrorText(errorText)
     }
+    if (riskStyle != null) {
+      RiskBadge(riskLevel = riskStyle.badgeLevel, compact = false)
+    }
   }
+}
+
+/** Border/surface-wash colors + [RiskBadge] level for one [RiskGrade] tier, sourced 1:1 from
+ * `ui/theme/Color.kt`'s existing Risk* tokens — no new colors, per the approved "Option B" mockup
+ * (2026-08-24). [RiskGrade.NORMAL]/[RiskGrade.UNKNOWN] never reach here — the ViewModel filters
+ * those out before they land in [DynamicVisitFormUiState.highlightedFieldGrades]. */
+private data class RiskHighlightStyle(val border: Color, val surface: Color, val badgeLevel: RiskLevel)
+
+private fun RiskGrade.highlightStyle(): RiskHighlightStyle? = when (this) {
+  RiskGrade.MILD -> RiskHighlightStyle(RiskMild, RiskMildSurface, RiskLevel.MILD)
+  RiskGrade.MODERATE -> RiskHighlightStyle(RiskModerate, RiskModerateSurface, RiskLevel.MODERATE)
+  RiskGrade.SEVERE -> RiskHighlightStyle(RiskHigh, RiskHighSurface, RiskLevel.HIGH)
+  RiskGrade.NORMAL, RiskGrade.UNKNOWN -> null
 }
 
 /** `input_type`s whose widget has its own `errorText` slot and therefore renders a server error

@@ -106,6 +106,7 @@ class VisitFormSyncExecutorTest {
         org.armman.sakhi.data.delivery.FakeDeliverySessionDao(),
       ),
       childFormDraftDao = org.armman.sakhi.data.childregistration.FakeChildFormDraftDao(),
+      riskAssessmentApi = FakeRiskAssessmentApi(),
     )
     executor = VisitFormSyncExecutor(dao, secureStore, coordinator)
   }
