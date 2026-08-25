@@ -22,6 +22,7 @@ import org.armman.sakhi.data.delivery.DeliverySessionRepository
 import org.armman.sakhi.data.delivery.DeliverySessionStep
 import org.armman.sakhi.data.delivery.DeliveryToChildRegistrationPrefill
 import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
+import org.armman.sakhi.data.forms.DeliveryQuestionCodes
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormComputedFieldEvaluator
 import org.armman.sakhi.data.forms.FormCrossFieldRule
@@ -85,6 +86,14 @@ data class DeliveryChildRegistrationUiState(
    * [DeliveryChildRegistrationViewModel]'s class doc for why this is injected rather than obtained
    * from a `POST /beneficiaries` call. Null only before the first successful [load]. */
   val serverBeneficiaryId: String? = null,
+  /** The mother's answered [DeliveryQuestionCodes.DATE_OF_DELIVERY], parsed — forwarded to
+   * [FormDateRuleset.boundsFor] so the infant DOB picker can't be scrolled back before the delivery
+   * that produced this registration (reported bug, 2026-08-25). Null only if the delivery answer is
+   * somehow missing/unparseable — see [DeliveryChildRegistrationViewModel.load]'s own "shouldn't
+   * happen" caveat for [deliveryAnswers] — in which case the DOB bound simply falls back to the
+   * wider age-ceiling window, same "missing data gap" convention as every other optional bound in
+   * [FormDateRuleset]. */
+  val deliveryDate: LocalDate? = null,
 )
 
 sealed interface DeliveryChildRegistrationEvent {
@@ -189,6 +198,8 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
       // it just returns null), so the Sakhi degrades to filling everything in fresh rather than
       // being blocked outright.
       val deliveryAnswers = deliveryFormDraftRepository.getAnswers(deliverySubmissionLocalUuid) ?: FormAnswers()
+      val deliveryDate = deliveryAnswers.valueOf(DeliveryQuestionCodes.DATE_OF_DELIVERY)
+        ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
       // The mother's own MOTHER_REGISTRATION answers — read locally (no network call, see
       // DeliveryToChildRegistrationPrefill.singleValueAnswersFor's own doc) so her name, DOB/age,
       // geography, mobile/address, consent and household socio-demographics can all prefill onto
@@ -218,6 +229,7 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
           answers = initialAnswers,
           childIndex = childIndex,
           serverBeneficiaryId = serverBeneficiaryId,
+          deliveryDate = deliveryDate,
         )
       }
       // Bug fix (2026-08-21): `current_age_of_infant_in_days` ("Age of infant") is declared

@@ -103,6 +103,14 @@
 -keep class org.armman.sakhi.data.adhocform.** { *; }
 -keep class org.armman.sakhi.data.delivery.** { *; }
 
+# previsithealth: PreVisitHealthHistoryApi (GET /beneficiaries/:id/visit-history) +
+# VisitHistoryResponseDto/VisitHistoryDataDto/VisitHistoryEntryDto/VisitVitalsDto/VitalValueDto/
+# BloodPressureDto, reached only via Retrofit's erased Response<T> generic — same reflection
+# hazard as every package above, missed by the 2026-08-19 audit. Release-only regression: the
+# Pre-Visit Health History screen's "We couldn't load this beneficiary's health history" error
+# on Start Visit (works fine in debug, fails in release) — confirmed 2026-08-25.
+-keep class org.armman.sakhi.data.previsithealth.** { *; }
+
 # Retrofit's own recommended R8 rules. Retrofit builds each call's generic return type
 # (Response<LoginResponseDto>) from the service interface method's signature/annotations at
 # runtime; stripping those causes GsonConverterFactory to hand back the wrong type and

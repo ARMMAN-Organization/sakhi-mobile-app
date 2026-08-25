@@ -341,6 +341,15 @@ object FormDateRuleset {
      * only caller that ever passes this; null (unbounded lower end) when unavailable, same
      * "missing data gap" convention as [beneficiaryRegistrationDate]. */
     motherLmpDate: LocalDate? = null,
+    /** The mother's actual delivery date (spec/reported bug, 2026-08-25: "Baby's date of birth
+     * cannot be earlier than the mother's delivery date"). Only meaningful for
+     * [ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT] — floors that field's picker at the
+     * delivery date instead of the wider age-ceiling window when a delivery event produced this
+     * registration. Sourced from the submitted `DELIVERY_VISIT` answers by
+     * [org.armman.sakhi.ui.delivery.DeliveryChildRegistrationViewModel]; null for the standalone
+     * Child Registration flow (no delivery event to floor against), same "missing data gap"
+     * convention as [beneficiaryRegistrationDate]/[motherLmpDate] above. */
+    deliveryDate: LocalDate? = null,
   ): Bounds? {
     val reference = referenceDate(answers, registrationDate)
     return when (questionCode) {
@@ -461,7 +470,11 @@ object FormDateRuleset {
       // but it is prefilled with — and capped at — today, so the two values agree in practice; this
       // keeps them agreeing even if a Sakhi back-dates it.
       ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT -> Bounds(
-        min = registrationDate.minusDays(childAgeCeilingDays(answers)),
+        // Floored at the mother's actual delivery date when known (a delivery-session
+        // registration) — a baby cannot be born before the delivery that produced this
+        // registration. Falls back to the wider age-ceiling window when there is no delivery event
+        // to floor against (the standalone/direct Child Registration flow).
+        min = deliveryDate ?: registrationDate.minusDays(childAgeCeilingDays(answers)),
         // "Should not accept future date" (spec row 6.0) — an infant aged 0 days is valid, so today
         // is selectable.
         max = registrationDate,
