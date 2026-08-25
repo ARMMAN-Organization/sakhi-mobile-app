@@ -195,6 +195,10 @@ fun DynamicFormField(
    * param's own doc. Null for every caller except [org.armman.sakhi.ui.delivery
    * .DeliverySessionScreen]; has no bearing on any other question code. */
   motherLmpDate: LocalDate? = null,
+  /** The mother's actual delivery date, forwarded verbatim to [FormDateRuleset.boundsFor] — see
+   * that param's own doc. Null for every caller except [org.armman.sakhi.ui.delivery
+   * .DeliveryChildRegistrationScreen]; has no bearing on any other question code. */
+  deliveryDate: LocalDate? = null,
   /** Server-side per-field validation message (from a `400 VALIDATION_ERROR`), shown inline under
    * the field. For text/number fields it feeds the widget's own `errorText` slot and takes
    * precedence over the local range/mobile hint; for every other field type it renders as a
@@ -265,6 +269,7 @@ fun DynamicFormField(
       registrationDate = registrationDate,
       beneficiaryRegistrationDate = beneficiaryRegistrationDate,
       motherLmpDate = motherLmpDate,
+      deliveryDate = deliveryDate,
       singleValue = singleValue,
       multiValue = multiValue,
       mediaCompleted = mediaCompleted,
@@ -363,6 +368,7 @@ private fun DynamicFormFieldBody(
   registrationDate: LocalDate,
   beneficiaryRegistrationDate: LocalDate?,
   motherLmpDate: LocalDate?,
+  deliveryDate: LocalDate?,
   singleValue: String,
   multiValue: List<String>,
   mediaCompleted: Boolean,
@@ -537,6 +543,7 @@ private fun DynamicFormFieldBody(
         formCode = formCode,
         beneficiaryRegistrationDate = beneficiaryRegistrationDate,
         motherLmpDate = motherLmpDate,
+        deliveryDate = deliveryDate,
       )
       val localError = FormDateRuleset
         .violationFor(field.questionCode, answers, registrationDate, formCode)
