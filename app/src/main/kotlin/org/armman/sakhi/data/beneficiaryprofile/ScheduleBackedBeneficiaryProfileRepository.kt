@@ -121,6 +121,11 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
     riskLevel = riskLevel,
     lmp = answers?.displayDate(QuestionCode.LMP_DATE),
     edd = answers?.displayDate(QuestionCode.EDD),
+    // CR (RCH-number-blank-on-ANC1 bugfix): captured at MOTHER_REGISTRATION under the same
+    // `input_rch_number` code the submission mapper reads (DynamicFormSubmissionMapper's
+    // QuestionCode.RCH_NUMBER) -- was never read back out here, so it stayed blank on the
+    // Visit Form's carried-forward context regardless of what the Sakhi entered.
+    rchNumber = answers?.displayValue(QuestionCode.RCH_NUMBER),
     // CHILD_REGISTRATION stores the infant's own DOB/weight under different question codes than
     // MOTHER_REGISTRATION's `date_of_birth`/`weight_kg` (used below for a MOTHER profile). Reading
     // the mother's codes for a child left both fields permanently blank on every child's profile.
@@ -165,6 +170,7 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
     const val LMP_DATE = "lmp_date"
     const val EDD = "edd"
     const val WEIGHT_KG = "weight_kg"
+    const val RCH_NUMBER = "input_rch_number"
   }
 
   private companion object {

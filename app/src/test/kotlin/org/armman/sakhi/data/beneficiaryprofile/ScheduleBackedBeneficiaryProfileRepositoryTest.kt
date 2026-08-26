@@ -186,6 +186,34 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
   }
 
   /**
+   * Reported bug: a Sakhi entered the RCH number at Mother Registration, but ANC1's carried-
+   * forward context always showed it blank -- `input_rch_number` was captured and synced but
+   * never read back into the profile. Regression coverage for that read-back.
+   */
+  @Test
+  fun `RCH number is read from the answers`() = runTest {
+    val localId = "local-uuid-rch-1"
+    saveLocalEnrolment(
+      localId,
+      firstName = "Sunita",
+      lastName = "Pawar",
+      extraSingleValues = mapOf("input_rch_number" to "RCH-2026-000123"),
+    )
+
+    assertEquals("RCH-2026-000123", repository.getBeneficiary(localId).rchNumber)
+  }
+
+  /** No RCH card on file at registration -- profile correctly reports null, not a crash or a
+   * stale/wrong value. */
+  @Test
+  fun `an unanswered RCH number renders null rather than failing`() = runTest {
+    val localId = "local-uuid-rch-2"
+    saveLocalEnrolment(localId, firstName = "Asha", lastName = "Jadhav")
+
+    assertEquals(null, repository.getBeneficiary(localId).rchNumber)
+  }
+
+  /**
    * The reported bug: `diagnoses` was never populated for a locally enrolled mother, so the
    * profile's Diagnosis chips never appeared even when Q58/Q60 were answered. Also exercises the
    * label lookup (raw `value_code`s must not leak onto the card) and the exclusion/inclusion rules

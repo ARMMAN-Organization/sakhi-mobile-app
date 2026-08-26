@@ -91,6 +91,14 @@ import org.armman.sakhi.data.delivery.DeliverySessionEntity
  *    to a table that may already have rows). Same standing team decision as v4-v11 — no real users
  *    on the app yet, so the placeholder `''` a pre-existing queued row would upgrade with is not
  *    backfilled with a real uuid; no automated migration test for this one either.
+ *  - v13: [DeliverySessionEntity.child1BirthOrder]/`child2BirthOrder`/`child3BirthOrder` (client-side
+ *    fix for the reported "stillborn twin causes the live twin's registration to prefill with the
+ *    dead twin's data" bug, 2026-08-26 — see that field's own doc for the full mechanism).
+ *    Additive [MIGRATION_12_13] — `ALTER TABLE`s the existing `delivery_sessions` table, adding
+ *    three nullable `INTEGER` columns. Every existing row upgrades with all three `NULL`
+ *    (SQLite's default), which is the correct "unknown, fall back to the old positional
+ *    assumption" state for any in-flight session that predates this fix — same standing team
+ *    decision as v4-v12, no automated migration test.
  */
 @Database(
   entities = [
@@ -105,7 +113,7 @@ import org.armman.sakhi.data.delivery.DeliverySessionEntity
     DeliveryFormDraftEntity::class,
     DeliveryChildRegistrationDraftEntity::class,
   ],
-  version = 12,
+  version = 13,
   exportSchema = true,
 )
 @TypeConverters(ScheduleTypeConverters::class)
@@ -395,6 +403,20 @@ abstract class SakhiDatabase : RoomDatabase() {
         db.execSQL(
           "ALTER TABLE `visit_form_drafts` ADD COLUMN `localSubmissionUuid` TEXT NOT NULL DEFAULT ''",
         )
+      }
+    }
+
+    /**
+     * v12 → v13: adds [DeliverySessionEntity.child1BirthOrder]/`child2BirthOrder`/`child3BirthOrder`
+     * to the existing `delivery_sessions` table — see that field's own doc for why this is needed
+     * alongside the existing `child1BeneficiaryId` etc. columns (compacted-position vs. real
+     * birth-order slot).
+     */
+    val MIGRATION_12_13: Migration = object : Migration(12, 13) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `delivery_sessions` ADD COLUMN `child1BirthOrder` INTEGER")
+        db.execSQL("ALTER TABLE `delivery_sessions` ADD COLUMN `child2BirthOrder` INTEGER")
+        db.execSQL("ALTER TABLE `delivery_sessions` ADD COLUMN `child3BirthOrder` INTEGER")
       }
     }
   }
