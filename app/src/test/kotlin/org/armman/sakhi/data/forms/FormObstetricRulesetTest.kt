@@ -149,16 +149,45 @@ class FormObstetricRulesetTest {
   // --- Partially filled forms stay quiet -------------------------------------------------------
 
   @Test
-  fun `a rule stays quiet until every figure it needs is entered`() {
-    // Mid-entry: Gravida typed, the parts still blank. Firing here would train the Sakhi to ignore
-    // errors.
-    val gravidaOnly = answers(GRAVIDA to "6")
-    assertNull(FormObstetricRuleset.violationFor(GRAVIDA, gravidaOnly))
-    assertNull(FormObstetricRuleset.expectedGravida(gravidaOnly))
-    assertTrue(FormObstetricRuleset.allValid(allFields, gravidaOnly))
+  fun `the gravida total is flagged as soon as gravida is entered - the reported bug`() {
+    // The report: on a fresh form a Gravida of 2 showed no message, but the SAME 2 did once the
+    // prior-pregnancy block had been hidden and shown again (which leaves "0" in those boxes - see
+    // FormHiddenFieldReset). Unanswered counts now read as zero either way, so both paths agree.
+    val freshlyTyped = answers(GRAVIDA to "2")
+    assertEquals(Violation.GRAVIDA_TOTAL, FormObstetricRuleset.violationFor(GRAVIDA, freshlyTyped))
+    assertFalse(FormObstetricRuleset.allValid(allFields, freshlyTyped))
 
+    val afterHideShow = answers(GRAVIDA to "2", LIVING_CHILDREN to "0", STILL_BIRTHS to "0", ABORTIONS to "0")
+    assertEquals(
+      FormObstetricRuleset.violationFor(GRAVIDA, freshlyTyped),
+      FormObstetricRuleset.violationFor(GRAVIDA, afterHideShow),
+    )
+
+    // A blank among filled siblings counts as zero too, rather than silencing the rule.
     val partBlank = answers(GRAVIDA to "6", LIVING_CHILDREN to "", STILL_BIRTHS to "0", ABORTIONS to "0")
-    assertNull(FormObstetricRuleset.violationFor(GRAVIDA, partBlank))
+    assertEquals(Violation.GRAVIDA_TOTAL, FormObstetricRuleset.violationFor(GRAVIDA, partBlank))
+  }
+
+  @Test
+  fun `a gravida of 1 with nothing else entered is not flagged`() {
+    // First pregnancy: the block stays hidden and zero outcomes are exactly right, so the Sakhi
+    // must not be shown an error on the commonest case of all.
+    val gravidaOnly = answers(GRAVIDA to "1")
+
+    assertNull(FormObstetricRuleset.violationFor(GRAVIDA, gravidaOnly))
+    assertTrue(FormObstetricRuleset.allValid(allFields, gravidaOnly))
+  }
+
+  @Test
+  fun `the other rules stay quiet until every figure they need is entered`() {
+    // Only the Gravida total reads a missing count as zero; the comparison rules still wait, so a
+    // half-typed Para/Abortions/Dead children never flashes an error mid-entry.
+    val gravidaOnly = answers(GRAVIDA to "6")
+
+    assertNull(FormObstetricRuleset.violationFor(PARA, gravidaOnly))
+    assertNull(FormObstetricRuleset.violationFor(ABORTIONS, gravidaOnly))
+    assertNull(FormObstetricRuleset.violationFor(DEAD_CHILDREN, gravidaOnly))
+    assertNull(FormObstetricRuleset.expectedGravida(gravidaOnly))
   }
 
   @Test

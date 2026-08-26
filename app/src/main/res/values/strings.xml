@@ -172,6 +172,7 @@
   <string name="beneficiary_profile_visit_complete_short">Complete</string>
   <string name="beneficiary_profile_schedule_date">Schedule Date : %1$s</string>
   <string name="beneficiary_profile_referral_incomplete">Referral Followup Incomplete</string>
+  <string name="beneficiary_profile_pending_sync">Queued for upload</string>
   <string name="beneficiary_profile_start_visit">Start Visit</string>
   <string name="beneficiary_profile_fill_form">Fill Form</string>
   <string name="beneficiary_profile_see_data">See Data</string>

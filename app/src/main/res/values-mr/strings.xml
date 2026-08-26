@@ -166,6 +166,7 @@
   <string name="beneficiary_profile_visit_complete_short">पूर्ण</string>
   <string name="beneficiary_profile_schedule_date">नियोजित तारीख : %1$s</string>
   <string name="beneficiary_profile_referral_incomplete">संदर्भ पाठपुरावा अपूर्ण</string>
+  <string name="beneficiary_profile_pending_sync">अपलोडसाठी प्रलंबित</string>
   <string name="beneficiary_profile_start_visit">भेट सुरू करा</string>
   <string name="beneficiary_profile_fill_form">फॉर्म भरा</string>
   <string name="beneficiary_profile_see_data">डेटा पहा</string>
