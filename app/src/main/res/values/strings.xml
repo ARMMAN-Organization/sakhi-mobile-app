@@ -62,10 +62,12 @@
   <string name="filter_close">Close filter</string>
   <string name="filter_all_padas">All Padas</string>
   <string name="filter_all_risks">All Risks</string>
-  <string name="risk_high">High Risk</string>
-  <string name="risk_moderate">Moderate Risk</string>
-  <string name="risk_mild">Mild Risk</string>
-  <string name="risk_low">Low Risk</string>
+  <!-- Sentence case (not Title Case) per 2026-08-26 design feedback: field-level risk badges
+       read as too shouty in Title Case next to a live form field. -->
+  <string name="risk_high">High risk</string>
+  <string name="risk_moderate">Moderate risk</string>
+  <string name="risk_mild">Mild risk</string>
+  <string name="risk_low">Low risk</string>
   <string name="risk_high_short">High</string>
   <string name="risk_moderate_short">Moderate</string>
   <string name="risk_mild_short">Mild</string>

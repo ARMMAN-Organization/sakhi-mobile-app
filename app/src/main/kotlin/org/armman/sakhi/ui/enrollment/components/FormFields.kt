@@ -183,6 +183,8 @@ fun AppDropdownField(
   errorText: String? = null,
   enabled: Boolean = true,
   required: Boolean = false,
+  // See AppTextInputField's [fieldBackground] doc — same contract, same risk-highlight use case.
+  fieldBackground: Color? = null,
 ) {
   var expanded by remember { mutableStateOf(false) }
   var fieldWidthPx by remember { mutableIntStateOf(0) }
@@ -205,7 +207,7 @@ fun AppDropdownField(
           .height(Dimens.SmallButtonHeight)
           .onSizeChanged { fieldWidthPx = it.width }
           .clip(FieldShape)
-          .background(White)
+          .background(fieldBackground ?: White)
           .border(1.dp, fieldBorder(errorText != null), FieldShape)
           .clickable(enabled = enabled && options.isNotEmpty()) {
             // A field further down the form (a dropdown, date, checkbox, radio — none of them
@@ -508,6 +510,11 @@ fun AppTextInputField(
   errorText: String? = null,
   keyboardType: KeyboardType = KeyboardType.Text,
   required: Boolean = false,
+  // Tints ONLY this input box's own background — never the label above it or anything below —
+  // for the real-time risk-highlight CR (2026-08-26 design feedback: color should sit on the
+  // field itself, not spill into an outer wrapper/margin around the whole label+field group).
+  // Null (default) -> White, i.e. zero visual change for every existing caller of this widget.
+  fieldBackground: Color? = null,
 ) {
   FieldFrame(label = label, errorText = errorText, modifier = modifier, required = required) {
     Box(
@@ -515,7 +522,7 @@ fun AppTextInputField(
         .fillMaxWidth()
         .height(Dimens.SmallButtonHeight)
         .clip(FieldShape)
-        .background(White)
+        .background(fieldBackground ?: White)
         .border(1.dp, fieldBorder(errorText != null), FieldShape)
         .padding(horizontal = Dimens.ChipSpacing),
       contentAlignment = Alignment.CenterStart,
@@ -553,10 +560,22 @@ fun AppRadioGroup(
   errorText: String? = null,
   horizontal: Boolean = false,
   required: Boolean = false,
+  // See AppTextInputField's [fieldBackground] doc. Unlike a single text/dropdown box, a radio
+  // group has no one input box to tint — this wraps just the options themselves (not the label
+  // above, not the error text below) in a soft rounded container instead.
+  fieldBackground: Color? = null,
 ) {
   FieldFrame(label = label, errorText = errorText, modifier = modifier, required = required) {
+    val optionsModifier = if (fieldBackground != null) {
+      Modifier
+        .clip(RoundedCornerShape(8.dp))
+        .background(fieldBackground)
+        .padding(8.dp)
+    } else {
+      Modifier
+    }
     if (horizontal) {
-      Row(horizontalArrangement = Arrangement.spacedBy(Dimens.ScreenPadding)) {
+      Row(horizontalArrangement = Arrangement.spacedBy(Dimens.ScreenPadding), modifier = optionsModifier) {
         options.forEachIndexed { index, option ->
           SelectableRow(
             label = option,
@@ -568,7 +587,7 @@ fun AppRadioGroup(
         }
       }
     } else {
-      Column(verticalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing)) {
+      Column(verticalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing), modifier = optionsModifier) {
         options.forEachIndexed { index, option ->
           SelectableRow(
             label = option,
@@ -599,6 +618,9 @@ fun AppCheckboxGroup(
   errorText: String? = null,
   enabled: (Int) -> Boolean = { true },
   required: Boolean = false,
+  // See AppRadioGroup's [fieldBackground] doc — same "wrap just the options, not the label"
+  // contract, used by MULTISELECT fields like urine_test/danger_signs in the risk-highlight CR.
+  fieldBackground: Color? = null,
 ) {
   FieldFrame(
     label = label,
@@ -607,7 +629,15 @@ fun AppCheckboxGroup(
     required = required,
     errorBelowLabel = true,
   ) {
-    Column(verticalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing)) {
+    val optionsModifier = if (fieldBackground != null) {
+      Modifier
+        .clip(RoundedCornerShape(8.dp))
+        .background(fieldBackground)
+        .padding(8.dp)
+    } else {
+      Modifier
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing), modifier = optionsModifier) {
       options.forEachIndexed { index, option ->
         SelectableRow(
           label = option,

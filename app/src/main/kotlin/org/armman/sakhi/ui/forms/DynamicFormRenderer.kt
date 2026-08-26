@@ -6,7 +6,6 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -77,11 +76,8 @@ import org.armman.sakhi.ui.components.RiskBadge
 import org.armman.sakhi.ui.components.SecondaryButton
 import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG400
-import org.armman.sakhi.ui.theme.RiskHigh
 import org.armman.sakhi.ui.theme.RiskHighSurface
-import org.armman.sakhi.ui.theme.RiskMild
 import org.armman.sakhi.ui.theme.RiskMildSurface
-import org.armman.sakhi.ui.theme.RiskModerate
 import org.armman.sakhi.ui.theme.RiskModerateSurface
 import org.armman.sakhi.ui.theme.StatusSuccess
 import org.armman.sakhi.ui.theme.VideoPlaceholderSurface
@@ -288,30 +284,18 @@ fun DynamicFormField(
     if (hasFocus && imeVisible) bringIntoViewRequester.bringIntoView()
   }
 
-  // Risk highlight (Option B): a colored surface-wash + border wrapped around the WHOLE field —
-  // label, input widget and all — rather than reaching into every individual widget's own
-  // border/background (NUMBER's AppTextInputField, RADIO/CHECKBOX/SELECT's own boxes, etc.). One
-  // wrap point here covers every FormFieldInputType uniformly and leaves every widget in
-  // ui/enrollment/components/FormFields.kt completely untouched, so this can't regress the
-  // enrollment flow those widgets are shared with. No risk grade -> zero-cost Modifier, pixel
-  // identical to before this param existed.
+  // Risk highlight (Option B), revised 2026-08-26: the tint now lives on the actual input
+  // widget's own background (AppTextInputField/AppDropdownField's box, or the options container
+  // for AppRadioGroup/AppCheckboxGroup) — see each widget's `fieldBackground` param in
+  // ui/enrollment/components/FormFields.kt — NOT on an outer wrapper around label+field+badge.
+  // Passed through as `riskStyle?.surface`; every other caller of those widgets passes nothing,
+  // so this is a zero-cost default (White/no tint) everywhere except here.
   val riskStyle = riskGrade?.highlightStyle()
   Column(
     modifier = modifier
       .bringIntoViewRequester(bringIntoViewRequester)
       // `hasFocus`, not `isFocused`: the focus sits on the child widget, not on this Column.
-      .onFocusEvent { hasFocus = it.hasFocus }
-      .then(
-        if (riskStyle != null) {
-          Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(riskStyle.surface, RoundedCornerShape(10.dp))
-            .border(1.4.dp, riskStyle.border, RoundedCornerShape(10.dp))
-            .padding(10.dp)
-        } else {
-          Modifier
-        },
-      ),
+      .onFocusEvent { hasFocus = it.hasFocus },
     verticalArrangement = Arrangement.spacedBy(4.dp),
   ) {
     DynamicFormFieldBody(
@@ -333,6 +317,7 @@ fun DynamicFormField(
       serverErrorText = errorText,
       readOnlyQuestionCodes = readOnlyQuestionCodes,
       formCode = formCode,
+      fieldBackground = riskStyle?.surface,
     )
     if (errorText != null && !rendersErrorInline) {
       FieldErrorText(errorText)
@@ -343,16 +328,21 @@ fun DynamicFormField(
   }
 }
 
-/** Border/surface-wash colors + [RiskBadge] level for one [RiskGrade] tier, sourced 1:1 from
- * `ui/theme/Color.kt`'s existing Risk* tokens — no new colors, per the approved "Option B" mockup
- * (2026-08-24). [RiskGrade.NORMAL]/[RiskGrade.UNKNOWN] never reach here — the ViewModel filters
- * those out before they land in [DynamicVisitFormUiState.highlightedFieldGrades]. */
-private data class RiskHighlightStyle(val border: Color, val surface: Color, val badgeLevel: RiskLevel)
+/** Surface-wash color + [RiskBadge] level for one [RiskGrade] tier, sourced 1:1 from
+ * `ui/theme/Color.kt`'s existing Risk*Surface tokens — no new colors, per the approved "Option B"
+ * mockup (2026-08-24). [RiskGrade.NORMAL]/[RiskGrade.UNKNOWN] never reach here — the ViewModel
+ * filters those out before they land in [DynamicVisitFormUiState.highlightedFieldGrades].
+ *
+ * No border color: per 2026-08-26 design feedback, an outer border line around the whole field
+ * group read as too heavy/boxed-in — the soft background wash plus the [RiskBadge] below the
+ * field are the only highlight signal now, and both read at the same visual weight regardless of
+ * severity (only the badge's own color/text carries the severity signal). */
+private data class RiskHighlightStyle(val surface: Color, val badgeLevel: RiskLevel)
 
 private fun RiskGrade.highlightStyle(): RiskHighlightStyle? = when (this) {
-  RiskGrade.MILD -> RiskHighlightStyle(RiskMild, RiskMildSurface, RiskLevel.MILD)
-  RiskGrade.MODERATE -> RiskHighlightStyle(RiskModerate, RiskModerateSurface, RiskLevel.MODERATE)
-  RiskGrade.SEVERE -> RiskHighlightStyle(RiskHigh, RiskHighSurface, RiskLevel.HIGH)
+  RiskGrade.MILD -> RiskHighlightStyle(RiskMildSurface, RiskLevel.MILD)
+  RiskGrade.MODERATE -> RiskHighlightStyle(RiskModerateSurface, RiskLevel.MODERATE)
+  RiskGrade.SEVERE -> RiskHighlightStyle(RiskHighSurface, RiskLevel.HIGH)
   RiskGrade.NORMAL, RiskGrade.UNKNOWN -> null
 }
 
@@ -448,6 +438,10 @@ private fun DynamicFormFieldBody(
   serverErrorText: String?,
   readOnlyQuestionCodes: Set<String> = emptySet(),
   formCode: String? = null,
+  // See AppTextInputField's `fieldBackground` doc (FormFields.kt) — threaded down to whichever
+  // widget this field's inputType renders. Read-only/computed/media/image branches don't accept
+  // it (none of those input types appear in RiskConditionFieldMap today).
+  fieldBackground: Color? = null,
 ) {
   val ageFromDobEditable = field.questionCode in AGE_FROM_DOB_QUESTION_CODES &&
     !isAgeFromDobReadOnly(answers)
@@ -516,6 +510,7 @@ private fun DynamicFormFieldBody(
         // (ViewModel.setAnswer), so the local hint takes over again — no double error.
         errorText = serverErrorText ?: localError,
         required = required,
+        fieldBackground = fieldBackground,
       )
     }
 
@@ -596,6 +591,7 @@ private fun DynamicFormFieldBody(
         // (ViewModel.setAnswer), so the local range/mobile hint takes over again — no double error.
         errorText = serverErrorText ?: localError,
         required = required,
+        fieldBackground = fieldBackground,
       )
     }
 
@@ -651,6 +647,7 @@ private fun DynamicFormFieldBody(
         selectedIndex = options.indexOfFirst { it.valueCode == singleValue }.takeIf { it >= 0 },
         onSelected = { index -> onSingleAnswer(options.getOrNull(index)?.valueCode) },
         required = required,
+        fieldBackground = fieldBackground,
       )
     }
 
@@ -673,6 +670,7 @@ private fun DynamicFormFieldBody(
           selectedIndex = options.indexOfFirst { it.valueCode == singleValue }.takeIf { it >= 0 },
           onSelected = { index -> onSingleAnswer(options.getOrNull(index)?.valueCode) },
           required = required,
+          fieldBackground = fieldBackground,
         )
       }
 
@@ -702,6 +700,7 @@ private fun DynamicFormFieldBody(
             !FormMultiSelectExclusivity.isDisabled(field.questionCode, code, multiValue, formCode)
         },
         required = required,
+        fieldBackground = fieldBackground,
       )
     }
 
