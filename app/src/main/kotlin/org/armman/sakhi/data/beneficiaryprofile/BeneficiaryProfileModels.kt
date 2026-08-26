@@ -71,6 +71,9 @@ data class BeneficiaryProfile(
   val lmp: String? = null,
   /** MOTHER only. */
   val edd: String? = null,
+  /** MOTHER only — captured at MOTHER_REGISTRATION (`input_rch_number`); null if the
+   * beneficiary has no RCH card on file. */
+  val rchNumber: String? = null,
   /** CHILD only. */
   val dob: String? = null,
   /** CHILD only. */

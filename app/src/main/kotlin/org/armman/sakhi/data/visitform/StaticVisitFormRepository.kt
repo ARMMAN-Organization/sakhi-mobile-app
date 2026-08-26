@@ -51,7 +51,11 @@ class StaticVisitFormRepository @Inject constructor(
    */
   private fun syntheticContext(profile: BeneficiaryProfile) = VisitContext(
     visitTypeLabel = "ANC1",
-    rchNumber = "",
+    // Bugfix: this used to be hardcoded blank for every real (non-seeded-demo) beneficiary, so
+    // an RCH number entered at MOTHER_REGISTRATION never carried forward onto ANC1. Read from the
+    // profile the same way `lmp` two lines below already does; still blank (not a crash) for a
+    // beneficiary with no RCH card on file, exactly per FR spec row 39-40.
+    rchNumber = profile.rchNumber.orEmpty(),
     lmp = profile.lmp
       ?.let { runCatching { LocalDate.parse(it, PROFILE_DATE_FORMAT) }.getOrNull() }
       ?: LocalDate.now(),

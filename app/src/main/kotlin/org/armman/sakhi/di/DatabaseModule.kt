@@ -40,7 +40,10 @@ object DatabaseModule {
       // delivery_child_registration_drafts; v10→v11 adds the deliveryFormFilledOn column onto
       // the existing delivery_sessions table (CR-042 PP1→NN/DONE step advancement); v11→v12 adds
       // the localSubmissionUuid column onto the existing visit_form_drafts table (resumed visit
-      // submissions now replay the same idempotency key instead of minting a fresh one).
+      // submissions now replay the same idempotency key instead of minting a fresh one); v12->v13
+      // adds child1BirthOrder/child2BirthOrder/child3BirthOrder onto the existing delivery_sessions
+      // table (fixes a stillborn twin's slot misaligning the next live twin's registration
+      // prefill).
       // fallbackToDestructiveMigration() is retained only as the last-resort net for the
       // pre-release v1 DB (see SakhiDatabase's doc).
       .addMigrations(
@@ -54,6 +57,7 @@ object DatabaseModule {
         SakhiDatabase.MIGRATION_9_10,
         SakhiDatabase.MIGRATION_10_11,
         SakhiDatabase.MIGRATION_11_12,
+        SakhiDatabase.MIGRATION_12_13,
       )
       .fallbackToDestructiveMigration()
       .build()

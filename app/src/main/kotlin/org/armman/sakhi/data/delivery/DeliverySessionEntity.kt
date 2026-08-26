@@ -71,6 +71,34 @@ data class DeliverySessionEntity(
    * sequence resumes at this index rather than restarting from child1.
    */
   val nextChildIndexToRegister: Int = 0,
+  /**
+   * The REAL, 1-based `DELIVERY_VISIT` birth-order slot (matching `childN_*` question codes) that
+   * [child1BeneficiaryId] actually corresponds to — null if unknown (a pre-migration session row,
+   * or the delivery answers didn't parse cleanly; [DeliveryFormSubmissionCoordinator] degrades to
+   * the old positional assumption in that case rather than failing).
+   *
+   * ### Why this exists — [child1BeneficiaryId] etc. are already compacted, not padded
+   * [org.armman.sakhi.data.forms.SubmissionResponseData.childBeneficiaryIds] excludes stillborn
+   * slots entirely rather than padding them with a null entry (see that field's own doc), so
+   * `childBeneficiaryIds[0]` is only ACTUALLY birth-order slot 1 when slot 1 itself was a live
+   * birth. If slot 1 was stillborn and slot 2 was live, `childBeneficiaryIds[0]` is slot 2's id —
+   * but [child1BeneficiaryId] still stores it under the "child1" column, because compacted-array
+   * position is what the rest of this session (registration sequencing, `nextChildIndexToRegister`)
+   * already keys off. That's fine for WHICH server id to submit against, but wrong for WHICH
+   * `childN_*` answers ([org.armman.sakhi.data.delivery.DeliveryToChildRegistrationPrefill]) to
+   * prefill from — this column is what lets the prefill step ask "which slot is this ACTUALLY",
+   * separately from "which compacted position is this."
+   *
+   * Reported bug (2026-08-26): without this, a stillborn non-last twin/triplet caused the next
+   * live child's Child Registration screen to prefill with the DEAD child's own
+   * sex/weight/length/complications — because prefill read `childN_*` using the compacted index
+   * (0) instead of the real slot (1, since slot 0 was stillborn and skipped).
+   */
+  val child1BirthOrder: Int? = null,
+  /** See [child1BirthOrder]'s own doc — same contract, for [child2BeneficiaryId]. */
+  val child2BirthOrder: Int? = null,
+  /** See [child1BirthOrder]'s own doc — same contract, for [child3BeneficiaryId]. */
+  val child3BirthOrder: Int? = null,
   val createdAtEpochMillis: Long,
   val updatedAtEpochMillis: Long,
 )

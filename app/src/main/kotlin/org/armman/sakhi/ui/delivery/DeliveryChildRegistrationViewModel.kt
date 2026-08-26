@@ -181,6 +181,10 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
       }
       val childIndex = session.nextChildIndexToRegister
       val serverBeneficiaryId = childBeneficiaryIdAt(session, childIndex)
+      // The REAL birth-order slot this compacted childIndex maps to (see
+      // DeliverySessionEntity.child1BirthOrder's own doc) — falls back to childIndex itself when
+      // unknown, i.e. exactly today's (imperfect but not new) behavior, not a new failure mode.
+      val prefillChildIndex = childBirthOrderAt(session, childIndex)?.minus(1) ?: childIndex
       if (serverBeneficiaryId == null) {
         // Defensive: step is CHILD_REGISTRATION but no child is recorded at this index — nothing
         // this screen can do about that, same "can't render" fallback as a missing schema.
@@ -209,12 +213,12 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
       val prefilledAnswers = FormAnswers(
         singleValues = DeliveryToChildRegistrationPrefill.singleValueAnswersFor(
           deliveryAnswers = deliveryAnswers,
-          childIndex = childIndex,
+          childIndex = prefillChildIndex,
           motherAnswers = motherAnswers,
           motherGeography = version.geography.orEmpty(),
           registrationDate = LocalDate.now(),
         ),
-        multiValues = DeliveryToChildRegistrationPrefill.multiValueAnswersFor(deliveryAnswers, childIndex),
+        multiValues = DeliveryToChildRegistrationPrefill.multiValueAnswersFor(deliveryAnswers, prefillChildIndex),
       )
       // registrtion_date and project_name are both hidden from the Sakhi (HIDDEN_QUESTION_CODES
       // includes ChildNonRenderableQuestionCodes.ALL) on the promise -- see that object's own doc --
@@ -518,6 +522,16 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
     0 -> session.child1BeneficiaryId
     1 -> session.child2BeneficiaryId
     2 -> session.child3BeneficiaryId
+    else -> null
+  }
+
+  /** See [DeliverySessionEntity.child1BirthOrder]'s own doc — the REAL 1-based `DELIVERY_VISIT`
+   * birth-order slot for the child at compacted [index], or null if unknown (pre-migration session
+   * row, or the delivery answers didn't parse cleanly at submit time). */
+  private fun childBirthOrderAt(session: DeliverySessionEntity, index: Int): Int? = when (index) {
+    0 -> session.child1BirthOrder
+    1 -> session.child2BirthOrder
+    2 -> session.child3BirthOrder
     else -> null
   }
 
