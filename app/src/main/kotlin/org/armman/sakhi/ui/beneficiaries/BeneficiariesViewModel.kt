@@ -60,7 +60,16 @@ class BeneficiariesViewModel @Inject constructor(
     loadBeneficiaries()
   }
 
-  /** Loads (or reloads after an error) the beneficiary list. */
+  /**
+   * Loads (or reloads after an error) the beneficiary list.
+   *
+   * Also called from [BeneficiariesScreen]'s `LaunchedEffect(Unit)` on every fresh entry into
+   * composition, not just here in init — this ViewModel is retained on its NavBackStackEntry, so
+   * an init-only load would show stale data (e.g. a beneficiary still ACTIVE right after its own
+   * Closure form submission popped back to this exact screen instance) on every return visit, not
+   * just the first. The one redundant reload this causes on first entry is a cheap, idempotent
+   * price for that.
+   */
   fun loadBeneficiaries() {
     _uiState.update { it.copy(isLoading = true, hasError = false) }
     viewModelScope.launch {
@@ -143,10 +152,21 @@ class BeneficiariesViewModel @Inject constructor(
    */
   private fun refreshList() {
     val s = _uiState.value
+    val query = s.searchQuery.trim()
     val common = allBeneficiaries.filter { b ->
-      (s.searchQuery.isBlank() || b.name.contains(s.searchQuery.trim(), ignoreCase = true)) &&
+      // Matches name OR phone number (M3 fix — search was name-only before). A blank
+      // phoneNumber (remote-only rows the API doesn't return a mobile number for) never
+      // false-matches: `"".contains(query)` would otherwise be true for a blank query, but an
+      // empty query already short-circuits via `query.isBlank()` above.
+      val matchesSearch = query.isBlank() ||
+        b.name.contains(query, ignoreCase = true) ||
+        (b.phoneNumber.isNotBlank() && b.phoneNumber.contains(query, ignoreCase = true))
+      // An unassessed row (remote-only, isAssessed == false) has a placeholder riskLevel, not a
+      // real assessment — it stays visible regardless of the risk filter rather than being
+      // silently dropped or silently matched under a risk grade it was never actually given.
+      matchesSearch &&
         (s.selectedPadas.isEmpty() || b.pada in s.selectedPadas) &&
-        (s.selectedRisks.isEmpty() || b.riskLevel in s.selectedRisks)
+        (s.selectedRisks.isEmpty() || !b.isAssessed || b.riskLevel in s.selectedRisks)
     }
     val lists = BeneficiaryStatus.entries.associateWith { status ->
       common.filter { b ->

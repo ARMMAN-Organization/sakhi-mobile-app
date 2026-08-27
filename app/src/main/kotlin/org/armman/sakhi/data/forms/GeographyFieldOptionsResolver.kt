@@ -28,6 +28,19 @@ object GeographyQuestionCodes {
   const val SUB_CENTRE = "name_of_sub_center"
 
   val ALL: Set<String> = setOf(PROJECT_NAME, STATE, DISTRICT, BLOCK_TALUKA, VILLAGE, PADA, PHC, SUB_CENTRE)
+
+  /** Maps each geography `question_code` to the backend `geography[].geoType` it resolves against
+   * (see [FormGeographyUnit]). [PROJECT_NAME] is intentionally absent — it is not a geography unit
+   * and resolves from the Sakhi profile instead. */
+  val QUESTION_CODE_TO_GEO_TYPE: Map<String, String> = mapOf(
+    STATE to "STATE",
+    DISTRICT to "DISTRICT",
+    BLOCK_TALUKA to "BLOCK",
+    VILLAGE to "VILLAGE",
+    PADA to "PADA",
+    PHC to "PHC",
+    SUB_CENTRE to "SUBCENTRE",
+  )
 }
 
 /**
@@ -42,6 +55,36 @@ class GeographyFieldOptionsResolver @Inject constructor(
   private val geographyRepository: GeographyRepository,
   private val currentUserRepository: CurrentUserRepository,
 ) {
+
+  /**
+   * Mother flow (CR-018): geography options come straight from the [FormVersion.geography] the
+   * backend ships with the active version — NOT the static [GeographyRepository] cascade — so every
+   * submitted `geographyUnitId` is one the backend's `/beneficiaries` validation recognizes. Using
+   * the static UUIDs is exactly what produced `pii.phcId does not refer to a known geography unit`
+   * (HTTP 422) once the backend's geography table diverged from the hardcoded ids.
+   *
+   * The backend currently ships exactly one unit per level (the Sakhi's assignment), so each level
+   * resolves to a single option; if it ever ships several for a level they're all returned, in
+   * which case the field falls back to a normal dropdown (see [DynamicFormField]). [PROJECT_NAME]
+   * is not a geography unit — it still resolves from the Sakhi profile. A `question_code` with no
+   * matching `geoType` in [geography] returns empty: a real backend gap surfaced as an unfillable
+   * (submit-gated) field rather than a silently wrong id.
+   */
+  suspend fun optionsFromVersionGeography(
+    questionCode: String,
+    geography: List<FormGeographyUnit>,
+  ): List<FormFieldOption> {
+    if (questionCode == GeographyQuestionCodes.PROJECT_NAME) {
+      val projectName = currentUserRepository.getProfile()?.projectName ?: return emptyList()
+      return listOf(FormFieldOption(label = projectName, sortOrder = 0, valueCode = projectName))
+    }
+    val geoType = GeographyQuestionCodes.QUESTION_CODE_TO_GEO_TYPE[questionCode] ?: return emptyList()
+    return geography
+      .filter { it.geoType == geoType }
+      .mapIndexed { index, unit ->
+        FormFieldOption(label = unit.name, sortOrder = index, valueCode = unit.geographyUnitId)
+      }
+  }
 
   suspend fun optionsFor(questionCode: String, answers: FormAnswers): List<FormFieldOption> {
     val assignment = geographyRepository.getSakhiAssignment()

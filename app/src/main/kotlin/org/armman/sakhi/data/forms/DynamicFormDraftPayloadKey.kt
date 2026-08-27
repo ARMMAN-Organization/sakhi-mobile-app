@@ -1,6 +1,7 @@
 package org.armman.sakhi.data.forms
 
 import com.google.gson.Gson
+import org.armman.sakhi.data.enrollment.DuplicateAcknowledgement
 
 private const val PAYLOAD_KEY_PREFIX = "dynamic_form_draft_payload_"
 
@@ -18,6 +19,25 @@ internal fun dynamicFormDraftPayloadKey(localBeneficiaryId: String): String =
 data class DynamicFormDraftPayload(
   val answers: FormAnswers,
   val registrationDateIso: String,
+  /**
+   * Set only after the Sakhi has confirmed an FR-S-2.5 "is this a new pregnancy?" prompt — it makes
+   * the next submission attempt send `acknowledgeDuplicate` plus the link back to the earlier case.
+   *
+   * Lives here rather than in the Room row so the acknowledgement survives a later manual Data
+   * Upload without a schema migration: Gson reads a payload written before this field existed as
+   * null, so old drafts stay readable.
+   */
+  val duplicateAcknowledgement: DuplicateAcknowledgement? = null,
+  /**
+   * Set when a submission attempt came back with an FR-S-2.5 new-pregnancy prompt that nobody has
+   * answered yet — it holds the earlier (completed) case's server id.
+   *
+   * Needed because a `409` can arrive during a manual Data Upload, long after the Sakhi left the
+   * form: without this the prompt would be lost and the draft would sit in DUPLICATE_CONFLICT
+   * forever. Home reads it to offer the same confirmation (see `FormUploadRecord`), and it is
+   * cleared the moment the answer is recorded either way.
+   */
+  val pendingNewPregnancyBeneficiaryId: String? = null,
 )
 
 internal val dynamicFormDraftGson = Gson()

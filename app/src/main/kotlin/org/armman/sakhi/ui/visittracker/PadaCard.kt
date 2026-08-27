@@ -2,54 +2,60 @@ package org.armman.sakhi.ui.visittracker
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import org.armman.sakhi.R
+import org.armman.sakhi.data.visittracker.PadaSummary
+import org.armman.sakhi.data.visittracker.PadaVisitBucket
 import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.theme.Dimens
-import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG400
-import org.armman.sakhi.ui.theme.NeutralG50
 import org.armman.sakhi.ui.theme.Primary
 import org.armman.sakhi.ui.theme.PrimarySurface
 import org.armman.sakhi.ui.theme.White
 import org.armman.sakhi.ui.theme.softShadow
 
+/** Fixed so the Women/Child stats line up between the Open and Referral Follow-up rows
+ * regardless of whether the highlighted "(N)" suffix is present on a given row. Sized generously
+ * enough that "Women N(N)" never wraps to a second line — [BucketStat] also caps at one line as
+ * a safety net for double-digit counts. */
+private val WomenStatWidth = 108.dp
+private val ChildStatWidth = 72.dp
+
 /**
- * Pada aggregate card (p63 mobile / p65 tablet): pada name, visits-remaining
- * badge, Open + Referral Follow-up rows with Women/Child counts, See Visits.
- * Tablet renders the rows as a 3-column table with dividers.
+ * Pada aggregate card, backed by [PadaSummary] (M3: `GET /sakhi/{sakhiId}/padas`).
+ *
+ * Per Figma p63/p65: an Open row and a Referral Follow-up row, each with a Women/Child count.
+ * The `(N)` highlighted count is women-only by design (confirmed 2026-08-17) — [PadaVisitBucket]
+ * also carries `childOverdueCount` from the API, but it is intentionally not rendered here.
  */
 @Composable
 fun PadaCard(
-  summary: PadaVisitSummary,
+  summary: PadaSummary,
   isTablet: Boolean,
-  onSeeVisits: (String) -> Unit,
+  onSeeVisits: (padaId: String, padaName: String) -> Unit,
   modifier: Modifier = Modifier,
 ) {
   Column(
@@ -65,16 +71,19 @@ fun PadaCard(
       verticalAlignment = Alignment.CenterVertically,
       modifier = Modifier.fillMaxWidth(),
     ) {
+      // Design (Figma p63/p65) shows only the pada name as the card title — no separate village
+      // subtitle line. [PadaSummary.villageName] is kept on the model for search/accessibility
+      // use elsewhere, just not rendered here.
       Text(
-        text = summary.pada,
+        text = summary.padaName,
         style = MaterialTheme.typography.titleLarge,
         color = NeutralG400,
       )
       Text(
         text = pluralStringResource(
           R.plurals.visit_tracker_visits_remaining,
-          summary.remainingVisits,
-          summary.remainingVisits,
+          summary.visitsRemainingCount,
+          summary.visitsRemainingCount,
         ),
         style = MaterialTheme.typography.labelLarge,
         color = Primary,
@@ -83,172 +92,99 @@ fun PadaCard(
           .padding(horizontal = 10.dp, vertical = 6.dp),
       )
     }
-    if (isTablet) {
-      TabletRows(summary)
-    } else {
-      MobileRows(summary)
-    }
+    BucketRow(
+      label = stringResource(R.string.visit_tracker_open),
+      bucket = summary.open,
+      modifier = Modifier.padding(top = Dimens.ItemSpacing),
+    )
+    BucketRow(
+      label = stringResource(R.string.visit_tracker_referral_follow_up),
+      bucket = summary.referralFollowUp,
+      modifier = Modifier.padding(top = Dimens.ItemSpacing),
+    )
     PrimaryButton(
       text = stringResource(R.string.visit_tracker_see_visits),
-      onClick = { onSeeVisits(summary.pada) },
+      onClick = { onSeeVisits(summary.padaId, summary.padaName) },
       trailingIcon = painterResource(R.drawable.ic_arrow_right),
       fullWidth = false,
       height = if (isTablet) Dimens.ChipHeight else Dimens.SmallButtonHeight,
       modifier = Modifier
         .align(Alignment.End)
-        .padding(top = if (isTablet) Dimens.SmallSpacing else Dimens.ItemSpacing),
+        .padding(top = Dimens.ItemSpacing),
     )
   }
 }
 
-/** Mobile: compact label + counts rows (p63). */
+/** One visit-type row: bucket label (Open / Referral Follow-up) on the left, Women/Child counts
+ * on the right in fixed-width columns so they align between the Open and Referral Follow-up
+ * rows. Only the Women count gets a highlighted `(N)` suffix — see [PadaCard] doc. */
 @Composable
-private fun MobileRows(summary: PadaVisitSummary) {
-  CountRow(
-    label = stringResource(R.string.visit_tracker_open),
-    women = summary.openWomen,
-    womenEnding = summary.openWomenEnding,
-    children = summary.openChildren,
-    modifier = Modifier.padding(top = Dimens.ItemSpacing),
-  )
-  CountRow(
-    label = stringResource(R.string.visit_tracker_referral_follow_up),
-    women = summary.referralWomen,
-    womenEnding = 0,
-    children = summary.referralChildren,
-    modifier = Modifier.padding(top = Dimens.SmallSpacing),
-  )
-}
-
-/** Tablet: 3-column table with vertical + horizontal dividers (p65). */
-@Composable
-private fun TabletRows(summary: PadaVisitSummary) {
-  Column(modifier = Modifier.fillMaxWidth().padding(top = Dimens.SmallSpacing)) {
-    TabletRow(
-      label = stringResource(R.string.visit_tracker_open),
-      women = summary.openWomen,
-      womenEnding = summary.openWomenEnding,
-      children = summary.openChildren,
-    )
-    HorizontalDivider(thickness = 1.dp, color = NeutralG50)
-    TabletRow(
-      label = stringResource(R.string.visit_tracker_referral_follow_up),
-      women = summary.referralWomen,
-      womenEnding = 0,
-      children = summary.referralChildren,
-    )
-  }
-}
-
-@Composable
-private fun TabletRow(label: String, women: Int, womenEnding: Int, children: Int) {
+private fun BucketRow(label: String, bucket: PadaVisitBucket, modifier: Modifier = Modifier) {
   Row(
-    verticalAlignment = Alignment.CenterVertically,
-    modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
-  ) {
-    Text(
-      text = label,
-      style = MaterialTheme.typography.bodyLarge,
-      color = NeutralG200,
-      modifier = Modifier.weight(1f).padding(vertical = Dimens.ChipSpacing),
-    )
-    VerticalDivider(thickness = 1.dp, color = NeutralG50, modifier = Modifier.fillMaxHeight())
-    CountCell(
-      icon = R.drawable.ic_woman,
-      label = stringResource(R.string.visit_tracker_women),
-      count = women,
-      ending = womenEnding,
-      modifier = Modifier.weight(1.2f),
-    )
-    VerticalDivider(thickness = 1.dp, color = NeutralG50, modifier = Modifier.fillMaxHeight())
-    CountCell(
-      icon = R.drawable.ic_baby,
-      label = stringResource(R.string.visit_tracker_child),
-      count = children,
-      ending = 0,
-      modifier = Modifier.weight(1f),
-    )
-  }
-}
-
-/** Mobile row: label left, Women and Child groups to the right. */
-@Composable
-private fun CountRow(
-  label: String,
-  women: Int,
-  womenEnding: Int,
-  children: Int,
-  modifier: Modifier = Modifier,
-) {
-  Row(
+    horizontalArrangement = Arrangement.SpaceBetween,
     verticalAlignment = Alignment.CenterVertically,
     modifier = modifier.fillMaxWidth(),
   ) {
     Text(
       text = label,
-      style = MaterialTheme.typography.bodyLarge,
+      style = MaterialTheme.typography.bodyMedium,
       color = NeutralG400,
       modifier = Modifier.weight(1f),
     )
-    CountCell(
-      icon = R.drawable.ic_woman,
-      label = stringResource(R.string.visit_tracker_women),
-      count = women,
-      ending = womenEnding,
-      modifier = Modifier.weight(1.2f),
-    )
-    CountCell(
-      icon = R.drawable.ic_baby,
-      label = stringResource(R.string.visit_tracker_child),
-      count = children,
-      ending = 0,
-      modifier = Modifier.weight(0.8f),
-    )
+    Row(horizontalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing)) {
+      BucketStat(
+        icon = painterResource(R.drawable.ic_woman),
+        label = stringResource(R.string.visit_tracker_women),
+        count = bucket.womenCount,
+        // Always shown (even "(0)") so the column width — and the Child column after it — never
+        // shifts depending on whether this pada happens to have a highlighted count today.
+        highlightedCount = bucket.womenOverdueCount,
+        modifier = Modifier.width(WomenStatWidth),
+      )
+      BucketStat(
+        icon = painterResource(R.drawable.ic_baby),
+        label = stringResource(R.string.visit_tracker_child),
+        count = bucket.childCount,
+        // Women-only highlight by design (confirmed 2026-08-17) — null means "never render a
+        // bracket for this stat", not "render (0)". Never pass childOverdueCount here.
+        highlightedCount = null,
+        modifier = Modifier.width(ChildStatWidth),
+      )
+    }
   }
 }
 
-/**
- * Icon + type label + count, ending count in purple parentheses.
- * Alignment intent (per design): the content block is CENTERED in the cell,
- * but has a fixed width so its left edge lines up across rows.
- */
+/** [highlightedCount] of `null` means this stat never gets a bracketed suffix (Child); a non-null
+ * value — including 0 — always renders "(N)" (Women), so the layout is stable whether or not
+ * today's pada happens to have a highlighted count. */
 @Composable
-private fun CountCell(
-  icon: Int,
+private fun BucketStat(
+  icon: Painter,
   label: String,
   count: Int,
-  ending: Int,
+  highlightedCount: Int?,
   modifier: Modifier = Modifier,
 ) {
-  Box(contentAlignment = Alignment.Center, modifier = modifier) {
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      modifier = Modifier.width(Dimens.PadaCountCellWidth),
-    ) {
-      Icon(
-        painter = painterResource(icon),
-        contentDescription = null,
-        tint = NeutralG400,
-        modifier = Modifier.size(18.dp),
-      )
-      // Design: only the first (row-label) column is grey; these stay dark.
-      Text(
-        text = label,
-        style = MaterialTheme.typography.bodyLarge,
-        color = NeutralG400,
-        modifier = Modifier.padding(start = 4.dp, end = Dimens.SmallSpacing),
-      )
-      Text(
-        text = buildAnnotatedString {
-          append(count.toString())
-          if (ending > 0) {
-            withStyle(SpanStyle(color = Primary)) { append("($ending)") }
-          }
-        },
-        // Numbers are Bold in the design, heavier than the labels.
-        style = MaterialTheme.typography.titleLarge,
-        color = NeutralG400,
-      )
+  Row(verticalAlignment = Alignment.CenterVertically, modifier = modifier) {
+    Icon(
+      painter = icon,
+      contentDescription = null, // decorative — the adjacent label text already conveys meaning
+      tint = NeutralG400,
+      modifier = Modifier.size(16.dp),
+    )
+    Spacer(modifier = Modifier.width(4.dp))
+    val text = buildAnnotatedString {
+      append("$label $count")
+      if (highlightedCount != null) {
+        withStyle(SpanStyle(color = Primary)) { append("($highlightedCount)") }
+      }
     }
+    Text(
+      text = text,
+      style = MaterialTheme.typography.bodyMedium,
+      color = NeutralG400,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
   }
 }

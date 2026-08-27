@@ -1,6 +1,7 @@
 package org.armman.sakhi.data.enrollment
 
 import org.armman.sakhi.data.auth.session.SessionStore
+import org.armman.sakhi.data.forms.FormObstetricRuleset
 import org.armman.sakhi.data.lookup.LookupRepository
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
@@ -70,9 +71,8 @@ class EnrollmentApiMapper @Inject constructor(
 
     CreateBeneficiaryRequestDto(
       pii = BeneficiaryPiiDto(
-        firstName = record.firstName,
-        middleName = record.middleName.takeIf { it.isNotBlank() },
-        lastName = record.lastName,
+        // See BeneficiaryPiiDto's doc: the backend wants ONE joined `fullName` now.
+        fullName = joinFullName(first = record.firstName, middle = record.middleName, last = record.lastName),
         phone = record.mobileNumber.takeIf { it.isNotBlank() },
         alternatePhone = null, // Not collected by the current form.
         // PersonalInfoState.isComplete only requires ageYears (Q20: "DOB or age — either one
@@ -145,16 +145,18 @@ class EnrollmentApiMapper @Inject constructor(
    * Mirrors `create-beneficiary.dto.ts`'s `superRefine` cross-field rules exactly, so a bad
    * submission fails fast on-device instead of round-tripping to the server first.
    *
-   * FLAGGED, not silently resolved: the backend's cross-total rule is
-   * `liveBirths + stillbirths + abortions === gravida`. The existing Health History step already
-   * gates on a *different* Excel-spec formula — `gravida == para + abortions + 1`
-   * ([HealthHistoryState.gravidaTotalError]) — using `para` (parity: births after 24 weeks), not
-   * `liveBirths`/`livingChildren` (children currently alive). Those are not the same count in
-   * general (e.g. a child counted in parity who later died lowers liveBirths but not parity), so a
-   * record can pass the existing UI gate and still fail this check. This is a genuine conflict
-   * between the Excel form spec and the live API contract, not a bug in either individual rule —
-   * it needs a product decision (relax/change the UI's own gate, or treat this as authoritative),
-   * not a silent pick made here.
+   * The cross-total rule is `liveBirths + stillbirths + abortions === gravida - 1` — Gravida
+   * counts the current pregnancy, the three outcome figures cannot. The Health History step gates
+   * on the same formula via [org.armman.sakhi.ui.enrollment.HealthHistoryState.gravidaTotalError]
+   * and both share [FormObstetricRuleset.CURRENT_PREGNANCY], so the on-device gate and this check
+   * cannot drift again. They have drifted twice before (`para + abortions + 1` here vs
+   * `livingChildren` there; then `== gravida` on-device vs `== gravida - 1` server-side, which made
+   * enrollment impossible for any woman with a prior pregnancy).
+   *
+   * Still FLAGGED, not silently resolved: the backend compares `deadChildren` against
+   * `liveBirths`/`livingChildren` (children currently alive) while `Registration_PW_D` row 50 means
+   * Para minus still births. Those are not the same count, so a record can pass the sheet's reading
+   * and still fail here. Needs an ARMMAN decision, not a silent pick made on device.
    */
   private fun validateMotherCrossFieldRules(record: EnrollmentRecord) {
     val hh = record.healthHistory
@@ -168,9 +170,9 @@ class EnrollmentApiMapper @Inject constructor(
     if (deadChildren != null && deadChildren > hh.livingChildren) {
       throw EnrollmentMappingException.CrossFieldValidation("deadChildren must not exceed liveBirths")
     }
-    if (hh.livingChildren + hh.stillBirths + hh.abortions != hh.gravida) {
+    if (hh.livingChildren + hh.stillBirths + hh.abortions != hh.gravida - FormObstetricRuleset.CURRENT_PREGNANCY) {
       throw EnrollmentMappingException.CrossFieldValidation(
-        "liveBirths + stillbirths + abortions must equal gravida",
+        "liveBirths + stillbirths + abortions must equal gravida - 1",
       )
     }
   }

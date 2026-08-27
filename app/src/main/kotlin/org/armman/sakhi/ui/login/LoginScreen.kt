@@ -1,16 +1,13 @@
 package org.armman.sakhi.ui.login
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -25,10 +22,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -37,8 +34,10 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 import org.armman.sakhi.R
 import org.armman.sakhi.ui.components.AppIcons
+import org.armman.sakhi.ui.components.AppLogo
 import org.armman.sakhi.ui.components.AppTextField
 import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.components.StatusBanner
@@ -47,10 +46,15 @@ import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG400
 import org.armman.sakhi.ui.theme.White
 
+/** How long the "logged out successfully" banner stays visible before auto-dismissing. */
+private const val LOGOUT_BANNER_TIMEOUT_MS = 4_000L
+
 /**
  * Login screen per the "Arogya Sakhi - Revamp" Figma (mobile 375x812):
  * logo, title, Username + Password fields, pill Login button, and a
  * success banner shown when the user arrives here right after logging out.
+ * The banner auto-dismisses after [LOGOUT_BANNER_TIMEOUT_MS] or as soon as
+ * the user starts interacting with the form.
  */
 @Composable
 fun LoginScreen(
@@ -61,6 +65,27 @@ fun LoginScreen(
   val state by viewModel.uiState.collectAsStateWithLifecycle()
   var passwordVisible by remember { mutableStateOf(false) }
 
+  // Once dismissed (timeout elapsed or user interacted) the banner stays gone.
+  // rememberSaveable survives config changes so it never reappears on rotation.
+  var logoutBannerDismissed by rememberSaveable { mutableStateOf(false) }
+  val logoutBannerVisible = shouldShowLogoutBanner(showLogoutBanner, logoutBannerDismissed)
+
+  // Auto-dismiss after the timeout. Guarded by the dismissed flag so it won't
+  // restart on an activity recreate once the banner is already gone.
+  LaunchedEffect(showLogoutBanner) {
+    if (showLogoutBanner && !logoutBannerDismissed) {
+      delay(LOGOUT_BANNER_TIMEOUT_MS)
+      logoutBannerDismissed = true
+    }
+  }
+
+  // Hide as soon as the user interacts with the form.
+  LaunchedEffect(state.username, state.password) {
+    if (userHasInteractedWithLoginForm(state.username, state.password)) {
+      logoutBannerDismissed = true
+    }
+  }
+
   LaunchedEffect(state.loginSucceeded) {
     if (state.loginSucceeded) {
       viewModel.onLoginHandled()
@@ -70,10 +95,13 @@ fun LoginScreen(
 
   Surface(color = White, modifier = Modifier.fillMaxSize()) {
     Box(
+      // `safeDrawingPadding()` covers system bars + display cutout + IME, and consumes those insets
+      // for everything below it. A nested `.imePadding()` would therefore be a no-op — do not
+      // re-add one (guarded by WindowInsetsConfigTest). The `verticalScroll` below is what makes
+      // the shrunken content reachable once the keyboard takes the bottom inset.
       modifier = Modifier
         .fillMaxSize()
-        .safeDrawingPadding()
-        .imePadding(),
+        .safeDrawingPadding(),
     ) {
       Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -83,10 +111,9 @@ fun LoginScreen(
           .padding(horizontal = Dimens.ScreenPadding),
       ) {
         Spacer(Modifier.height(72.dp))
-        Image(
-          painter = painterResource(R.drawable.logo_arogya_sakhi),
+        AppLogo(
+          height = Dimens.LoginLogoHeight,
           contentDescription = stringResource(R.string.login_logo_content_description),
-          modifier = Modifier.size(width = 140.dp, height = 156.dp),
         )
         Spacer(Modifier.height(32.dp))
         Text(
@@ -147,25 +174,31 @@ fun LoginScreen(
           onClick = viewModel::onLoginClicked,
           loading = state.isSubmitting,
         )
-        // Reserve space so the bottom banner never overlaps the button on small screens.
-        Spacer(Modifier.height(96.dp))
-      }
-
-      val bannerModifier = Modifier
-        .align(Alignment.BottomCenter)
-        .fillMaxWidth()
-        .padding(horizontal = Dimens.ScreenPadding, vertical = Dimens.ScreenPadding)
-      when {
-        state.loginError != null -> StatusBanner(
-          message = stringResource(state.loginError!!),
-          variant = StatusBannerVariant.Error,
-          modifier = bannerModifier,
-        )
-        showLogoutBanner -> StatusBanner(
-          message = stringResource(R.string.login_logout_success),
-          variant = StatusBannerVariant.Success,
-          modifier = bannerModifier,
-        )
+        // Banner sits a fixed gap below the button, in the normal content flow, per Figma.
+        // It must NOT be aligned to the screen's bottom edge (e.g. Box + Alignment.BottomCenter):
+        // that anchors it to the physical bottom of the device rather than to the button, so on
+        // screens taller than the Figma frame it visually drifts away from the button toward the
+        // bottom of the screen.
+        val bannerModifier = Modifier.fillMaxWidth()
+        when {
+          state.loginError != null -> {
+            Spacer(Modifier.height(96.dp))
+            StatusBanner(
+              message = stringResource(state.loginError!!),
+              variant = StatusBannerVariant.Error,
+              modifier = bannerModifier,
+            )
+          }
+          logoutBannerVisible -> {
+            Spacer(Modifier.height(96.dp))
+            StatusBanner(
+              message = stringResource(R.string.login_logout_success),
+              variant = StatusBannerVariant.Success,
+              modifier = bannerModifier,
+            )
+          }
+        }
+        Spacer(Modifier.height(24.dp))
       }
     }
   }

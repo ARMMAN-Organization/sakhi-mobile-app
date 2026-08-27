@@ -1,0 +1,210 @@
+package org.armman.sakhi.data.forms
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * Covers [BeneficiaryFieldErrorMapper] — turning the backend's dotted DTO-path `fieldErrors` back
+ * into per-`question_code` errors, the reverse of [DynamicFormSubmissionMapper]'s routing. Guards
+ * the mappings a real 400 hits (names, mother-details counts, geography) and the two safety rules:
+ * the split-vs-combined name fallback, and silently dropping paths with no field home.
+ */
+class BeneficiaryFieldErrorMapperTest {
+
+  /** The split-name schema (v2+) plus the mother-detail and geography codes the tests touch. */
+  private val splitNameSchemaCodes = setOf(
+    "first_name",
+    "middle_name",
+    "last_name",
+    "still_births",
+    "gravida_total_number_of_pregnancies",
+    "abortions_pregnancy_losses_before_24_weeks",
+    "living_children",
+    GeographyQuestionCodes.PHC,
+  )
+
+  @Test
+  fun `maps split name paths to their own question codes`() {
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf(
+        "pii.firstName" to "First name is required",
+        "pii.lastName" to "Last name is required",
+      ),
+      splitNameSchemaCodes,
+    )
+
+    assertEquals("First name is required", result["first_name"])
+    assertEquals("Last name is required", result["last_name"])
+  }
+
+  @Test
+  fun `pins a pii-fullName error to first_name - the current live contract`() {
+    // 2026-08-06: the backend reverted to sending ONE pii.fullName error instead of separate
+    // firstName/lastName ones (see BeneficiaryPiiDto's doc) — this is the path a real 400 hits
+    // today, not the legacy split-path test above.
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf("pii.fullName" to "fullName must contain at least 1 character(s)"),
+      splitNameSchemaCodes,
+    )
+
+    assertEquals("fullName must contain at least 1 character(s)", result["first_name"])
+  }
+
+  @Test
+  fun `a pii-fullName error falls back to the combined name field on an older schema`() {
+    val combinedNameCode = "beneficary_name_first_name_middle_name_last_name"
+    val v1SchemaCodes = setOf(combinedNameCode, "still_births")
+
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf("pii.fullName" to "fullName must contain at least 1 character(s)"),
+      v1SchemaCodes,
+    )
+
+    assertEquals("fullName must contain at least 1 character(s)", result[combinedNameCode])
+  }
+
+  @Test
+  fun `a pii-fullName error pins to the CURRENT combined field when the schema has it`() {
+    // 2026-08-06: the live schema replaced the split first/middle/last questions with ONE
+    // beneficiary_name field again (see BeneficiaryNameQuestionCodes) — this is the shape a real
+    // 400 hits today, and it must win over both older fallbacks.
+    val currentSchemaCodes = setOf(BeneficiaryNameQuestionCodes.CURRENT, "still_births")
+
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf("pii.fullName" to "fullName must contain at least 1 character(s)"),
+      currentSchemaCodes,
+    )
+
+    assertEquals(
+      "fullName must contain at least 1 character(s)",
+      result[BeneficiaryNameQuestionCodes.CURRENT],
+    )
+  }
+
+  @Test
+  fun `the combined field wins over the split fallback when both happen to be present`() {
+    // Shouldn't be possible in one real schema, but resolve() must still be deterministic rather
+    // than order-of-map-iteration dependent.
+    val bothPresent = setOf(BeneficiaryNameQuestionCodes.CURRENT, "first_name")
+
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf("pii.fullName" to "message"),
+      bothPresent,
+    )
+
+    assertEquals("message", result[BeneficiaryNameQuestionCodes.CURRENT])
+  }
+
+  @Test
+  fun `a split-name path falls back to the combined field when its own target is gone`() {
+    // The live schema dropped first_name/middle_name/last_name entirely in favour of
+    // beneficiary_name — an older-shaped 400 body (pii.firstName) must still land somewhere
+    // rather than silently vanish to the page-level banner.
+    val currentSchemaCodes = setOf(BeneficiaryNameQuestionCodes.CURRENT, "still_births")
+
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf("pii.firstName" to "First name is required"),
+      currentSchemaCodes,
+    )
+
+    assertEquals("First name is required", result[BeneficiaryNameQuestionCodes.CURRENT])
+  }
+
+  @Test
+  fun `pins a registration date error to whichever spelling the active schema declares`() {
+    val errors = mapOf("case.registrationDate" to "Registration date cannot be in the future")
+
+    assertEquals(
+      "Registration date cannot be in the future",
+      BeneficiaryFieldErrorMapper
+        .toQuestionCodeErrors(errors, setOf(REGISTRATION_DATE_QUESTION_CODE))[REGISTRATION_DATE_QUESTION_CODE],
+    )
+    assertEquals(
+      "Registration date cannot be in the future",
+      BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+        errors,
+        setOf(REGISTRATION_DATE_QUESTION_CODE_CORRECTED),
+      )[REGISTRATION_DATE_QUESTION_CODE_CORRECTED],
+    )
+    // No registration-date field in the schema: dropped to the page-level banner, not guessed at.
+    assertTrue(BeneficiaryFieldErrorMapper.toQuestionCodeErrors(errors, setOf("first_name")).isEmpty())
+  }
+
+  @Test
+  fun `maps mother-detail counts to their schema question codes`() {
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf(
+        "motherDetails.stillbirths" to "too many",
+        "motherDetails.gravida" to "out of range",
+        "motherDetails.abortions" to "invalid",
+        // liveBirths is fed by living_children in the forward mapper — the reverse must agree.
+        "motherDetails.liveBirths" to "invalid",
+      ),
+      splitNameSchemaCodes,
+    )
+
+    assertEquals("too many", result["still_births"])
+    assertEquals("out of range", result["gravida_total_number_of_pregnancies"])
+    assertEquals("invalid", result["abortions_pregnancy_losses_before_24_weeks"])
+    assertEquals("invalid", result["living_children"])
+  }
+
+  @Test
+  fun `maps a geography path to its geography question code`() {
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf("pii.phcId" to "does not refer to a known geography unit"),
+      splitNameSchemaCodes,
+    )
+
+    assertEquals(
+      "does not refer to a known geography unit",
+      result[GeographyQuestionCodes.PHC],
+    )
+  }
+
+  @Test
+  fun `falls back to the combined name field when the split fields are absent (older schema)`() {
+    val combinedNameCode = "beneficary_name_first_name_middle_name_last_name"
+    val v1SchemaCodes = setOf(combinedNameCode, "still_births")
+
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf(
+        "pii.firstName" to "First name is required",
+        "pii.lastName" to "Last name is required",
+      ),
+      v1SchemaCodes,
+    )
+
+    // Both name paths collapse onto the single combined field; the first message wins.
+    assertEquals(1, result.size)
+    assertEquals("First name is required", result[combinedNameCode])
+  }
+
+  @Test
+  fun `drops a path with no field home rather than guessing`() {
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf(
+        "case.projectId" to "some backend-only field",
+        "pii.someBrandNewField" to "unknown to this app version",
+      ),
+      splitNameSchemaCodes,
+    )
+
+    assertTrue(result.isEmpty())
+  }
+
+  @Test
+  fun `drops a mapped path whose question code is not in the active schema`() {
+    // `pii.dateOfBirth` maps to `date_of_birth`, but this schema doesn't render it — so there's no
+    // field to pin the error to; it stays banner-only rather than being force-mapped.
+    val result = BeneficiaryFieldErrorMapper.toQuestionCodeErrors(
+      mapOf("pii.dateOfBirth" to "Invalid date"),
+      splitNameSchemaCodes,
+    )
+
+    assertFalse(result.containsKey("date_of_birth"))
+    assertTrue(result.isEmpty())
+  }
+}

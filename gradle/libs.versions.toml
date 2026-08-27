@@ -17,6 +17,13 @@ junit = "4.13.2"
 securityCrypto = "1.1.0-alpha06"
 room = "2.6.1"
 work = "2.9.1"
+zenEngineAndroid = "0.7.2"
+# KSP replaces KAPT for Room/Hilt annotation processing (CR-032 Milestone 3 fix): KAPT's stub
+# generation reads Kotlin metadata via Room's own bundled kotlinx-metadata-jvm reader, which only
+# supports metadata up to version 2.0.0 — the GoRules zen-engine artifact ships metadata 2.1.0 and
+# crashes kaptDebugKotlin just by being on the classpath. KSP's processing path doesn't hit that
+# reader, so switching unblocks the GoRules dependency without needing a Room version bump.
+ksp = "2.0.20-1.0.25"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -48,10 +55,11 @@ room-compiler = { group = "androidx.room", name = "room-compiler", version.ref =
 work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
 hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "hiltNavigation" }
 androidx-hilt-compiler = { group = "androidx.hilt", name = "hilt-compiler", version.ref = "hiltNavigation" }
+gorules-zen-engine = { group = "io.gorules", name = "zen-engine-kotlin-android", version.ref = "zenEngineAndroid" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }

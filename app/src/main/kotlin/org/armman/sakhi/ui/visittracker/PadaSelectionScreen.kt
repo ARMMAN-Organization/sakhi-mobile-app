@@ -51,7 +51,7 @@ import java.util.Locale
 @Composable
 fun PadaSelectionScreen(
   onBack: () -> Unit,
-  onSeeVisits: (String) -> Unit,
+  onSeeVisits: (padaId: String, padaName: String) -> Unit,
   onProfile: () -> Unit = {},
   viewModel: PadaSelectionViewModel = hiltViewModel(),
 ) {
@@ -67,7 +67,6 @@ fun PadaSelectionScreen(
         title = stringResource(R.string.beneficiaries_back_title),
         subtitle = today,
         onBack = onBack,
-        onAvatarClick = onProfile,
       )
       Surface(
         color = White,
@@ -155,7 +154,7 @@ internal fun TrackerHeader(
 private fun PadaList(
   state: PadaSelectionUiState,
   isTablet: Boolean,
-  onSeeVisits: (String) -> Unit,
+  onSeeVisits: (padaId: String, padaName: String) -> Unit,
 ) {
   LazyColumn(
     verticalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
@@ -183,7 +182,7 @@ private fun PadaList(
         }
       }
     }
-    items(state.padaCards, key = { it.pada }) { summary ->
+    items(state.padaCards, key = { it.padaId }) { summary ->
       PadaCard(summary = summary, isTablet = isTablet, onSeeVisits = onSeeVisits)
     }
   }

@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -62,6 +63,12 @@ fun BeneficiariesScreen(
   viewModel: BeneficiariesViewModel = hiltViewModel(),
 ) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
+  // Reruns on every fresh entry into composition, including a pop-back from a beneficiary's
+  // Closure form submission — so a beneficiary just moved to JOURNEY_COMPLETE/CLOSED (or any
+  // other change made downstream) shows up immediately instead of the stale snapshot this
+  // retained ViewModel loaded the first time it was created. See BeneficiariesViewModel's doc
+  // for why this isn't in its init{} instead.
+  LaunchedEffect(Unit) { viewModel.loadBeneficiaries() }
   val context = LocalContext.current
   val today = remember {
     LocalDate.now().format(DateTimeFormatter.ofPattern("EEE, d MMM", Locale.getDefault()))
@@ -73,7 +80,6 @@ fun BeneficiariesScreen(
         title = stringResource(R.string.beneficiaries_back_title),
         subtitle = today,
         onBack = onBack,
-        onAvatarClick = onProfile,
       )
       Surface(
         color = White,
@@ -201,7 +207,10 @@ private fun BeneficiaryList(
       item { MonthFilterRow(state, viewModel) }
     }
     if (beneficiaries.isEmpty()) {
-      item { EmptyState() }
+      // "No beneficiaries match the current filters" is only true once a Pada/Risk filter is
+      // actually selected -- reported bug: it showed unconditionally, so an empty tab with no
+      // filter applied at all still implied filtering was active.
+      item { EmptyState(hasActiveFilters = state.selectedPadas.isNotEmpty() || state.selectedRisks.isNotEmpty()) }
     }
     items(beneficiaries, key = { it.id }) { beneficiary ->
       BeneficiaryCard(
@@ -280,13 +289,19 @@ private fun LoadError(onRetry: () -> Unit) {
 }
 
 @Composable
-private fun EmptyState() {
+private fun EmptyState(hasActiveFilters: Boolean) {
   Box(
     contentAlignment = Alignment.Center,
     modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
   ) {
     Text(
-      text = stringResource(R.string.beneficiaries_empty),
+      // Reported bug: this always read "No beneficiaries match the current filters," even with
+      // no Pada/Risk filter selected -- wrongly implying filtering was active on a genuinely
+      // empty tab (or one emptied by search/month selection, neither of which is a Pada/Risk
+      // filter). Only the Pada/Risk-filtered case gets the filtered-results wording now.
+      text = stringResource(
+        if (hasActiveFilters) R.string.beneficiaries_empty else R.string.beneficiaries_empty_no_filters,
+      ),
       style = MaterialTheme.typography.bodyLarge,
       color = NeutralG200,
     )

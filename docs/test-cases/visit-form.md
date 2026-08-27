@@ -304,3 +304,91 @@ not a hidden row.
 - **Open question carried from planning:** HIV test field exists in `Registration_PW_D`
   (enrollment) but not in `ANC visit form` — confirm with ARMMAN before 016b whether
   it's enrollment-only by design or a spec gap, since the Tests sub-tab may expect it.
+
+# CR-033 — INC/CCV form codes are a placeholder, not real content (tracked, not fixed here)
+
+**Status: open, pending backend content.** `INC_VISIT` and `CCV_VISIT` exist as real form
+codes/endpoints on the backend (`GET/POST /forms/{formCode}/...` both respond), and
+`VisitCodeFormResolver` (app/src/main/kotlin/org/armman/sakhi/data/forms/VisitCodeFormResolver.kt)
+now routes `VisitCodeType.INC`/`INC_HR`/`CCV`/`CCV_HR` schedule rows to them instead of the old
+hardcoded `INFANT_VISIT`. **But** the schema content behind those two codes is currently a direct
+copy of `INFANT_VISIT`'s fields — not a real INC/CCV-specific question set. A Sakhi opening an
+INC or CCV visit today sees the generic 0–12m infant visit form, not INC/CCV-specific questions.
+
+**Unblocks:** the app-side plumbing (form-code resolution, upload-status labelling — see CR-034's
+sibling change in `FormUploadStatusPresentation.kt`) so nothing is hardcoded to `INFANT_VISIT`
+anymore; swapping in the real schema later needs no further app change beyond deploying it
+server-side.
+
+**What's pending, from the backend team:** the actual INC/CCV clinical field list (referenced in
+the SRS as "CCV clinical rules... Prajakta (ARMMAN)", SRS line 179) — this repo has the "High Risk
+Protocols — Developer Copy" PDFs (ANC HR, Infant HR, Dashboard) in the project docs, which may be
+the right source; confirm with the backend/SRS owner before assuming so.
+
+# CR-034 — HR visits route to their base visit's form (design decision still open)
+
+**Status: open, pending an HR design decision.** `ANC_HR`, `INC_HR`, and `CCV_HR` schedule rows
+resolve (via `VisitCodeFormResolver`'s fallback map) to the same form code as their non-HR
+counterpart (`ANC_VISIT`, `INFANT_VISIT`) — there is no separate HR form and no `isHighRisk`
+flag/section anywhere in any existing schema. Checked every seed/schema file for
+`high_risk`/`hr_`/`visibleWhen`/`showIf`/conditional markup — nothing found; the SRS only
+describes HR as a *scheduling* trigger (FR-S-5.2), never HR-specific form content.
+
+This is a deliberate, tracked choice, not an oversight: showing the base form is what already
+happened before CR-033/CR-034 (HR types weren't distinguished from their base type at all), so
+this preserves current behaviour rather than guessing at new HR-specific fields.
+
+**What's pending:** whoever owns the High Risk Protocol docs (ANC HR / Infant HR / Dashboard)
+needs to decide — separate HR form codes with extra risk-monitoring questions, or a flag/section
+layered on the base form — and supply the extra fields if the latter. No further app change is
+needed to prepare for either outcome; `VisitCodeFormResolver`'s map is the single place that
+would change.
+
+# CR-035 — Capture-only local audit trail for form open/save/submit (no viewer yet)
+
+**Status: shipped, capture-only.** Every visit-form and registration-form open, offline-draft
+save, and successful submission now writes a row to a new local-only `form_audit_events` table
+(`org.armman.sakhi.data.audit.FormAuditEventEntity`, via `FormAuditRepository`/
+`RoomFormAuditRepository`). This is intentionally capture-only: there is no screen anywhere in the
+app that reads this table yet. It exists purely so the trail is being recorded faithfully from day
+one, before any viewer is built.
+
+**Every open is logged, not just the first.** `DynamicVisitFormViewModel.load()` calls
+`recordOpened()` on every successful load — re-opening the same visit form five times writes five
+OPENED rows, by explicit product decision (an accurate trail is the point, not a deduplicated
+summary). A failed `load()` (blank ids, beneficiary not found, or no active form version) does NOT
+write an OPENED event — only a genuinely-loaded form counts as "opened".
+
+**SAVED** fires unconditionally inside `RoomVisitFormDraftRepository.saveLocally()` and
+`RoomDynamicFormDraftRepository.saveLocally()` — both the online-immediate-attempt path and the
+offline-queued path go through `saveLocally()` first, so both get a SAVED event regardless of what
+happens next.
+
+**SUBMITTED** fires only on a successful `POST /forms/:formCode/submissions` response, from inside
+`VisitFormSubmissionCoordinator.submit()` and `DynamicFormSubmissionCoordinator.submit()` — never
+on a failed attempt of either the visit-creation/beneficiary-creation call or the submission call
+itself.
+
+**`submittedBy` field:** `FormSubmissionApi.CreateSubmissionRequestDto` gained a new nullable
+`submittedBy: String?` field, populated from the signed-in Sakhi's session at submission time in
+both coordinators above — the same session read each already does for its own `sakhiId`-equivalent
+field (e.g. `VisitApi`'s `CreateVisitInstanceRequestDto.sakhiId`). Nullable because a session could
+theoretically be absent by the time the DTO is built, though in practice both coordinators already
+throw before reaching that point if there is no active session (`NoActiveSession` /
+`EnrollmentMappingException.NoActiveSession`), so it is non-null on every request actually sent.
+
+**No automated migration test for `MIGRATION_5_6` (v5→v6, adds `form_audit_events`).** Explicit
+team decision, not an oversight — there are no real users on the app yet, and none of the three
+prior additive migrations (`MIGRATION_2_3`/`MIGRATION_3_4`/`MIGRATION_4_5`) were automated-tested
+either, so this is consistent with the existing project convention rather than a new shortcut. The
+migration itself is still hand-written carefully, mirroring `MIGRATION_4_5`'s exact style (raw
+`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` matching Room's generated schema for
+`FormAuditEventEntity` column-for-column).
+
+**Out of scope for this pass, tracked for later:**
+- No UI anywhere reads `form_audit_events` — capture-only, by design.
+- `ChildRegistrationSubmissionCoordinator` (Children Register's own submission flow) was not
+  wired for a SUBMITTED event or `submittedBy` — the CR only named
+  `VisitFormSubmissionCoordinator`/`DynamicFormSubmissionCoordinator` in scope. Its own
+  `CreateSubmissionRequestDto` call is unaffected (the new field defaults to null), but if the
+  audit trail should also cover Children Register submissions, that needs its own follow-up.

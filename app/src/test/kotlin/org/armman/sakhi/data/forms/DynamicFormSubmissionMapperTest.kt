@@ -4,9 +4,11 @@ import kotlinx.coroutines.test.runTest
 import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
+import org.armman.sakhi.data.enrollment.DuplicateAcknowledgement
 import org.armman.sakhi.data.enrollment.EnrollmentMappingException
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -40,7 +42,8 @@ class DynamicFormSubmissionMapperTest {
     singleValues = mapOf(
       "did_we_receive_consent" to consent,
       "lmp_date" to "2026-05-01",
-      "gravida_total_number_of_pregnancies" to "2",
+      // 1 living child + 1 abortion + 0 still births = 2 past outcomes, + the current pregnancy.
+      "gravida_total_number_of_pregnancies" to "3",
       "para_number_of_births_after_24_weeks" to "0",
       "living_children" to "1",
       "abortions_pregnancy_losses_before_24_weeks" to "1",
@@ -76,9 +79,7 @@ class DynamicFormSubmissionMapperTest {
     val dto = mapper.toCreateBeneficiaryRequest("local-case-1", answeredForm(), LocalDate.of(2026, 7, 20))
       .getOrThrow()
 
-    assertEquals("Test", dto.pii.firstName)
-    assertEquals(null, dto.pii.middleName)
-    assertEquals("Mother", dto.pii.lastName)
+    assertEquals("Test Mother", dto.pii.fullName)
     assertEquals("9876543210", dto.pii.phone)
     assertEquals("1996-01-01", dto.pii.dateOfBirth)
     assertEquals("Pada 4, Dhadgaon", dto.pii.addressLine)
@@ -98,7 +99,7 @@ class DynamicFormSubmissionMapperTest {
 
     val mother = requireNotNull(dto.motherDetails)
     assertEquals("2026-05-01", mother.lmpDate)
-    assertEquals(2, mother.gravida)
+    assertEquals(3, mother.gravida)
     assertEquals(0, mother.parity)
     assertEquals(1, mother.liveBirths)
     assertEquals(1, mother.abortions)
@@ -106,6 +107,47 @@ class DynamicFormSubmissionMapperTest {
     assertEquals(0, mother.deadChildren)
 
     assertEquals("GIVEN", dto.consent.status)
+  }
+
+  @Test
+  fun `names are trimmed and a whitespace-only middle name maps to null`() = runTest {
+    // BeneficiaryNameRule allows spaces, so padding survives the input filter and must be stripped
+    // before it reaches the PII fields or the name-based duplicate-detection hash.
+    sessionStore.saveSession(session)
+    val answers = answeredForm().let { base ->
+      base.copy(
+        singleValues = base.singleValues + mapOf(
+          "first_name" to "  Reema  ",
+          "middle_name" to "   ",
+          "last_name" to " Devi ",
+        ),
+      )
+    }
+
+    val dto = mapper.toCreateBeneficiaryRequest("local-case-1", answers, LocalDate.of(2026, 7, 20))
+      .getOrThrow()
+
+    // Trimmed AND single-spaced when joined, not "Reema    Devi" with the padding baked in.
+    assertEquals("Reema Devi", dto.pii.fullName)
+  }
+
+  @Test
+  fun `the corrected registration date spelling still reaches the case DTO`() = runTest {
+    // MOTHER_REGISTRATION v3 renamed `registrtion_date` to `registration_date`; reading only the old
+    // literal would silently fall back to today's date instead of the answered one.
+    sessionStore.saveSession(session)
+    val answers = answeredForm().let { base ->
+      base.copy(
+        singleValues = base.singleValues - REGISTRATION_DATE_QUESTION_CODE +
+          (REGISTRATION_DATE_QUESTION_CODE_CORRECTED to "2026-07-20"),
+      )
+    }
+
+    val dto = mapper.toCreateBeneficiaryRequest("local-case-1", answers, LocalDate.of(2026, 7, 25))
+      .getOrThrow()
+
+    assertEquals("2026-07-20", dto.case.registrationDate)
+    assertEquals("2026-07-20", dto.consent.date)
   }
 
   @Test
@@ -133,7 +175,7 @@ class DynamicFormSubmissionMapperTest {
     // "Missing required field" for every one of them. The submissions endpoint validates the
     // whole schema, so formData must carry them.
     assertEquals("2026-05-01", formData["lmp_date"])
-    assertEquals("2", formData["gravida_total_number_of_pregnancies"])
+    assertEquals("3", formData["gravida_total_number_of_pregnancies"])
     assertEquals("Test", formData["first_name"])
     assertEquals("Mother", formData["last_name"])
     assertEquals("1996-01-01", formData["date_of_birth"])
@@ -173,7 +215,53 @@ class DynamicFormSubmissionMapperTest {
   }
 
   @Test
-  fun `first, middle and last name are sent as discrete fields, blank middle becomes null`() = runTest {
+  fun `beneficiary_name (current live schema) is preferred over the split fields`() = runTest {
+    // 2026-08-06: the live schema replaced first_name/middle_name/last_name with ONE
+    // beneficiary_name field again — see BeneficiaryNameQuestionCodes's doc. Answers can carry
+    // both codes on a draft started before this switch; the combined field must win.
+    sessionStore.saveSession(session)
+    val form = answeredForm().let {
+      it.copy(singleValues = it.singleValues + mapOf(BeneficiaryNameQuestionCodes.CURRENT to "Priya Sharma"))
+    }
+
+    val dto = mapper.toCreateBeneficiaryRequest("local-case-1", form, LocalDate.of(2026, 7, 20)).getOrThrow()
+
+    assertEquals("Priya Sharma", dto.pii.fullName)
+  }
+
+  @Test
+  fun `beneficiary_name alone (no split fields at all) is enough to build the DTO`() = runTest {
+    sessionStore.saveSession(session)
+    val form = answeredForm().let {
+      it.copy(
+        singleValues = it.singleValues - "first_name" - "last_name" +
+          (BeneficiaryNameQuestionCodes.CURRENT to "Priya Sharma"),
+      )
+    }
+
+    val dto = mapper.toCreateBeneficiaryRequest("local-case-1", form, LocalDate.of(2026, 7, 20)).getOrThrow()
+
+    assertEquals("Priya Sharma", dto.pii.fullName)
+  }
+
+  @Test
+  fun `a blank-only name (neither combined nor split fields answered) fails loudly instead of submitting a space`() = runTest {
+    // The 2026-08-06 bug this guards: the schema moved to beneficiary_name, the mapper still only
+    // read the split fields, joinFullName("", null, "") produced a single space, and that space
+    // silently reached the backend as pii.fullName. This must now fail before building the DTO.
+    sessionStore.saveSession(session)
+    val form = answeredForm().let {
+      it.copy(singleValues = it.singleValues - "first_name" - "last_name")
+    }
+
+    val result = mapper.toCreateBeneficiaryRequest("local-case-1", form, LocalDate.of(2026, 7, 20))
+
+    assertTrue(result.isFailure)
+    assertTrue(result.exceptionOrNull() is EnrollmentMappingException.CrossFieldValidation)
+  }
+
+  @Test
+  fun `first, middle and last name are joined into a single fullName field`() = runTest {
     sessionStore.saveSession(session)
     val form = answeredForm().let {
       it.copy(singleValues = it.singleValues + mapOf("middle_name" to "Kumari"))
@@ -181,9 +269,7 @@ class DynamicFormSubmissionMapperTest {
 
     val dto = mapper.toCreateBeneficiaryRequest("local-case-1", form, LocalDate.of(2026, 7, 20)).getOrThrow()
 
-    assertEquals("Test", dto.pii.firstName)
-    assertEquals("Kumari", dto.pii.middleName)
-    assertEquals("Mother", dto.pii.lastName)
+    assertEquals("Test Kumari Mother", dto.pii.fullName)
   }
 
   @Test
@@ -236,9 +322,9 @@ class DynamicFormSubmissionMapperTest {
   @Test
   fun `gravida cross-total mismatch blocks submission with a specific message`() = runTest {
     sessionStore.saveSession(session)
-    // livingChildren(1) + stillBirths(0) + abortions(1) = 2, but gravida is set to 3 — mismatch.
+    // livingChildren(1) + stillBirths(0) + abortions(1) = 2, but gravida 4 implies 3 — mismatch.
     val form = answeredForm().let {
-      it.copy(singleValues = it.singleValues + mapOf("gravida_total_number_of_pregnancies" to "3"))
+      it.copy(singleValues = it.singleValues + mapOf("gravida_total_number_of_pregnancies" to "4"))
     }
 
     val result = mapper.toCreateBeneficiaryRequest("local-case-1", form, LocalDate.of(2026, 7, 20))
@@ -246,8 +332,44 @@ class DynamicFormSubmissionMapperTest {
     val error = result.exceptionOrNull()
     assertTrue(error is EnrollmentMappingException.CrossFieldValidation)
     assertEquals(
-      "liveBirths + stillbirths + abortions must equal gravida",
+      "liveBirths + stillbirths + abortions must equal gravida - 1",
       (error as EnrollmentMappingException.CrossFieldValidation).rule,
     )
+  }
+
+  @Test
+  fun `no acknowledgement means neither duplicate field is sent, so the backend can detect duplicates`() = runTest {
+    // The mapper reads the Sakhi's identity and project from the session — without one it
+    // throws NoActiveSession before it ever looks at the answers.
+    sessionStore.saveSession(session)
+    val dto = mapper.toCreateBeneficiaryRequest(
+      "local-case-1",
+      answeredForm(),
+      LocalDate.of(2026, 7, 20),
+    ).getOrThrow()
+
+    assertNull(dto.acknowledgeDuplicate)
+    assertNull(dto.case.previousBeneficiaryId)
+  }
+
+  @Test
+  fun `a confirmed new pregnancy sends acknowledgeDuplicate and links the earlier case`() = runTest {
+    // SRS FR-S-2.5: the new pregnancy is a NEW case that points back at the completed one; nothing
+    // about the earlier pregnancy is overwritten.
+    // The mapper reads the Sakhi's identity and project from the session — without one it
+    // throws NoActiveSession before it ever looks at the answers.
+    sessionStore.saveSession(session)
+    val dto = mapper.toCreateBeneficiaryRequest(
+      localCaseUuid = "local-case-1",
+      answers = answeredForm(),
+      fallbackRegistrationDate = LocalDate.of(2026, 7, 20),
+      duplicateAcknowledgement = DuplicateAcknowledgement("earlier-case-uuid"),
+    ).getOrThrow()
+
+    assertEquals(true, dto.acknowledgeDuplicate)
+    assertEquals("earlier-case-uuid", dto.case.previousBeneficiaryId)
+    // The rest of the payload is unchanged by the acknowledgement.
+    assertEquals("local-case-1", dto.case.localCaseUuid)
+    assertEquals("MOTHER", dto.case.caseType)
   }
 }

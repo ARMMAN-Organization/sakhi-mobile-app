@@ -6,13 +6,37 @@ import androidx.compose.ui.unit.dp
 object Dimens {
   val ScreenPadding = 24.dp
   val ItemSpacing = 16.dp
+
+  /**
+   * Vertical gap between consecutive questions in the Enrollment stepper's field-heavy screens
+   * (Personal Info, Health History) — deliberately larger than [ItemSpacing] so each question
+   * (label + field + inline error) reads as a distinct block rather than a cramped stack.
+   */
+  val FormFieldSpacing = 32.dp
   val SmallSpacing = 8.dp
+
+  /**
+   * Bottom `contentPadding` for the dynamic form field lists — deliberately larger than
+   * [ScreenPadding]. It is scroll headroom, not visual spacing: `bringIntoView` can only scroll as
+   * far as the content extends, so a field near the end of a section needs empty space beneath it to
+   * be liftable clear of the keyboard. Sized to roughly one field's height so the last question can
+   * still reach the middle of the visible area.
+   */
+  val FormListBottomSlack = 120.dp
   val ButtonHeight = 48.dp
   val CardRadius = 16.dp
   val TileRadius = 12.dp
   val TilePadding = 20.dp
   val SheetRadius = 40.dp
   val PillButtonPaddingH = 16.dp
+
+  /**
+   * Data Upload pill on the Home dashboard — deliberately smaller than [ButtonHeight]/
+   * [ButtonHeightTablet] (the "See Visit Tracker" CTA) per the Home dashboard design, since it's a
+   * secondary status action rather than the screen's primary CTA.
+   */
+  val DataUploadPillHeight = 40.dp
+  val DataUploadPillHeightTablet = 44.dp
 
   // Tablet button proportions (taller pill, wider inner padding).
   val ButtonHeightTablet = 48.dp
@@ -32,13 +56,22 @@ object Dimens {
   val TabIndicatorHeight = 4.dp
   val CardAccentHeight = 6.dp
   val AvatarSize = 44.dp
+
+  /** Height of the Arogya Sakhi logo lockup in a screen header (width follows the asset ratio). */
+  val HeaderLogoHeight = 52.dp
+
+  /** Height of the logo lockup on the Login screen. */
+  val LoginLogoHeight = 156.dp
+
+  /**
+   * Breathing room between the logo lockup's laid-out bounds and the artwork. The PNG bleeds to all
+   * four edges, so without this inset the wordmark sits flush against neighbouring content.
+   */
+  val LogoContentPadding = 4.dp
   val SmallButtonHeight = 44.dp
 
   /** Horizontal content inset on tablet screens (measured from tablet designs). */
   val ScreenPaddingTablet = 48.dp
-
-  /** Stepper tab indicator extends this much beyond the label on each side. */
-  val TabIndicatorOverhang = 10.dp
 
   // Enrollment tokens measured from the Enrollment form designs (150dpi).
   /** Height of a "Register New Beneficiary as" option card. */
@@ -55,6 +88,9 @@ object Dimens {
 
   /** Square consent checkbox size. */
   val ConsentCheckboxSize = 20.dp
+
+  /** Captured consent-photo thumbnail preview, shown below the "Take photo" pill. */
+  val ConsentPhotoPreviewSize = 96.dp
 
   /** Vertical gap between consent checklist rows. */
   val ConsentCheckRowSpacing = 20.dp
@@ -76,4 +112,23 @@ object Dimens {
 
   /** Micro gap between a review row's label and its value (Summary frame). */
   val LabelValueGap = 2.dp
+
+  // "Forms Uploaded" sync-status modal (Home screen Data Upload pill).
+  /** Status icon/spinner diameter per row. */
+  val UploadModalStatusIconSize = 24.dp
+
+  /** Caps the record list's height so a long draft history scrolls inside the modal instead of
+   * pushing it off-screen. */
+  val UploadModalListMaxHeight = 360.dp
+
+  /** Diameter of the circular close (X) button overlapping the modal's top-right corner — kept
+   * small (matches FilterPopup's close button precedent), not Material3's default 48dp. */
+  val UploadModalCloseButtonSize = 28.dp
+
+  /** X glyph size inside [UploadModalCloseButtonSize] — smaller than Icon's own 24dp default so
+   * it doesn't crowd the smaller circle. */
+  val UploadModalCloseIconSize = 16.dp
+
+  /** Height of a category card's sync-progress bar (thicker + rounded, per the Figma reference). */
+  val UploadModalProgressBarHeight = 8.dp
 }

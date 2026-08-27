@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Camera capture targets live in app-private storage only (no gallery). -->
+<!-- Camera capture targets live in app-private storage only (no gallery).
+
+     EVERY directory passed to File(context.filesDir, "<dir>") before
+     FileProvider.getUriForFile() MUST have a matching <files-path> entry here, or
+     getUriForFile throws IllegalArgumentException ("Failed to find configured root
+     that contains ...") and crashes the app the moment the camera is launched.
+     When adding a new form flow with an image field, add its directory below. -->
 <paths>
   <files-path
     name="enrollment_captures"
@@ -10,4 +16,34 @@
   <files-path
     name="dynamic_form_captures"
     path="dynamic-form/" />
+  <!-- CR-016b ANC Visit Form's "Upload sonography report image" field — see
+       DynamicVisitFormScreen.onCaptureImage. Missing this entry crashed the app the instant the
+       camera launched (the exact failure mode this file's own top comment warns about). -->
+  <files-path
+    name="dynamic_visit_form_captures"
+    path="dynamic-visit-form/" />
+  <!-- CR-020 Children Register — see DynamicChildRegistrationScreen.onCaptureImage. -->
+  <files-path
+    name="child_registration_captures"
+    path="child-registration/" />
+  <!-- Referral Follow-up's "Photo of case paper/discharge summary..." and "Photo of further
+       investigation advised" image fields — see AdHocFormScreen.onCaptureImage. Reported bug
+       (2026-08-18): onCaptureImage was a no-op ({}), so tapping these fields did nothing at all
+       (not even a crash, since the camera never launched) — bharath's "I can't take picture"
+       report. -->
+  <files-path
+    name="ad_hoc_form_captures"
+    path="ad-hoc-form/" />
+  <!-- CR-042 Delivery Event Session's DELIVERY_VISIT form — see
+       DeliverySessionScreen.onCaptureImage. -->
+  <files-path
+    name="delivery_session_captures"
+    path="delivery-session/" />
+  <!-- CR-042 Delivery Event Session's CHILD_REGISTRATION step (photo consent field) — see
+       DeliveryChildRegistrationScreen.onCaptureImage. Missing this entry crashed the app the
+       instant the camera launched (the exact failure mode this file's own top comment warns
+       about) — reported 2026-08-19 as "photo consent... app crashed and closed automatically". -->
+  <files-path
+    name="delivery_child_registration_captures"
+    path="delivery-child-registration/" />
 </paths>

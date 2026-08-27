@@ -14,6 +14,13 @@ import org.armman.sakhi.data.auth.LoginResult
 import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
+import org.armman.sakhi.data.lookup.FakeLookupRepository
+import org.armman.sakhi.data.lookup.LookupWarmer
+import org.armman.sakhi.data.motherlink.LinkedMother
+import org.armman.sakhi.data.motherlink.LinkedMotherConsent
+import org.armman.sakhi.data.motherlink.MotherDetailsWarmer
+import org.armman.sakhi.data.motherlink.MotherLinkRepository
+import org.armman.sakhi.data.motherlink.MotherSocioDemographics
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -71,13 +78,27 @@ class LoginViewModelTest {
     override suspend fun logout() { /* no session state in the fake */ }
   }
 
+  /** No mothers, nothing to warm — this test suite only cares that login succeeds/fails, not
+   * about warming behaviour, which [org.armman.sakhi.data.motherlink.MotherDetailsWarmerTest] and
+   * [org.armman.sakhi.data.motherlink.RemoteMotherLinkRepositoryTest] already cover. */
+  private class NoopMotherLinkRepository : MotherLinkRepository {
+    override suspend fun getRegisteredMothers(): List<LinkedMother>? = emptyList()
+    override suspend fun getMotherConsent(motherId: String): LinkedMotherConsent? = null
+    override suspend fun getMotherSocioDemographics(motherId: String): MotherSocioDemographics? = null
+  }
+
   private lateinit var repository: FakeAuthRepository
   private lateinit var keyValueStore: FakeSecureKeyValueStore
   private lateinit var sessionStore: SessionStore
   private lateinit var viewModel: LoginViewModel
 
   private fun createViewModel() {
-    viewModel = LoginViewModel(repository, sessionStore)
+    viewModel = LoginViewModel(
+      repository,
+      sessionStore,
+      LookupWarmer(FakeLookupRepository()),
+      MotherDetailsWarmer(NoopMotherLinkRepository()),
+    )
   }
 
   @Before
@@ -198,6 +219,23 @@ class LoginViewModelTest {
     repository.result = LoginResult.Failure(LoginFailureReason.INVALID_CREDENTIALS)
     viewModel.onUsernameChanged("test.sakhi")
     viewModel.onPasswordChanged("wrong")
+    viewModel.onLoginClicked()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val state = viewModel.uiState.value
+    assertEquals(R.string.login_error_invalid_credentials, state.loginError)
+    assertFalse(state.loginSucceeded)
+    assertFalse(state.isSubmitting)
+  }
+
+  @Test
+  fun `validation error from server shows same message as invalid credentials`() = runTest(dispatcher) {
+    // A 400 from the API (e.g. username fails the allowed-characters check) must read the same
+    // as a 401 "wrong credentials" — the user typed something bad in either case, and there's no
+    // security or UX reason to give it a different (and unhelpfully generic) message.
+    repository.result = LoginResult.Failure(LoginFailureReason.VALIDATION_ERROR)
+    viewModel.onUsernameChanged("bad user@name")
+    viewModel.onPasswordChanged("Test@1234")
     viewModel.onLoginClicked()
     dispatcher.scheduler.advanceUntilIdle()
 

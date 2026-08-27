@@ -673,9 +673,11 @@ class EnrollmentViewModelTest {
 
     val errors = pi().validationErrors
     assertTrue(errors.isNotEmpty())
-    // Spot-check a couple of concrete messages rather than the full ~20-item list.
+    // Spot-check a couple of concrete messages rather than the full ~20-item list. State/district/
+    // block are pre-filled from the Sakhi's geography assignment (EnrollmentViewModel.load), so
+    // they're not in the missing list — check fields the Sakhi still has to enter.
     assertTrue(errors.any { it.contains("first name", ignoreCase = true) })
-    assertTrue(errors.any { it.contains("state", ignoreCase = true) })
+    assertTrue(errors.any { it.contains("mobile", ignoreCase = true) })
   }
 
   @Test
@@ -936,12 +938,10 @@ class EnrollmentViewModelTest {
   }
 
   /**
-   * Minimal valid Health History: Gravida 1 (no last-pregnancy block).
-   * NOTE: livingChildren=1 here (not 0) purely to satisfy the cross-total
-   * rule (livingChildren + stillBirths + abortions == gravida) as currently
-   * implemented — see the flagged product issue on that formula not
-   * accounting for the current, still-ongoing pregnancy. Not meant to model
-   * a realistic obstetric history, just to keep this shared fixture valid.
+   * Minimal valid Health History: a first pregnancy — Gravida 1 with every
+   * outcome figure 0, which satisfies the cross-total rule
+   * (livingChildren + stillBirths + abortions == gravida - 1, the -1 being the
+   * current pregnancy) and hides the last-pregnancy block.
    */
   private fun completeHealthHistory() {
     with(viewModel) {
@@ -952,7 +952,7 @@ class EnrollmentViewModelTest {
       setTdNone(true)
       setGravida("1")
       setPara("0")
-      setLivingChildren("1")
+      setLivingChildren("0")
       setAbortions("0")
       setStillBirths("0")
       toggleSelfCondition(1)
@@ -1110,17 +1110,18 @@ class EnrollmentViewModelTest {
   @Test
   fun `HH-14 gravida cross-total enforced when all entered`() {
     // Formula MUST match the /beneficiaries API's own cross-field rule:
-    // livingChildren + stillBirths + abortions == gravida. This used to be
-    // checked against a different, incompatible formula (para + abortions + 1)
-    // that could pass here and still fail server-side at submit — see the
-    // doc comment on HealthHistoryState.gravidaTotalError.
+    // livingChildren + stillBirths + abortions == gravida - 1 (Gravida counts
+    // the current pregnancy, the outcome figures cannot). Two earlier formulas
+    // drifted from it — para + abortions + 1, then == gravida, which no Gravida
+    // value could satisfy alongside the server — see the doc comment on
+    // HealthHistoryState.gravidaTotalError.
     reachHealthHistory()
     viewModel.setGravida("4")
     viewModel.setLivingChildren("2")
     viewModel.setStillBirths("0")
-    viewModel.setAbortions("1") // 2 + 0 + 1 = 3 ≠ 4
+    viewModel.setAbortions("2") // 2 + 0 + 2 = 4 ≠ 4 - 1
     assertEquals(HealthFieldError.GRAVIDA_TOTAL_MISMATCH, hh().gravidaTotalError)
-    viewModel.setAbortions("2") // 2 + 0 + 2 = 4
+    viewModel.setAbortions("1") // 2 + 0 + 1 = 3 = 4 - 1
     assertNull(hh().gravidaTotalError)
   }
 

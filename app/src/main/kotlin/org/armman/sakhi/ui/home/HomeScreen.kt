@@ -1,7 +1,6 @@
 package org.armman.sakhi.ui.home
 
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,30 +9,33 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.armman.sakhi.R
+import org.armman.sakhi.ui.components.AppLogo
+import org.armman.sakhi.ui.components.ConfirmationDialog
 import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG400
 import org.armman.sakhi.ui.theme.White
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -52,6 +54,20 @@ fun HomeScreen(
   viewModel: HomeViewModel = hiltViewModel(),
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+  val uploadModalState by viewModel.uploadModalState.collectAsStateWithLifecycle()
+  val pendingUploadCount by viewModel.pendingUploadCount.collectAsStateWithLifecycle()
+  val duplicateReview by viewModel.duplicateReview.collectAsStateWithLifecycle()
+
+  // Offline Data Upload tap (bharath, 2026-08-08) - see HomeViewModel.onDataUploadClicked's doc.
+  val context = LocalContext.current
+  val offlineUploadMessage = stringResource(R.string.home_data_upload_offline)
+  LaunchedEffect(viewModel) {
+    viewModel.events.collect { event ->
+      when (event) {
+        HomeEvent.OfflineUploadBlocked -> Toast.makeText(context, offlineUploadMessage, Toast.LENGTH_SHORT).show()
+      }
+    }
+  }
 
   Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -67,15 +83,48 @@ fun HomeScreen(
           is HomeUiState.Error -> HomeError(onRetry = viewModel::loadSummary)
           is HomeUiState.Success -> HomeContent(
             summary = state.summary,
+            pendingUploadCount = pendingUploadCount,
             onAllBeneficiaries = onAllBeneficiaries,
             onSeeVisitTracker = onSeeVisitTracker,
             onRegisterNew = onRegisterNew,
+            onDataUploadClick = viewModel::onDataUploadClicked,
           )
         }
       }
     }
   }
+
+  if (uploadModalState.isVisible) {
+    FormsUploadedModal(
+      records = uploadModalState.records,
+      onDismiss = viewModel::onDismissUploadModal,
+    )
+  }
+
+  // SRS FR-S-2.5 — a draft rejected as a possible duplicate during an upload, where the earlier
+  // pregnancy is already complete. Asked here because the rejection happens after the Sakhi has left
+  // the enrollment form; confirming enrolls it as a new case linked to the earlier one.
+  duplicateReview?.let { review ->
+    ConfirmationDialog(
+      title = stringResource(R.string.home_duplicate_review_title),
+      message = stringResource(
+        R.string.home_duplicate_review_message,
+        formatSubmissionDate(review.submittedAtEpochMillis),
+      ),
+      confirmLabel = stringResource(R.string.enrollment_duplicate_new_pregnancy_confirm),
+      cancelLabel = stringResource(R.string.enrollment_duplicate_new_pregnancy_cancel),
+      onConfirm = { viewModel.onConfirmNewPregnancy(review) },
+      onCancel = { viewModel.onDismissDuplicateReview(review) },
+    )
+  }
 }
+
+/** Identifies the rejected draft by the day it was filled — the only non-PII handle the upload
+ * records carry (see [org.armman.sakhi.data.forms.FormUploadRecord]). */
+private fun formatSubmissionDate(epochMillis: Long): String =
+  Instant.ofEpochMilli(epochMillis)
+    .atZone(ZoneId.systemDefault())
+    .format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))
 
 /** Lavender header: welcome title + today's date, profile avatar on the right. */
 @Composable
@@ -103,13 +152,9 @@ private fun HomeHeader(onProfile: () -> Unit) {
         modifier = Modifier.padding(top = 4.dp),
       )
     }
-    Image(
-      painter = painterResource(R.drawable.logo_arogya_sakhi),
+    AppLogo(
       contentDescription = stringResource(R.string.home_profile_content_description),
-      modifier = Modifier
-        .size(52.dp)
-        .clip(RoundedCornerShape(8.dp))
-        .clickable(onClick = onProfile),
+      onClick = onProfile,
     )
   }
 }

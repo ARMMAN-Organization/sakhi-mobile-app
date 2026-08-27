@@ -4,13 +4,8 @@ package org.armman.sakhi.data.forms
  * `FakeEnrollmentSyncScheduler`. */
 class FakeDynamicFormSyncScheduler : DynamicFormSyncScheduler {
   var syncNowCallCount = 0
-  var ensurePeriodicSyncScheduledCallCount = 0
 
   override fun syncNow() {
     syncNowCallCount++
-  }
-
-  override fun ensurePeriodicSyncScheduled() {
-    ensurePeriodicSyncScheduledCallCount++
   }
 }

@@ -12,6 +12,7 @@ enum class FormFieldInputType {
   TEXT_GEO,
   NUMBER,
   DATE,
+  TIME,
   SELECT,
   RADIO,
   MULTISELECT,
@@ -21,15 +22,44 @@ enum class FormFieldInputType {
   UNKNOWN,
 }
 
+/**
+ * [Q44's `has_the_women_received_td_dose`] has now shipped under THREE different `input_type`
+ * spellings across three schema publishes, confirmed against real payloads each time:
+ * `"multiselect_date"` (CR-018, `api-calls.jsonl`), then unchanged through `api-calls-live.jsonl`
+ * (2026-07-31), then `"multiselect,calendar"` (2026-08-06, reported live — bharath's screenshot
+ * showed the field falling into [FormFieldInputType.UNKNOWN] and printing the raw
+ * "Unsupported field type ... (multiselect,calendar)" message). Matching the SET rather than one
+ * literal — same reasoning as [REGISTRATION_DATE_QUESTION_CODES] — so the next republish doesn't
+ * silently break this field again the same way. `"multiselect, calendar"` (with the space the
+ * spec's own "Multiple choice, calendar" column text has) is included pre-emptively since the
+ * comma-joined spelling already showed the backend is normalizing the spec's Data Type column
+ * text directly rather than using a fixed enum token.
+ */
+private val MULTISELECT_DATE_SPELLINGS = setOf("multiselect_date", "multiselect,calendar", "multiselect, calendar")
+
+/**
+ * `select`/dropdown fields are shipped by the backend as `"dropdown"`, not `"select"` — confirmed
+ * 2026-08-18 against a real `GET /forms/.../active-version` payload for `closure_reason` and
+ * `maternal_death_place` (ANC/Infant Closure forms), and reported live on the Referral form's
+ * "If No, state reasons" field with the same symptom: falling into [FormFieldInputType.UNKNOWN]
+ * and printing "Unsupported field type ... (dropdown) — app update needed." instead of rendering
+ * the dropdown. `"Dropdown"` (capitalized, matching the SRS Data Type column text verbatim) is
+ * included pre-emptively for the same reason [MULTISELECT_DATE_SPELLINGS] hedges on casing/
+ * punctuation — the backend normalizes the spec's own column text rather than using a fixed enum
+ * token, so a future republish could ship either casing.
+ */
+private val DROPDOWN_SPELLINGS = setOf("select", "dropdown", "Dropdown")
+
 fun String.toFormFieldInputType(): FormFieldInputType = when (this) {
   "text" -> FormFieldInputType.TEXT
   "text_geo" -> FormFieldInputType.TEXT_GEO
   "number" -> FormFieldInputType.NUMBER
   "date" -> FormFieldInputType.DATE
-  "select" -> FormFieldInputType.SELECT
+  "time" -> FormFieldInputType.TIME
+  in DROPDOWN_SPELLINGS -> FormFieldInputType.SELECT
   "radio" -> FormFieldInputType.RADIO
   "multiselect" -> FormFieldInputType.MULTISELECT
-  "multiselect_date" -> FormFieldInputType.MULTISELECT_DATE
+  in MULTISELECT_DATE_SPELLINGS -> FormFieldInputType.MULTISELECT_DATE
   "media" -> FormFieldInputType.MEDIA
   "image" -> FormFieldInputType.IMAGE
   else -> FormFieldInputType.UNKNOWN
@@ -44,12 +74,18 @@ data class FormFieldOption(
   @SerializedName("value_code") val valueCode: String,
 )
 
-/** `field`/`value`/`operator` condition gating whether a field is shown. Only `"eq"` has been
- * observed; an unrecognized operator is treated as "always visible" — the safer failure mode is
- * showing an extra field, not silently hiding a required one. */
+/**
+ * `field`/`value`/`operator` condition gating whether a field is shown — the backend's SRS
+ * Category 5 skip logic. Operators are `eq`, `gte`, `lt` and `isSet`, matching the service's own
+ * `visibleWhen` enum; see [FormVisibilityEvaluator] for the semantics and failure modes.
+ *
+ * [value] is nullable because the backend types it `z.any().optional()`: an `isSet` rule carries no
+ * value at all, and Gson would happily leave a non-null `String` property null, producing a value
+ * that violates its own type the moment anything touched it.
+ */
 data class FormVisibleWhen(
   val field: String,
-  val value: String,
+  val value: String?,
   val operator: String,
 )
 
@@ -94,11 +130,34 @@ data class FormFieldSchema(
 
 /** One cross-field rule from `validationJson`. Matches the backend's `crossFieldRuleSchema`
  * discriminated union exactly: `LTE` compares `fields[0] <= fields[1]`; `SUM_EQUALS` checks
- * `sum(fields) == value-of(equals)`. [equals] is only present for `SUM_EQUALS`. */
+ * `sum(fields) == value-of(equals)`. [equals] is only present for `SUM_EQUALS`. [field] and
+ * [optionFieldMap] are only present for `REQUIRED_IF_SELECTED`: [field] is the trigger question
+ * (a multiselect), and [optionFieldMap] maps a selected option code to the question_code that
+ * becomes required when that option is selected — e.g. ANC_CLOSURE_VISIT/CHILD_CLOSURE_VISIT's
+ * "other, please specify" death-cause detail fields. [field] and [exclusiveValues] are only
+ * present for `EXCLUSIVE_OPTION` (confirmed 2026-08-19 against `DELIVERY_VISIT`'s
+ * `did_mother_experience_complications` and `CHILD_REGISTRATION`'s `vaccination_taken_at_birth`):
+ * [field] is the trigger multiselect, and [exclusiveValues] are option codes (e.g. `"none"`) that
+ * must not be selected alongside any other option in that same field. */
 data class FormCrossFieldRule(
   val rule: String,
   val fields: List<String>,
   val equals: String? = null,
+  val field: String? = null,
+  val optionFieldMap: Map<String, String>? = null,
+  val exclusiveValues: List<String>? = null,
+)
+
+/** One geography unit the backend ships alongside the form version in the `active-version`
+ * response (one row per level of the Sakhi's assigned branch — STATE, DISTRICT, BLOCK, VILLAGE,
+ * PADA, PHC, SUBCENTRE). These are the ONLY geographyUnitIds the backend's `/beneficiaries`
+ * validation recognizes, so geography answers must be sourced from here — not from any hardcoded
+ * cascade, which is exactly what caused `pii.phcId does not refer to a known geography unit`
+ * (HTTP 422). See [org.armman.sakhi.data.forms.GeographyFieldOptionsResolver]. */
+data class FormGeographyUnit(
+  val geographyUnitId: String,
+  val geoType: String,
+  val name: String,
 )
 
 data class FormVersion(
@@ -110,10 +169,25 @@ data class FormVersion(
   val effectiveFrom: String,
   val effectiveTo: String?,
   val status: String,
+  /** Nullable (not a defaulted non-null list) on purpose: a [FormVersion] persisted by an older
+   * build predates this field, so its cached JSON has no `geography` key and Gson would leave a
+   * non-null `List` property as null anyway — modelling it nullable makes that explicit and forces
+   * call sites to `.orEmpty()` rather than risk an NPE reading a stale cache. */
+  val geography: List<FormGeographyUnit>? = null,
 )
 
 data class FormActiveVersionResponseDto(
   val success: Boolean,
   val message: String?,
   val data: FormVersion?,
+)
+
+/** CR-033/CR-034: envelope for [FormsApi.getVisitCodeFormMap] — `data` is a flat
+ * `VisitCodeType.name -> formCode` map (e.g. `{"ANC": "ANC_VISIT", "PP": "POSTPARTUM_VISIT"}`),
+ * covering only the visit types the backend currently has a real/placeholder mapping for. See
+ * [VisitCodeFormResolver] for what happens when a code is missing from this map. */
+data class VisitCodeFormMapResponseDto(
+  val success: Boolean,
+  val message: String?,
+  val data: Map<String, String>?,
 )

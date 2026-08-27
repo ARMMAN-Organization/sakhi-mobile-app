@@ -15,6 +15,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
@@ -80,7 +82,7 @@ fun PersonalInfoStep(
   actions: PersonalInfoActions,
   modifier: Modifier = Modifier,
 ) {
-  val fieldGap = Dimens.ItemSpacing
+  val fieldGap = Dimens.FormFieldSpacing
   Column(
     verticalArrangement = Arrangement.spacedBy(fieldGap),
     modifier = modifier.fillMaxWidth(),
@@ -91,6 +93,16 @@ fun PersonalInfoStep(
       color = NeutralG200,
       modifier = Modifier.padding(top = Dimens.ItemSpacing),
     )
+
+    // Banner sits right after the instruction, at the TOP of the step's field list — not after
+    // the last field. `validationScrollTrigger` (see EnrollmentScreen) scrolls this step back to
+    // y=0 on a blocked Next tap, so the banner must already be on that first screenful; if it
+    // were below all the fields (as it used to be), scrolling to the top would land the Sakhi on
+    // the first field with no visible indication of what's wrong, and finding "Complete all
+    // necessary fields" would require scrolling all the way back down again.
+    if (state.showValidationBanner) {
+      ValidationErrorBanner(errors = state.validationErrors)
+    }
 
     // --- Identity (Q19–20) ---
     AppTextField(
@@ -302,10 +314,6 @@ fun PersonalInfoStep(
         value = state.gestationalAgeWeeks?.toString().orEmpty(),
       )
     }
-
-    if (state.showValidationBanner) {
-      ValidationErrorBanner(errors = state.validationErrors)
-    }
   }
 }
 
@@ -338,10 +346,18 @@ private fun LmpKnownRow(lmpKnown: Boolean, onLmpKnown: (Boolean) -> Unit) {
 
 @Composable
 private fun RadioOption(label: String, selected: Boolean, onClick: () -> Unit) {
+  val focusManager = LocalFocusManager.current
+  val keyboardController = LocalSoftwareKeyboardController.current
   Row(
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing),
-    modifier = Modifier.clickable(onClick = onClick),
+    modifier = Modifier.clickable {
+      // A still-focused AppTextField above (e.g. Address) otherwise keeps the keyboard able to
+      // reappear even though this Yes/No radio isn't a text input — see FormFields.SelectableRow.
+      focusManager.clearFocus()
+      keyboardController?.hide()
+      onClick()
+    },
   ) {
     Icon(
       painter = painterResource(

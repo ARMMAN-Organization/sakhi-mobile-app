@@ -13,7 +13,9 @@ import org.armman.sakhi.data.auth.RemoteCurrentUserRepository
 import org.armman.sakhi.data.auth.session.EncryptedSharedPreferencesStore
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.connectivity.AndroidConnectivityChecker
+import org.armman.sakhi.data.connectivity.AndroidConnectivityObserver
 import org.armman.sakhi.data.connectivity.ConnectivityChecker
+import org.armman.sakhi.data.connectivity.ConnectivityObserver
 import retrofit2.Retrofit
 import java.time.Clock
 import javax.inject.Singleton
@@ -33,6 +35,10 @@ abstract class AuthModule {
   @Binds
   @Singleton
   abstract fun bindConnectivityChecker(impl: AndroidConnectivityChecker): ConnectivityChecker
+
+  @Binds
+  @Singleton
+  abstract fun bindConnectivityObserver(impl: AndroidConnectivityObserver): ConnectivityObserver
 
   @Binds
   @Singleton

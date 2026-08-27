@@ -15,6 +15,8 @@ import org.armman.sakhi.data.auth.LoginFailureReason
 import org.armman.sakhi.data.auth.LoginRequest
 import org.armman.sakhi.data.auth.LoginResult
 import org.armman.sakhi.data.auth.session.SessionStore
+import org.armman.sakhi.data.lookup.LookupWarmer
+import org.armman.sakhi.data.motherlink.MotherDetailsWarmer
 import javax.inject.Inject
 
 /**
@@ -35,6 +37,8 @@ data class LoginUiState(
 class LoginViewModel @Inject constructor(
   private val authRepository: AuthRepository,
   private val sessionStore: SessionStore,
+  private val lookupWarmer: LookupWarmer,
+  private val motherDetailsWarmer: MotherDetailsWarmer,
 ) : ViewModel() {
 
   // A valid, unexpired "stay logged in" session skips the form entirely — LoginScreen treats
@@ -71,8 +75,17 @@ class LoginViewModel @Inject constructor(
         LoginRequest(username = state.username.trim(), password = state.password.trim()),
       )
       when (result) {
-        is LoginResult.Success ->
+        is LoginResult.Success -> {
+          // Warm the submit-critical lookups now, while the network is freshest, so a later
+          // enrollment can resolve caseType/beneficiaryType even offline or on a weak signal.
+          // Fire-and-forget on the warmer's own scope so navigating away doesn't cancel it.
+          lookupWarmer.warmSubmitCriticalCategoriesAsync()
+          // Same reasoning for every registered mother's consent + socio-demographics (CR-032): a
+          // Sakhi may go the whole day with no signal and never get the chance to warm them one
+          // mother at a time.
+          motherDetailsWarmer.warmAllMothersAsync()
           _uiState.update { it.copy(isSubmitting = false, loginSucceeded = true) }
+        }
         is LoginResult.Failure ->
           _uiState.update { it.copy(isSubmitting = false, loginError = result.reason.toMessageRes()) }
       }
@@ -87,7 +100,7 @@ class LoginViewModel @Inject constructor(
   @StringRes
   private fun LoginFailureReason.toMessageRes(): Int = when (this) {
     LoginFailureReason.INVALID_CREDENTIALS -> R.string.login_error_invalid_credentials
-    LoginFailureReason.VALIDATION_ERROR -> R.string.login_error_generic
+    LoginFailureReason.VALIDATION_ERROR -> R.string.login_error_invalid_credentials
     LoginFailureReason.NETWORK_ERROR -> R.string.login_error_network
     LoginFailureReason.WRONG_ROLE -> R.string.login_error_wrong_role
     LoginFailureReason.OFFLINE_NO_CACHE -> R.string.login_error_offline_no_cache

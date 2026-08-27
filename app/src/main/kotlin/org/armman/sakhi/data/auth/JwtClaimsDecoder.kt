@@ -9,8 +9,17 @@ import javax.inject.Singleton
 /** The access token isn't a well-formed JWT (wrong segment count) — can't extract claims. */
 class JwtDecodeException(message: String) : Exception(message)
 
+/** Sentinel used for [JwtClaims.expiresAtEpochSeconds] when the token carries no `exp` claim —
+ * the auth-service intentionally stopped issuing one, so tokens no longer expire. Chosen so
+ * every "is this still valid" comparison (e.g. [org.armman.sakhi.data.auth.session.SessionStore.hasValidSession])
+ * always evaluates as not-expired. */
+const val NO_EXPIRY_EPOCH_SECONDS: Long = Long.MAX_VALUE
+
 /** Claims this app reads out of the access token payload. Shape confirmed from a live token:
- * `{sub, roles:[...], projectId, geographyUnitId, iat, exp}` — no username/display-name claim. */
+ * `{sub, roles:[...], projectId, geographyUnitId, iat}` — no username/display-name claim. The
+ * auth-service deliberately no longer issues an `exp` claim (tokens don't expire), so
+ * [expiresAtEpochSeconds] falls back to [NO_EXPIRY_EPOCH_SECONDS] when the claim is absent —
+ * see [JwtClaimsDecoder.decode]. */
 data class JwtClaims(
   val subjectId: String,
   val roles: List<String>,
@@ -64,16 +73,19 @@ class JwtClaimsDecoder @Inject constructor() {
     } catch (e: com.google.gson.JsonSyntaxException) {
       throw JwtDecodeException("Access token payload is not valid JSON.")
     }
-    // Fail fast on missing REQUIRED claims rather than defaulting them: an empty subjectId or a
-    // 0 expiry would silently produce a misleading session (e.g. an already-"expired" token, or
-    // a session with no identity) instead of surfacing a clearly malformed token. `iat` is
-    // informational only, so it keeps its lenient default.
+    // Fail fast on missing REQUIRED claims rather than defaulting them: an empty subjectId
+    // would silently produce a session with no identity instead of surfacing a clearly
+    // malformed token. `iat` is informational only, so it keeps its lenient default.
     val subjectId = raw.subjectId?.takeIf { it.isNotBlank() }
       ?: throw JwtDecodeException("Access token is missing the required `sub` claim.")
     val roles = raw.roles
       ?: throw JwtDecodeException("Access token is missing the required `roles` claim.")
-    val expiresAtEpochSeconds = raw.expiresAtEpochSeconds
-      ?: throw JwtDecodeException("Access token is missing the required `exp` claim.")
+    // The auth-service deliberately no longer sets `exp` (tokens don't expire) — treat a
+    // missing claim as "never expires" instead of failing the whole login. NO_EXPIRY_EPOCH_SECONDS
+    // is always greater than SessionStore's `now` check, so hasValidSession() never treats this
+    // as expired. If `exp` IS present (e.g. a future backend change reintroduces it), it's
+    // still honored as before.
+    val expiresAtEpochSeconds = raw.expiresAtEpochSeconds ?: NO_EXPIRY_EPOCH_SECONDS
     return JwtClaims(
       subjectId = subjectId,
       roles = roles,

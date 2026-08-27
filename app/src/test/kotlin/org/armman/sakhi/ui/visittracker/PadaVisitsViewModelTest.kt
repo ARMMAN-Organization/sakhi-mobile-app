@@ -9,11 +9,14 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.armman.sakhi.data.beneficiary.BeneficiaryType
 import org.armman.sakhi.data.beneficiary.RiskLevel
+import org.armman.sakhi.data.visit.PadaVisitsResult
 import org.armman.sakhi.data.visit.Visit
 import org.armman.sakhi.data.visit.VisitRepository
+import org.armman.sakhi.data.visit.VisitStatus
 import org.armman.sakhi.data.visit.VisitType
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -25,12 +28,26 @@ class PadaVisitsViewModelTest {
   private val dispatcher = StandardTestDispatcher()
 
   private class FakeVisitRepository(
-    var visits: List<Visit> = FIXTURE,
+    var open: List<Visit> = OPEN_FIXTURE,
+    var referral: List<Visit> = REFERRAL_FIXTURE,
     var error: Exception? = null,
+    var lastSearch: String? = null,
   ) : VisitRepository {
-    override suspend fun getTodaysVisits(): List<Visit> {
+    override suspend fun getVisits(
+      padaId: String,
+      status: VisitStatus,
+      date: LocalDate?,
+      search: String?,
+    ): PadaVisitsResult {
+      assertEquals("pada-jamsar", padaId)
+      lastSearch = search
       error?.let { throw it }
-      return visits
+      val visits = if (status == VisitStatus.OPEN) open else referral
+      return PadaVisitsResult(
+        openCount = open.size,
+        referralFollowUpCount = referral.size,
+        visits = visits,
+      )
     }
   }
 
@@ -47,86 +64,69 @@ class PadaVisitsViewModelTest {
     Dispatchers.resetMain()
   }
 
-  private fun createViewModel(pada: String = "Jamsar"): PadaVisitsViewModel {
+  private fun createViewModel(padaId: String = "pada-jamsar", padaName: String = "Jamsar"): PadaVisitsViewModel {
     val viewModel = PadaVisitsViewModel(
       repository,
-      SavedStateHandle(mapOf(PadaVisitsViewModel.NAV_ARG_PADA to pada)),
+      SavedStateHandle(
+        mapOf(
+          PadaVisitsViewModel.NAV_ARG_PADA_ID to padaId,
+          PadaVisitsViewModel.NAV_ARG_PADA_NAME to padaName,
+        ),
+      ),
     )
     dispatcher.scheduler.advanceUntilIdle()
     return viewModel
   }
 
   @Test
-  fun `loads only the requested pada with correct tab counts`() {
-    val viewModel = createViewModel("Jamsar")
+  fun `loads both tabs with correct counts and the pada name for the heading`() {
+    val viewModel = createViewModel()
     val state = viewModel.uiState.value
 
     assertEquals("Jamsar", state.pada)
     assertEquals(2, state.openCount)
     assertEquals(1, state.referralCount)
-    // Default tab is OPEN.
     assertEquals(listOf("v1", "v2"), state.visits.map { it.id })
   }
 
   @Test
-  fun `tab switch filters by visit type`() {
-    val viewModel = createViewModel("Jamsar")
+  fun `tab switch shows the other tab's already-loaded list`() {
+    val viewModel = createViewModel()
 
     viewModel.onTabSelected(VisitType.REFERRAL_FOLLOWUP)
-    assertEquals(listOf("v4"), viewModel.uiState.value.visits.map { it.id })
+    assertNull(viewModel.uiState.value.visits.single().id) // Referral rows always have a null id.
 
     viewModel.onTabSelected(VisitType.OPEN)
     assertEquals(2, viewModel.uiState.value.visits.size)
   }
 
   @Test
-  fun `search filters names within the selected tab`() {
-    val viewModel = createViewModel("Jamsar")
+  fun `search is debounced and refetches both tabs from the server`() = runTest(dispatcher.scheduler) {
+    val viewModel = createViewModel()
 
-    viewModel.onSearchQueryChanged("sUnItA")
-    assertEquals(listOf("v1"), viewModel.uiState.value.visits.map { it.id })
+    viewModel.onSearchQueryChanged("Sun")
+    viewModel.onSearchQueryChanged("Sunita Sharma")
+    dispatcher.scheduler.advanceUntilIdle()
 
-    // Meena is in the referral tab, so no result while OPEN is selected.
-    viewModel.onSearchQueryChanged("Meena")
-    assertTrue(viewModel.uiState.value.visits.isEmpty())
-
-    viewModel.onTabSelected(VisitType.REFERRAL_FOLLOWUP)
-    assertEquals(listOf("v4"), viewModel.uiState.value.visits.map { it.id })
+    // Only the latest, settled value is sent — not every keystroke.
+    assertEquals("Sunita Sharma", repository.lastSearch)
   }
 
   @Test
-  fun `pada with zero visits of one type shows empty list and zero count`() {
-    val viewModel = createViewModel("Kelghar")
+  fun `pada with zero referral visits shows an empty list and zero count`() {
+    repository.referral = emptyList()
+    val viewModel = createViewModel()
     val state = viewModel.uiState.value
 
-    assertEquals(1, state.openCount)
     assertEquals(0, state.referralCount)
-
     viewModel.onTabSelected(VisitType.REFERRAL_FOLLOWUP)
     assertTrue(viewModel.uiState.value.visits.isEmpty())
-  }
-
-  @Test
-  fun `visitsByType holds both tabs simultaneously with counts intact`() {
-    val viewModel = createViewModel("Jamsar")
-    val state = viewModel.uiState.value
-
-    assertEquals(listOf("v1", "v2"), state.visitsByType[VisitType.OPEN]?.map { it.id })
-    assertEquals(listOf("v4"), state.visitsByType[VisitType.REFERRAL_FOLLOWUP]?.map { it.id })
-
-    // Search filters both lists; counts stay from the unfiltered pada lists.
-    viewModel.onSearchQueryChanged("Sunita")
-    val filtered = viewModel.uiState.value
-    assertEquals(listOf("v1"), filtered.visitsByType[VisitType.OPEN]?.map { it.id })
-    assertTrue(filtered.visitsByType[VisitType.REFERRAL_FOLLOWUP].orEmpty().isEmpty())
-    assertEquals(2, filtered.openCount)
-    assertEquals(1, filtered.referralCount)
   }
 
   @Test
   fun `repository failure sets error and retry recovers`() {
     repository.error = IOException("offline")
-    val viewModel = createViewModel("Jamsar")
+    val viewModel = createViewModel()
     assertTrue(viewModel.uiState.value.hasError)
 
     repository.error = null
@@ -139,24 +139,26 @@ class PadaVisitsViewModelTest {
   }
 
   private companion object {
-    val FIXTURE = listOf(
-      visit("v1", "Sunita Sharma", VisitType.OPEN, "Jamsar"),
-      visit("v2", "Riya Verma", VisitType.OPEN, "Jamsar"),
-      visit("v4", "Meena Gavit", VisitType.REFERRAL_FOLLOWUP, "Jamsar"),
-      visit("v6", "Abha Mhatre", VisitType.OPEN, "Kelghar"),
+    val OPEN_FIXTURE = listOf(
+      visit("v1", "b1", "Sunita Sharma", VisitType.OPEN),
+      visit("v2", "b2", "Riya Verma", VisitType.OPEN),
+    )
+    val REFERRAL_FIXTURE = listOf(
+      visit(null, "b4", "Meena Gavit", VisitType.REFERRAL_FOLLOWUP),
     )
 
-    fun visit(id: String, name: String, type: VisitType, pada: String) = Visit(
+    fun visit(id: String?, beneficiaryId: String, name: String, type: VisitType) = Visit(
       id = id,
-      beneficiaryId = "b-$id",
+      beneficiaryId = beneficiaryId,
       beneficiaryName = name,
       beneficiaryType = BeneficiaryType.MOTHER,
-      riskLevel = RiskLevel.LOW,
+      riskLevel = RiskLevel.MILD,
       visitType = type,
-      isEnding = false,
-      pada = pada,
+      pada = "Jamsar",
+      village = "Pada - Jamsar",
       scheduleDate = LocalDate.of(2026, 4, 24),
-      visitLabel = "ANC 3",
+      dueDate = LocalDate.of(2026, 4, 24),
+      visitLabel = if (type == VisitType.REFERRAL_FOLLOWUP) "Referral Follow-up" else "ANC 3",
       daysRemaining = 2,
       phoneNumber = "+911234567890",
     )

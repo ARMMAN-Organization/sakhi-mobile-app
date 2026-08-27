@@ -6,39 +6,41 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
-import org.armman.sakhi.data.beneficiary.BeneficiaryType
-import org.armman.sakhi.data.beneficiary.RiskLevel
-import org.armman.sakhi.data.visit.Visit
-import org.armman.sakhi.data.visit.VisitRepository
-import org.armman.sakhi.data.visit.VisitType
+import org.armman.sakhi.data.visittracker.PadaRepository
+import org.armman.sakhi.data.visittracker.PadaSummary
+import org.armman.sakhi.data.visittracker.PadaVisitBucket
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.IOException
-import java.time.LocalDate
 
+/**
+ * M3: [PadaSelectionViewModel] now consumes [PadaRepository]'s pre-aggregated per-pada counts
+ * directly — replaces the old fixture-and-aggregate test against a flat [org.armman.sakhi.data.visit.Visit]
+ * list, which no longer exists in this ViewModel.
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 class PadaSelectionViewModelTest {
   private val dispatcher = StandardTestDispatcher()
 
-  private class FakeVisitRepository(
-    var visits: List<Visit> = FIXTURE,
+  private class FakePadaRepository(
+    var summaries: List<PadaSummary> = DEFAULT_DATA,
     var error: Exception? = null,
-  ) : VisitRepository {
-    override suspend fun getTodaysVisits(): List<Visit> {
+  ) : PadaRepository {
+    override suspend fun getPadaSummaries(): List<PadaSummary> {
       error?.let { throw it }
-      return visits
+      return summaries
     }
   }
 
-  private lateinit var repository: FakeVisitRepository
+  private lateinit var repository: FakePadaRepository
 
   @Before
   fun setUp() {
     Dispatchers.setMain(dispatcher)
-    repository = FakeVisitRepository()
+    repository = FakePadaRepository()
   }
 
   @After
@@ -53,33 +55,35 @@ class PadaSelectionViewModelTest {
   }
 
   @Test
-  fun `one card per pada, sorted alphabetically`() {
+  fun `loadVisits populates padaCards directly from repository summaries`() {
     val viewModel = createViewModel()
     val state = viewModel.uiState.value
 
-    assertEquals(listOf("Jamsar", "Kelghar"), state.padaCards.map { it.pada })
+    assertEquals(listOf("Test Pada", "Ambewadi Pada"), state.padaCards.map { it.padaName })
     assertEquals(2, state.totalPadas)
+    assertEquals(false, state.isLoading)
+    assertEquals(false, state.hasError)
   }
 
   @Test
-  fun `aggregates are exact for the fixture`() {
+  fun `each card exposes the open and referral follow-up buckets exactly as the repository returned them`() {
     val viewModel = createViewModel()
-    val jamsar = viewModel.uiState.value.padaCards.first { it.pada == "Jamsar" }
+    val testPada = viewModel.uiState.value.padaCards.first { it.padaName == "Test Pada" }
 
-    assertEquals(2, jamsar.openWomen)
-    assertEquals(1, jamsar.openWomenEnding)
-    assertEquals(1, jamsar.openChildren)
-    assertEquals(1, jamsar.referralWomen)
-    assertEquals(1, jamsar.referralChildren)
-    assertEquals(5, jamsar.remainingVisits)
+    assertEquals(4, testPada.visitsRemainingCount)
+    assertEquals(3, testPada.open.womenCount)
+    assertEquals(1, testPada.open.womenOverdueCount)
+    assertEquals(2, testPada.open.childCount)
+    assertEquals(1, testPada.referralFollowUp.womenCount)
+    assertEquals(1, testPada.referralFollowUp.childCount)
   }
 
   @Test
-  fun `search filters padas case-insensitively and restores on clear`() {
+  fun `search filters by pada name case-insensitively and restores on clear`() {
     val viewModel = createViewModel()
 
-    viewModel.onSearchQueryChanged("kelG")
-    assertEquals(listOf("Kelghar"), viewModel.uiState.value.padaCards.map { it.pada })
+    viewModel.onSearchQueryChanged("ambe")
+    assertEquals(listOf("Ambewadi Pada"), viewModel.uiState.value.padaCards.map { it.padaName })
 
     viewModel.onSearchQueryChanged("zzz")
     assertTrue(viewModel.uiState.value.padaCards.isEmpty())
@@ -103,35 +107,23 @@ class PadaSelectionViewModelTest {
   }
 
   private companion object {
-    val FIXTURE = listOf(
-      visit("v1", "Sunita", VisitType.OPEN, "Jamsar", BeneficiaryType.MOTHER, ending = true),
-      visit("v2", "Riya", VisitType.OPEN, "Jamsar", BeneficiaryType.MOTHER),
-      visit("v3", "Baby of Riya", VisitType.OPEN, "Jamsar", BeneficiaryType.INFANT),
-      visit("v4", "Meena", VisitType.REFERRAL_FOLLOWUP, "Jamsar", BeneficiaryType.MOTHER),
-      visit("v5", "Baby of Meena", VisitType.REFERRAL_FOLLOWUP, "Jamsar", BeneficiaryType.INFANT),
-      visit("v6", "Abha", VisitType.OPEN, "Kelghar", BeneficiaryType.MOTHER),
-    )
-
-    fun visit(
-      id: String,
-      name: String,
-      type: VisitType,
-      pada: String,
-      beneficiaryType: BeneficiaryType,
-      ending: Boolean = false,
-    ) = Visit(
-      id = id,
-      beneficiaryId = "b-$id",
-      beneficiaryName = name,
-      beneficiaryType = beneficiaryType,
-      riskLevel = RiskLevel.LOW,
-      visitType = type,
-      isEnding = ending,
-      pada = pada,
-      scheduleDate = LocalDate.of(2026, 4, 24),
-      visitLabel = "ANC 3",
-      daysRemaining = 2,
-      phoneNumber = "+911234567890",
+    val DEFAULT_DATA = listOf(
+      PadaSummary(
+        padaId = "pada-1",
+        padaName = "Test Pada",
+        villageName = "Test Village",
+        open = PadaVisitBucket(womenCount = 3, womenOverdueCount = 1, childCount = 2, childOverdueCount = 0),
+        referralFollowUp = PadaVisitBucket(womenCount = 1, womenOverdueCount = 0, childCount = 1, childOverdueCount = 0),
+        visitsRemainingCount = 4,
+      ),
+      PadaSummary(
+        padaId = "pada-2",
+        padaName = "Ambewadi Pada",
+        villageName = "Ambewadi",
+        open = PadaVisitBucket(womenCount = 1, womenOverdueCount = 0, childCount = 1, childOverdueCount = 0),
+        referralFollowUp = PadaVisitBucket(womenCount = 1, womenOverdueCount = 0, childCount = 0, childOverdueCount = 0),
+        visitsRemainingCount = 3,
+      ),
     )
   }
 }

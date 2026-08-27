@@ -3,6 +3,8 @@ package org.armman.sakhi.data.forms
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
+import org.armman.sakhi.data.audit.FakeFormAuditRepository
+import org.armman.sakhi.data.audit.FormAuditEventType
 import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
@@ -62,6 +64,7 @@ class DynamicFormSubmissionCoordinatorTest {
 
   private lateinit var enrollmentApi: FakeEnrollmentApi
   private lateinit var formSubmissionApi: FakeFormSubmissionApi
+  private lateinit var formAuditRepository: FakeFormAuditRepository
   private lateinit var coordinator: DynamicFormSubmissionCoordinator
 
   private val session = UserSession(
@@ -82,17 +85,19 @@ class DynamicFormSubmissionCoordinatorTest {
     val sessionStore = SessionStore(FakeSecureKeyValueStore())
     sessionStore.saveSession(session)
     val mapper = DynamicFormSubmissionMapper(sessionStore, FakeLookupRepository())
-    coordinator = DynamicFormSubmissionCoordinator(enrollmentApi, formSubmissionApi, mapper)
+    formAuditRepository = FakeFormAuditRepository()
+    coordinator = DynamicFormSubmissionCoordinator(enrollmentApi, formSubmissionApi, mapper, sessionStore, formAuditRepository)
   }
 
-  /** Answers matching a real gravida invariant (liveBirths + stillbirths + abortions = gravida)
+  /** Answers matching a real gravida invariant
+   * (liveBirths + stillbirths + abortions = gravida - 1, the -1 being the current pregnancy)
    * so the happy path doesn't trip the backend's own `superRefine` — see
    * `create-beneficiary.dto.ts`'s `motherDetailsSchema`. */
   private fun consistentAnswers() = FormAnswers(
     singleValues = mapOf(
       "did_we_receive_consent" to "yes",
       "lmp_date" to "2026-05-01",
-      "gravida_total_number_of_pregnancies" to "2",
+      "gravida_total_number_of_pregnancies" to "3",
       "para_number_of_births_after_24_weeks" to "1",
       "living_children" to "1",
       "abortions_pregnancy_losses_before_24_weeks" to "1",
@@ -141,8 +146,7 @@ class DynamicFormSubmissionCoordinatorTest {
 
     // POST /beneficiaries got the mapped PII/case/motherDetails payload.
     val beneficiaryRequest = requireNotNull(enrollmentApi.lastRequest)
-    assertEquals("Test", beneficiaryRequest.pii.firstName)
-    assertEquals("Mother", beneficiaryRequest.pii.lastName)
+    assertEquals("Test Mother", beneficiaryRequest.pii.fullName)
     assertEquals("local-case-1", beneficiaryRequest.case.localCaseUuid)
 
     // POST /forms/MOTHER_REGISTRATION/submissions used the SERVER's beneficiary id, not the
@@ -164,12 +168,54 @@ class DynamicFormSubmissionCoordinatorTest {
   }
 
   @Test
+  fun `happy path records a SUBMITTED audit event`() = runTest {
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    coordinator.submit(
+      formVersionId = "version-v6",
+      localCaseUuid = "local-case-1",
+      localSubmissionUuid = "local-submission-1",
+      answers = consistentAnswers(),
+      fallbackRegistrationDate = LocalDate.of(2026, 7, 20),
+    )
+
+    assertEquals(
+      listOf(FormAuditEventType.SUBMITTED),
+      formAuditRepository.recordedEvents.map { it.eventType },
+    )
+    assertEquals("local-case-1", formAuditRepository.recordedEvents.single().subjectId)
+    assertEquals("MOTHER_REGISTRATION", formAuditRepository.recordedEvents.single().formCode)
+  }
+
+  @Test
+  fun `form submission failure does not record a SUBMITTED audit event`() = runTest {
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    formSubmissionApi.response = Response.error(
+      422,
+      "{\"message\":\"formVersionId not found\"}".toResponseBody("application/json".toMediaType()),
+    )
+
+    coordinator.submit(
+      formVersionId = "version-v6",
+      localCaseUuid = "local-case-1",
+      localSubmissionUuid = "local-submission-1",
+      answers = consistentAnswers(),
+      fallbackRegistrationDate = LocalDate.now(),
+    )
+
+    assertTrue(formAuditRepository.recordedEvents.isEmpty())
+  }
+
+  @Test
   fun `mapping failure short-circuits before either API is called`() = runTest {
     val noSessionSessionStore = SessionStore(FakeSecureKeyValueStore()) // never saved a session
     val brokenCoordinator = DynamicFormSubmissionCoordinator(
       enrollmentApi,
       formSubmissionApi,
       DynamicFormSubmissionMapper(noSessionSessionStore, FakeLookupRepository()),
+      noSessionSessionStore,
+      FakeFormAuditRepository(),
     )
 
     val result = brokenCoordinator.submit(
@@ -208,6 +254,35 @@ class DynamicFormSubmissionCoordinatorTest {
     val error = result.exceptionOrNull() as DynamicFormSubmissionException.BeneficiaryCreationFailed
     assertEquals(400, error.httpCode)
     assertTrue(error.body.orEmpty().contains("Invalid uuid"))
+    // The parsed envelope is now carried on the exception for inline attribution downstream.
+    assertEquals("VALIDATION_ERROR", error.errorCode)
+    assertEquals("Invalid uuid", error.fieldErrors["pii.villageId"])
+    assertEquals(0, formSubmissionApi.callCount)
+  }
+
+  @Test
+  fun `a 422 unprocessable from beneficiaries carries the message but no fieldErrors`() = runTest {
+    // The real geography case: 422 with a plain message and no per-field map — must stay
+    // banner-only (empty fieldErrors), never attributed to a field.
+    val body = """
+      {"success":false,"message":"pii.phcId does not refer to a known geography unit.",
+      "errorCode":"UNPROCESSABLE","traceId":"abc123"}
+    """.trimIndent()
+    enrollmentApi.response = Response.error(422, body.toResponseBody("application/json".toMediaType()))
+
+    val result = coordinator.submit(
+      formVersionId = "version-v6",
+      localCaseUuid = "local-case-1",
+      localSubmissionUuid = "local-submission-1",
+      answers = consistentAnswers(),
+      fallbackRegistrationDate = LocalDate.now(),
+    )
+
+    assertTrue(result.isFailure)
+    val error = result.exceptionOrNull() as DynamicFormSubmissionException.BeneficiaryCreationFailed
+    assertEquals(422, error.httpCode)
+    assertEquals("UNPROCESSABLE", error.errorCode)
+    assertTrue(error.fieldErrors.isEmpty())
     assertEquals(0, formSubmissionApi.callCount)
   }
 

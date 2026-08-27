@@ -56,9 +56,10 @@ private data class LabelValue(val label: String, val value: String, val purple: 
  * Identity + clinical-summary card on the beneficiary profile.
  *
  * Mobile (per the purple Figma board): header (avatar, name|age, Edit), a
- * single-column inline "Label : Value" list (Village/Pada/Husband/Mobile),
- * a Status | Risk | DOB | Weight stat strip with vertical dividers, then a
- * full-width Diagnosis chip row.
+ * single-column inline "Label : Value" list (Village/Pada/Mobile),
+ * a Status | Risk | DOB stat strip with vertical dividers, then a
+ * full-width Diagnosis chip row. Husband's Name and Weight are intentionally
+ * omitted from the profile card display.
  *
  * Tablet keeps the wider 3-column grid layout per the tablet frame.
  */
@@ -130,7 +131,13 @@ private fun HeaderRow(
         )
       }
       Text(
-        text = stringResource(R.string.beneficiary_profile_name_age, profile.name, profile.ageLabel),
+        // CR-022g: a locally enrolled beneficiary has no age yet (the mother form does not capture
+        // one), and the "%1$s | %2$s" template would leave a dangling separator after her name.
+        text = if (profile.ageLabel.isBlank()) {
+          profile.name
+        } else {
+          stringResource(R.string.beneficiary_profile_name_age, profile.name, profile.ageLabel)
+        },
         style = SerifTitleLarge,
         color = NeutralG400,
         maxLines = 1,
@@ -191,7 +198,7 @@ private fun InlineFieldList(fields: List<LabelValue>, modifier: Modifier = Modif
 }
 
 /**
- * Mobile stat strip: Status | Risk | DOB | Weight,
+ * Mobile stat strip: Status | Risk | DOB,
  * separated by thin vertical dividers per the design.
  */
 @Composable
@@ -217,29 +224,7 @@ private fun StatStrip(profile: BeneficiaryProfile, modifier: Modifier = Modifier
     ) {
       StatDate(profile.dob.orEmpty())
     }
-    StripDivider()
-    StatColumn(
-      label = stringResource(R.string.beneficiary_profile_label_weight),
-      modifier = Modifier.weight(1f),
-    ) {
-      WeightChip(profile.weight.orEmpty())
-    }
   }
-}
-
-/** Weight value in a pink chip per the design frame. */
-@Composable
-private fun WeightChip(value: String) {
-  Text(
-    text = value,
-    style = MaterialTheme.typography.titleMedium,
-    color = RiskHigh,
-    maxLines = 1,
-    overflow = TextOverflow.Ellipsis,
-    modifier = Modifier
-      .background(RiskHighSurface, RoundedCornerShape(6.dp))
-      .padding(horizontal = 10.dp, vertical = 4.dp),
-  )
 }
 
 @Composable
@@ -381,28 +366,28 @@ private fun DiagnosisChip(text: String) {
   )
 }
 
-/** Mobile inline list: Village, Pada, Husband's Name, Mobile No — per the board. */
+/** Mobile inline list: Village, Pada, Mobile No — per the board. Husband's Name is hidden here. */
 @Composable
 private fun BeneficiaryProfile.inlineFields(): List<LabelValue> = listOf(
   LabelValue(stringResource(R.string.beneficiary_profile_label_village), village),
   LabelValue(stringResource(R.string.beneficiary_profile_label_pada), pada),
-  LabelValue(stringResource(R.string.beneficiary_profile_label_husband), husbandName),
   LabelValue(stringResource(R.string.beneficiary_profile_label_mobile), mobileNumber),
 )
 
-/** Tablet grid pairs: MOTHER shows LMP/EDD, CHILD shows DOB/Weight. */
+/**
+ * Tablet grid pairs: MOTHER shows LMP/EDD, CHILD shows DOB. Husband's Name and Weight
+ * are intentionally excluded from the profile card display.
+ */
 @Composable
 private fun BeneficiaryProfile.gridFields(): List<LabelValue> {
   val village = LabelValue(stringResource(R.string.beneficiary_profile_label_village), village)
   val pada = LabelValue(stringResource(R.string.beneficiary_profile_label_pada), pada)
-  val husband = LabelValue(stringResource(R.string.beneficiary_profile_label_husband), husbandName)
   val mobile = LabelValue(stringResource(R.string.beneficiary_profile_label_mobile), mobileNumber)
   return if (type == BeneficiaryType.MOTHER) {
     listOf(
       village,
       pada,
       LabelValue(stringResource(R.string.beneficiary_profile_label_lmp), lmp.orEmpty(), purple = true),
-      husband,
       mobile,
       LabelValue(stringResource(R.string.beneficiary_profile_label_edd), edd.orEmpty(), purple = true),
     )
@@ -411,9 +396,7 @@ private fun BeneficiaryProfile.gridFields(): List<LabelValue> {
       village,
       pada,
       LabelValue(stringResource(R.string.beneficiary_profile_label_dob), dob.orEmpty()),
-      husband,
       mobile,
-      LabelValue(stringResource(R.string.beneficiary_profile_label_weight), weight.orEmpty()),
     )
   }
 }

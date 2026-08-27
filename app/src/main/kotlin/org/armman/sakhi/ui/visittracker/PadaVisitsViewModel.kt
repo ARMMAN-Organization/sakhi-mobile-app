@@ -4,19 +4,25 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.armman.sakhi.data.visit.Visit
 import org.armman.sakhi.data.visit.VisitRepository
+import org.armman.sakhi.data.visit.VisitStatus
 import org.armman.sakhi.data.visit.VisitType
 import javax.inject.Inject
 
+private const val SEARCH_DEBOUNCE_MS = 500L
+
 /**
- * UI state for a single pada's visit list. [visitsByType] holds both tabs'
- * filtered lists so the swipe pager can show the adjacent page's real content.
+ * UI state for a single pada's visit list. [visitsByType] holds both tabs' lists so the swipe
+ * pager can show the adjacent page's real content.
  */
 data class PadaVisitsUiState(
   val isLoading: Boolean = true,
@@ -28,72 +34,82 @@ data class PadaVisitsUiState(
   val openCount: Int = 0,
   val referralCount: Int = 0,
 ) {
-  /** Convenience: the currently selected tab's filtered list. */
+  /** Convenience: the currently selected tab's list. */
   val visits: List<Visit>
     get() = visitsByType[selectedTab].orEmpty()
 }
 
+/**
+ * Backed by `GET /padas/{padaId}/visits`: one call per tab (each returns both tabs' counts, but
+ * only its own tab's rows), refetched together on load, retry, and search. Search is exact-match
+ * server-side (encrypted names — no partial/fuzzy match), so typing is debounced rather than
+ * filtered live like the old client-side mock.
+ */
 @HiltViewModel
 class PadaVisitsViewModel @Inject constructor(
   private val visitRepository: VisitRepository,
   savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
-  private val pada: String = savedStateHandle[NAV_ARG_PADA] ?: ""
+  private val padaId: String = savedStateHandle[NAV_ARG_PADA_ID] ?: ""
+  private val padaName: String = savedStateHandle[NAV_ARG_PADA_NAME] ?: ""
 
-  private val _uiState = MutableStateFlow(PadaVisitsUiState(pada = pada))
+  private val _uiState = MutableStateFlow(PadaVisitsUiState(pada = padaName))
   val uiState: StateFlow<PadaVisitsUiState> = _uiState.asStateFlow()
 
-  private var padaVisits: List<Visit> = emptyList()
+  /** Emits every keystroke; [SEARCH_DEBOUNCE_MS] later the latest value triggers a real reload. */
+  private val searchQueryChanges = MutableSharedFlow<String>(extraBufferCapacity = 1)
 
   init {
     loadVisits()
+    viewModelScope.launch {
+      searchQueryChanges
+        .debounce(SEARCH_DEBOUNCE_MS)
+        .distinctUntilChanged()
+        .collect { fetchVisits(it) }
+    }
   }
 
-  /** Loads (or reloads after an error) this pada's visits for today. */
+  /** Loads (or reloads after an error/retry) both tabs for the current search query. */
   fun loadVisits() {
-    _uiState.update { it.copy(isLoading = true, hasError = false) }
-    viewModelScope.launch {
-      try {
-        padaVisits = visitRepository.getTodaysVisits().filter { it.pada == pada }
-        _uiState.update { state ->
-          state.copy(
-            isLoading = false,
-            openCount = padaVisits.count { it.visitType == VisitType.OPEN },
-            referralCount = padaVisits.count { it.visitType == VisitType.REFERRAL_FOLLOWUP },
-          )
-        }
-        refreshList()
-      } catch (e: Exception) {
-        // Generic error state for the UI; technical detail must not leak to users.
-        _uiState.update { it.copy(isLoading = false, hasError = true) }
-      }
-    }
+    viewModelScope.launch { fetchVisits(_uiState.value.searchQuery) }
   }
 
   fun onTabSelected(tab: VisitType) {
     _uiState.update { it.copy(selectedTab = tab) }
-    refreshList()
   }
 
+  /** Updates the input immediately; the network reload is debounced (see [searchQueryChanges]). */
   fun onSearchQueryChanged(query: String) {
     _uiState.update { it.copy(searchQuery = query) }
-    refreshList()
+    searchQueryChanges.tryEmit(query)
   }
 
-  private fun refreshList() {
-    val s = _uiState.value
-    val matchesQuery = { visit: Visit ->
-      s.searchQuery.isBlank() ||
-        visit.beneficiaryName.contains(s.searchQuery.trim(), ignoreCase = true)
+  private suspend fun fetchVisits(search: String) {
+    _uiState.update { it.copy(isLoading = true, hasError = false) }
+    try {
+      val trimmedSearch = search.trim().takeIf { it.isNotBlank() }
+      val open = visitRepository.getVisits(padaId, VisitStatus.OPEN, search = trimmedSearch)
+      val referral = visitRepository.getVisits(padaId, VisitStatus.REFERRAL_FOLLOW_UP, search = trimmedSearch)
+      _uiState.update {
+        it.copy(
+          isLoading = false,
+          openCount = open.openCount,
+          referralCount = open.referralFollowUpCount,
+          visitsByType = mapOf(
+            VisitType.OPEN to open.visits,
+            VisitType.REFERRAL_FOLLOWUP to referral.visits,
+          ),
+        )
+      }
+    } catch (e: Exception) {
+      // Generic error state for the UI; technical detail must not leak to users.
+      _uiState.update { it.copy(isLoading = false, hasError = true) }
     }
-    val lists = VisitType.entries.associateWith { type ->
-      padaVisits.filter { it.visitType == type && matchesQuery(it) }
-    }
-    _uiState.update { it.copy(visitsByType = lists) }
   }
 
   companion object {
-    const val NAV_ARG_PADA = "pada"
+    const val NAV_ARG_PADA_ID = "padaId"
+    const val NAV_ARG_PADA_NAME = "padaName"
   }
 }

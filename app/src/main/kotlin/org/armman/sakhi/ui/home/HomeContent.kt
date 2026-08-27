@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -44,21 +45,34 @@ import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG400
 import org.armman.sakhi.ui.theme.NeutralG50
+import org.armman.sakhi.ui.theme.NeutralG75
 import org.armman.sakhi.ui.theme.Primary
 import org.armman.sakhi.ui.theme.RiskHigh
 import org.armman.sakhi.ui.theme.StatusSuccess
 import org.armman.sakhi.ui.theme.White
 import org.armman.sakhi.ui.theme.softShadow
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-/** Success-state body of the Home dashboard: Sakhi row, cards and bottom bar. */
+/**
+ * Success-state body of the Home dashboard: Sakhi row, cards and bottom bar.
+ *
+ * M3: cards render [DashboardSummary]'s real API fields. [ActiveVisitsCard] and
+ * [ActiveBeneficiariesCard] are 2-tile rows per the confirmed design (bharath, 2026-08-17) —
+ * [DashboardSummary.overdueVisitsCount] + [DashboardSummary.dueVisitsCount] are combined into a
+ * single "Open" figure, with [DashboardSummary.endingSoonVisitsCount] broken out alongside it, and
+ * [DashboardSummary.accompaniedReferralsCount] is not shown on Home (no tile for it in the
+ * design) — see docs/test-cases/dashboard-visit-tracker-api.md for the full field mapping.
+ */
 @Composable
 internal fun HomeContent(
   summary: DashboardSummary,
+  pendingUploadCount: Int,
   onAllBeneficiaries: () -> Unit = {},
   onSeeVisitTracker: () -> Unit = {},
   onRegisterNew: () -> Unit = {},
+  onDataUploadClick: () -> Unit = {},
 ) {
   Column(modifier = Modifier.fillMaxSize()) {
     Column(
@@ -68,7 +82,7 @@ internal fun HomeContent(
         .verticalScroll(rememberScrollState())
         .padding(horizontal = Dimens.ItemSpacing, vertical = Dimens.ScreenPadding),
     ) {
-      SakhiRow(summary)
+      SakhiRow(summary, pendingUploadCount, onDataUploadClick)
       ActiveVisitsCard(summary, onSeeVisitTracker)
       ActiveBeneficiariesCard(summary)
     }
@@ -78,10 +92,12 @@ internal fun HomeContent(
 
 /** Sakhi name + Data Upload pill on one row, "Updated" caption under the pill. */
 @Composable
-private fun SakhiRow(summary: DashboardSummary) {
-  val updatedOn = summary.lastUploadedOn.format(
-    DateTimeFormatter.ofPattern("EEE, d MMM", Locale.getDefault()),
-  )
+private fun SakhiRow(summary: DashboardSummary, pendingUploadCount: Int, onDataUploadClick: () -> Unit) {
+  val updatedOn = summary.lastSyncedAt?.let {
+    DateTimeFormatter.ofPattern("EEE, d MMM", Locale.getDefault())
+      .withZone(ZoneId.systemDefault())
+      .format(it)
+  }
   Row(
     horizontalArrangement = Arrangement.SpaceBetween,
     verticalAlignment = Alignment.Top,
@@ -89,24 +105,29 @@ private fun SakhiRow(summary: DashboardSummary) {
   ) {
     // Name centers against the pill's height; caption centers under the pill.
     val isTabletRow = LocalConfiguration.current.screenWidthDp >= Dimens.TabletMinWidthDp
-    val pillHeight = if (isTabletRow) Dimens.ButtonHeightTablet else Dimens.ButtonHeight
+    val pillHeight = if (isTabletRow) Dimens.DataUploadPillHeightTablet else Dimens.DataUploadPillHeight
     Text(
       text = summary.sakhiName,
       style = MaterialTheme.typography.headlineSmall,
       color = NeutralG400,
       maxLines = 1,
       overflow = TextOverflow.Ellipsis,
+      // Cards below (e.g. "Active Visits") sit inside a SummaryCard with its own
+      // Dimens.ItemSpacing inner padding on top of this row's outer padding, so their title
+      // text starts one extra ItemSpacing in from the screen edge. Match that here so the
+      // Sakhi's name lines up with "Active Visits"/"Active Beneficiaries" below it.
       modifier = Modifier
         .weight(1f)
-        .padding(end = Dimens.SmallSpacing)
+        .padding(start = Dimens.ItemSpacing, end = Dimens.SmallSpacing)
         .height(pillHeight)
         .wrapContentHeight(Alignment.CenterVertically),
     )
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
       val isTablet = LocalConfiguration.current.screenWidthDp >= Dimens.TabletMinWidthDp
-      DataUploadPill(pendingCount = summary.pendingUploadCount)
+      DataUploadPill(pendingCount = pendingUploadCount, onClick = onDataUploadClick)
       Text(
-        text = stringResource(R.string.home_updated_on, updatedOn),
+        text = updatedOn?.let { stringResource(R.string.home_updated_on, it) }
+          ?: stringResource(R.string.home_never_synced),
         style = if (isTablet) {
           MaterialTheme.typography.bodyLarge
         } else {
@@ -120,13 +141,21 @@ private fun SakhiRow(summary: DashboardSummary) {
 }
 
 @Composable
-private fun DataUploadPill(pendingCount: Int) {
+private fun DataUploadPill(pendingCount: Int, onClick: () -> Unit) {
   val isTablet = LocalConfiguration.current.screenWidthDp >= Dimens.TabletMinWidthDp
   val badgeSize = if (isTablet) 28.dp else 24.dp
+  // Nothing left to upload: the pill goes inert (grey, unclickable) rather than staying an
+  // actionable-looking purple CTA with no action left to take.
+  val allUploaded = pendingCount <= 0
   Button(
-    onClick = { /* no-op: upload flow not built yet */ },
+    onClick = onClick,
+    enabled = !allUploaded,
+    colors = ButtonDefaults.buttonColors(
+      disabledContainerColor = NeutralG75,
+      disabledContentColor = White,
+    ),
     contentPadding = PaddingValues(horizontal = Dimens.PillButtonPaddingH),
-    modifier = Modifier.height(if (isTablet) Dimens.ButtonHeightTablet else Dimens.ButtonHeight),
+    modifier = Modifier.height(if (isTablet) Dimens.DataUploadPillHeightTablet else Dimens.DataUploadPillHeight),
   ) {
     if (pendingCount > 0) {
       Box(
@@ -159,12 +188,20 @@ private fun DataUploadPill(pendingCount: Int) {
   }
 }
 
+/**
+ * Open (= [DashboardSummary.overdueVisitsCount] + [DashboardSummary.dueVisitsCount]) / Pending
+ * Referral Follow-up — 2 tiles per the confirmed design. The Open tile also breaks out
+ * [DashboardSummary.endingSoonVisitsCount] in purple, both on the value line ("12 (2)") and as an
+ * "(Ending)" caption suffix, matching the Figma Home board. The ending count is a subset of Open,
+ * not additional to it — always shown, including "(0)", so the wiring is visually verifiable even
+ * against test accounts with nothing ending soon.
+ */
 @Composable
 private fun ActiveVisitsCard(summary: DashboardSummary, onSeeVisitTracker: () -> Unit) {
-  val visits = summary.activeVisits
-  val month = visits.month.format(DateTimeFormatter.ofPattern("MMM yyyy", Locale.getDefault()))
   val isTablet = LocalConfiguration.current.screenWidthDp >= Dimens.TabletMinWidthDp
-  SummaryCard(title = stringResource(R.string.home_active_visits), trailingLabel = month) {
+  val openVisitsCount = summary.overdueVisitsCount + summary.dueVisitsCount
+  val endingSoonCount = summary.endingSoonVisitsCount
+  SummaryCard(title = stringResource(R.string.home_active_visits)) {
     Row(
       horizontalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
       modifier = Modifier.fillMaxWidth().padding(top = Dimens.ItemSpacing),
@@ -172,20 +209,20 @@ private fun ActiveVisitsCard(summary: DashboardSummary, onSeeVisitTracker: () ->
       StatTile(
         icon = painterResource(R.drawable.ic_calendar_blank),
         value = buildAnnotatedString {
-          append(visits.openCount.toString())
-          withStyle(SpanStyle(color = Primary)) { append(" (${visits.endingCount})") }
+          append(openVisitsCount.toString())
+          append(" ")
+          withStyle(SpanStyle(color = Primary)) { append("($endingSoonCount)") }
         },
         caption = buildAnnotatedString {
           append(stringResource(R.string.home_open))
-          withStyle(SpanStyle(color = Primary)) {
-            append(" " + stringResource(R.string.home_ending))
-          }
+          append("\n")
+          withStyle(SpanStyle(color = Primary)) { append(stringResource(R.string.home_ending)) }
         },
         modifier = Modifier.weight(1f),
       )
       StatTile(
-        icon = painterResource(R.drawable.ic_referral),
-        value = buildAnnotatedString { append(visits.pendingReferralCount.toString()) },
+        icon = painterResource(R.drawable.ic_users_round),
+        value = buildAnnotatedString { append(summary.pendingFollowUpsCount.toString()) },
         caption = buildAnnotatedString { append(stringResource(R.string.home_pending_referral)) },
         modifier = Modifier.weight(1f),
       )
@@ -206,24 +243,32 @@ private fun ActiveVisitsCard(summary: DashboardSummary, onSeeVisitTracker: () ->
   }
 }
 
+/**
+ * Mothers / Infants — 2 tiles per the confirmed design, each showing the active count with its
+ * high-risk subset alongside in red ("21 | 8"), replacing the earlier percent-only display.
+ * Accompanied Referrals is not shown on Home (bharath, 2026-08-17) —
+ * [DashboardSummary.accompaniedReferralsCount] is still fetched and modeled, just not rendered
+ * here. [DashboardSummary.totalActiveBeneficiaries] is shown as the card's trailing label.
+ */
 @Composable
 private fun ActiveBeneficiariesCard(summary: DashboardSummary) {
-  val b = summary.activeBeneficiaries
-  val isTablet = LocalConfiguration.current.screenWidthDp >= Dimens.TabletMinWidthDp
-  SummaryCard(title = stringResource(R.string.home_active_beneficiaries)) {
+  SummaryCard(
+    title = stringResource(R.string.home_active_beneficiaries),
+    trailingLabel = stringResource(R.string.home_active_beneficiaries_total, summary.totalActiveBeneficiaries),
+  ) {
     Row(
       horizontalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
       modifier = Modifier.fillMaxWidth().padding(top = Dimens.ItemSpacing),
     ) {
       StatTile(
         icon = painterResource(R.drawable.ic_woman),
-        value = totalWithRisk(b.mothersTotal, b.mothersHighRisk, isTablet),
+        value = countWithHighRisk(summary.activeMothersCount, summary.activeMothersHighRiskCount),
         caption = buildAnnotatedString { append(stringResource(R.string.home_mothers)) },
         modifier = Modifier.weight(1f),
       )
       StatTile(
         icon = painterResource(R.drawable.ic_baby),
-        value = totalWithRisk(b.infantsTotal, b.infantsHighRisk, isTablet),
+        value = countWithHighRisk(summary.activeChildrenCount, summary.activeChildrenHighRiskCount),
         caption = buildAnnotatedString { append(stringResource(R.string.home_infants)) },
         modifier = Modifier.weight(1f),
       )
@@ -231,18 +276,13 @@ private fun ActiveBeneficiariesCard(summary: DashboardSummary) {
   }
 }
 
-/**
- * Formats the total with the high-risk count in red —
- * tablet design: "21 (8)"; mobile design: "21 | 8".
- */
-private fun totalWithRisk(total: Int, highRisk: Int, isTablet: Boolean) = buildAnnotatedString {
-  append(total.toString())
-  if (isTablet) {
-    withStyle(SpanStyle(color = RiskHigh)) { append(" ($highRisk)") }
-  } else {
-    withStyle(SpanStyle(color = NeutralG200)) { append(" | ") }
-    withStyle(SpanStyle(color = RiskHigh)) { append(highRisk.toString()) }
-  }
+/** "<count> | <highRiskCount>" with the high-risk number in [RiskHigh] red, per the Figma Active
+ * Beneficiaries tile. The "| N" segment is a subset of count, not additional to it. */
+@Composable
+private fun countWithHighRisk(count: Int, highRiskCount: Int) = buildAnnotatedString {
+  append(count.toString())
+  append(" | ")
+  withStyle(SpanStyle(color = RiskHigh)) { append(highRiskCount.toString()) }
 }
 
 /** Fixed bottom bar: All Beneficiaries and Register New each navigate via their callbacks. */

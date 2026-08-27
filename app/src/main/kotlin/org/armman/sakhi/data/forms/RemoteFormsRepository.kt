@@ -1,6 +1,8 @@
 package org.armman.sakhi.data.forms
 
+import android.util.Log
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import com.google.gson.JsonSyntaxException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -9,6 +11,11 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val KEY_PREFIX = "form_active_version_"
+
+/** Temporary diagnostic tag for the "couldn't load this visit's data" report (CR-026
+ * debugging) — fetchActiveVersion() swallows every exception into a bare null, so there was
+ * no way to tell offline/timeout/401/404/malformed-body apart from a bug report alone. */
+private const val TAG = "SakhiSync"
 
 /**
  * Real [FormsRepository] backed by `GET /forms/:formCode/active-version`.
@@ -28,7 +35,12 @@ class RemoteFormsRepository @Inject constructor(
   private val store: SecureKeyValueStore,
 ) : FormsRepository {
 
-  private val gson = Gson()
+  // registerTypeAdapter(FormVisibleWhen) — see FormVisibleWhenDeserializer's own doc: makes a
+  // malformed visibleWhen value (seen as a JSON array in real ANC_VISIT content) degrade to
+  // null instead of throwing and failing the WHOLE schemaJson parse.
+  private val gson = GsonBuilder()
+    .registerTypeAdapter(FormVisibleWhen::class.java, FormVisibleWhenDeserializer())
+    .create()
   private val mutex = Mutex()
   private val cachedByFormCode = mutableMapOf<String, FormVersion>()
 
@@ -58,7 +70,11 @@ class RemoteFormsRepository @Inject constructor(
   }
 
   private suspend fun fetchActiveVersion(formCode: String): FormVersion? = try {
-    formsApi.getActiveVersion(formCode)
+    val response = formsApi.getActiveVersion(formCode)
+    if (!response.isSuccessful) {
+      Log.w(TAG, "RemoteFormsRepository.fetchActiveVersion($formCode): HTTP ${response.code()} — ${response.errorBody()?.string()}")
+    }
+    response
       .takeIf { it.isSuccessful }
       ?.body()
       ?.takeIf { it.success }
@@ -66,6 +82,7 @@ class RemoteFormsRepository @Inject constructor(
   } catch (e: Exception) {
     // Offline, timeout, 404 (form not published yet), malformed body — all treated the same:
     // nothing new to cache, fall back to whatever's persisted/in-memory.
+    Log.w(TAG, "RemoteFormsRepository.fetchActiveVersion($formCode): threw ${e::class.simpleName} — ${e.message}")
     null
   }
 }

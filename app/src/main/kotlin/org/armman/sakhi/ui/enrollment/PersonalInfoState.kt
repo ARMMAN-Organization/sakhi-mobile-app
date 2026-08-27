@@ -276,7 +276,7 @@ data class PersonalInfoState(
 
   private fun nameError(value: String, required: Boolean = true): FieldError? = when {
     value.isBlank() -> if (required) requiredOrNull else null
-    !value.all { it.isLetter() || it.isWhitespace() } -> FieldError.NAME_SPECIAL_CHARS
+    !value.all(org.armman.sakhi.data.forms.BeneficiaryNameRule::isNameChar) -> FieldError.NAME_SPECIAL_CHARS
     else -> null
   }
 

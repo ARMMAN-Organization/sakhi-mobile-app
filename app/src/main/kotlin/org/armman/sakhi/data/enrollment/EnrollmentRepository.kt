@@ -2,8 +2,8 @@ package org.armman.sakhi.data.enrollment
 
 /**
  * Persistence boundary for submitted enrollments. The interface is shaped for
- * the future offline-first store + sync API; CR-015d ships an in-memory
- * implementation ([StaticEnrollmentRepository]).
+ * the offline-first store + sync API; the live implementation is
+ * [RoomEnrollmentRepository] (Room + encrypted store + background sync).
  */
 interface EnrollmentRepository {
 

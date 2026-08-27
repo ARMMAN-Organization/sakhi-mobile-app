@@ -5,8 +5,10 @@ import org.armman.sakhi.data.enrollment.BeneficiaryCaseDto
 import org.armman.sakhi.data.enrollment.BeneficiaryPiiDto
 import org.armman.sakhi.data.enrollment.ConsentDto
 import org.armman.sakhi.data.enrollment.CreateBeneficiaryRequestDto
+import org.armman.sakhi.data.enrollment.DuplicateAcknowledgement
 import org.armman.sakhi.data.enrollment.EnrollmentMappingException
 import org.armman.sakhi.data.enrollment.MotherDetailsDto
+import org.armman.sakhi.data.enrollment.joinFullName
 import org.armman.sakhi.data.lookup.LookupRepository
 import java.time.LocalDate
 import javax.inject.Inject
@@ -32,15 +34,11 @@ private object QuestionCode {
   const val DEAD_CHILDREN = "dead_children"
 
   /**
-   * 2026-07-22: the v5 schema's single combined name question
-   * (`beneficary_name_first_name_middle_name_last_name`) was replaced with three separate
-   * questions — confirmed against a real `active-version` response (`api-calls.jsonl`). The
-   * backend's `/beneficiaries` PII contract changed the same day, twice, both confirmed against
-   * real 400 bodies: it briefly wanted a single joined `fullName`, then switched to requiring
-   * `firstName`/`lastName` as discrete fields and rejecting `fullName` outright
-   * (`pii: Unrecognized key(s) in object: 'fullName'`). These three answers are now sent straight
-   * through to `BeneficiaryPiiDto.firstName`/`middleName`/`lastName` — see that DTO's doc before
-   * changing this again, the contract has been unstable.
+   * The FORM schema's own name question has flip-flopped, not just the API contract — see
+   * [BeneficiaryNameQuestionCodes]'s doc for the full timeline. As of 2026-08-06 the live schema
+   * is back to ONE combined `beneficiary_name` question, so these split codes are now the
+   * FALLBACK [beneficiaryFullName] reads only when no combined-name answer exists — kept rather
+   * than deleted because this exact field has already reverted once and may again.
    */
   const val FIRST_NAME = "first_name"
   const val MIDDLE_NAME = "middle_name"
@@ -54,7 +52,9 @@ private object QuestionCode {
   const val DATE_OF_BIRTH = "date_of_birth"
   const val ADDRESS = "enter_the_beneficiary_address"
   const val RCH_NUMBER = "input_rch_number"
-  const val REGISTRATION_DATE = "registrtion_date"
+  // Registration date is NOT declared here: the published schemas use two different spellings, so it
+  // is read via `answers.registrationDateAnswer()` / REGISTRATION_DATE_QUESTION_CODES instead of a
+  // single literal.
   const val DID_WE_RECEIVE_CONSENT = "did_we_receive_consent"
 }
 
@@ -91,10 +91,20 @@ class DynamicFormSubmissionMapper @Inject constructor(
   private val lookupRepository: LookupRepository,
 ) {
 
+  /**
+   * Builds the `POST /beneficiaries` body for this draft.
+   *
+   * [duplicateAcknowledgement] is non-null only on a resubmission the Sakhi explicitly confirmed
+   * after an FR-S-2.5 "is this a new pregnancy?" prompt. It sets both `acknowledgeDuplicate` (so the
+   * backend skips its duplicate check for this one call) and `case.previousBeneficiaryId` (so the new
+   * pregnancy is linked to the completed one instead of standing alone). On a first attempt it is
+   * null and neither field is sent — the backend must be free to detect the duplicate.
+   */
   suspend fun toCreateBeneficiaryRequest(
     localCaseUuid: String,
     answers: FormAnswers,
     fallbackRegistrationDate: LocalDate,
+    duplicateAcknowledgement: DuplicateAcknowledgement? = null,
   ): Result<CreateBeneficiaryRequestDto> = runCatching {
     val session = sessionStore.readSession() ?: throw EnrollmentMappingException.NoActiveSession
     val projectId = session.projectId ?: throw EnrollmentMappingException.MissingProjectId
@@ -131,13 +141,26 @@ class DynamicFormSubmissionMapper @Inject constructor(
       )
     }
 
-    val registrationDate = answers.valueOf(QuestionCode.REGISTRATION_DATE) ?: fallbackRegistrationDate.toString()
+    val registrationDate = answers.registrationDateAnswer() ?: fallbackRegistrationDate.toString()
+
+    // 2026-08-06: reached here once with a blank/space-only name because the live schema had
+    // silently moved from the split first/middle/last questions to ONE combined `beneficiary_name`
+    // field and this mapper hadn't caught up — the backend accepted it (its own validation only
+    // checks non-empty, and a lone space is technically non-empty to a naive check) and the
+    // Sakhi's actual typed name never made it into pii.fullName. Fail loudly here instead of
+    // repeating that: a blank result from beneficiaryFullName is always a mapping bug, not a
+    // legitimate "no name" case (Personal Info's own required gate already blocks Submit while
+    // it's genuinely unanswered).
+    val fullName = beneficiaryFullName(answers)
+    if (fullName.isBlank()) {
+      throw EnrollmentMappingException.CrossFieldValidation(
+        "Beneficiary name is required",
+      )
+    }
 
     CreateBeneficiaryRequestDto(
       pii = BeneficiaryPiiDto(
-        firstName = answers.valueOf(QuestionCode.FIRST_NAME).orEmpty(),
-        middleName = answers.valueOf(QuestionCode.MIDDLE_NAME)?.takeIf { it.isNotBlank() },
-        lastName = answers.valueOf(QuestionCode.LAST_NAME).orEmpty(),
+        fullName = fullName,
         phone = answers.valueOf(QuestionCode.MOBILE_NUMBER),
         alternatePhone = null,
         dateOfBirth = dateOfBirth,
@@ -161,7 +184,9 @@ class DynamicFormSubmissionMapper @Inject constructor(
         sakhiId = session.subjectId,
         caseType = "MOTHER",
         registrationDate = registrationDate,
-        previousBeneficiaryId = null,
+        // Links this pregnancy to the completed earlier one when the Sakhi confirmed a new
+        // pregnancy (FR-S-2.5). Null on a normal enrolment — there is nothing to link to.
+        previousBeneficiaryId = duplicateAcknowledgement?.existingBeneficiaryId,
         motherBeneficiaryId = null,
         beneficiaryTypeLookupId = beneficiaryTypeLookupId,
         caseTypeLookupId = caseTypeLookupId,
@@ -181,18 +206,20 @@ class DynamicFormSubmissionMapper @Inject constructor(
       // Mother-only (CR-018 covers this form; child enrollment is a separate, not-yet-built phase).
       childDetails = null,
       consent = ConsentDto(status = "GIVEN", date = registrationDate),
-      acknowledgeDuplicate = null,
+      // Sent as `true` only for a Sakhi-confirmed new pregnancy; omitted otherwise so the backend
+      // always runs its own duplicate detection on a first attempt.
+      acknowledgeDuplicate = duplicateAcknowledgement?.let { true },
     )
   }
 
   /**
    * The live CR-018 schema's `validationJson` (see `api-calls.jsonl`) declares `para <= gravida`,
    * `abortions <= gravida`, and `deadChildren <= livingChildren` as cross-field rules, but does
-   * NOT declare the `/beneficiaries` API's own `liveBirths + stillbirths + abortions == gravida`
+   * NOT declare the `/beneficiaries` API's own `liveBirths + stillbirths + abortions == gravida - 1`
    * check — [FormCrossFieldValidator] fully supports a `SUM_EQUALS` rule, it's just never sent by
    * the backend for this form version. Without this, a Sakhi can freely submit numbers that don't
    * add up and only find out at the very end via a raw backend 400
-   * (`motherDetails.gravida: liveBirths + stillbirths + abortions must equal gravida`). Mirrors
+   * (`motherDetails.gravida: liveBirths + stillbirths + abortions must equal gravida - 1`). Mirrors
    * [org.armman.sakhi.ui.enrollment.EnrollmentViewModel]'s equivalent static-flow check
    * ([org.armman.sakhi.data.enrollment.EnrollmentApiMapper.validateMotherCrossFieldRules]) so both
    * submission paths fail the same way, this early rather than round-tripping to the server first.
@@ -202,9 +229,9 @@ class DynamicFormSubmissionMapper @Inject constructor(
     val living = answers.valueOf(QuestionCode.LIVING_CHILDREN)?.toIntOrNull() ?: return
     val stillbirths = answers.valueOf(QuestionCode.STILL_BIRTHS)?.toIntOrNull() ?: return
     val abortions = answers.valueOf(QuestionCode.ABORTIONS)?.toIntOrNull() ?: return
-    if (living + stillbirths + abortions != gravida) {
+    if (living + stillbirths + abortions != gravida - FormObstetricRuleset.CURRENT_PREGNANCY) {
       throw EnrollmentMappingException.CrossFieldValidation(
-        "liveBirths + stillbirths + abortions must equal gravida",
+        "liveBirths + stillbirths + abortions must equal gravida - 1",
       )
     }
   }
@@ -219,4 +246,19 @@ class DynamicFormSubmissionMapper @Inject constructor(
    * injected by [DynamicFormSubmissionCoordinator] after `POST /beneficiaries` returns. */
   fun toFormSubmissionData(answers: FormAnswers): Map<String, Any?> =
     answers.singleValues + answers.multiValues
+
+  /**
+   * The beneficiary's `pii.fullName`, preferring the live schema's current combined-name field
+   * ([BeneficiaryNameQuestionCodes.COMBINED_CODES]) and falling back to joining the split
+   * [QuestionCode.FIRST_NAME]/[QuestionCode.MIDDLE_NAME]/[QuestionCode.LAST_NAME] questions if
+   * none of those are answered. The fallback exists because this exact field has already
+   * flip-flopped between the two shapes once (see [BeneficiaryNameQuestionCodes]'s doc) — reading
+   * both means the next flip doesn't silently reproduce today's blank-name bug.
+   */
+  private fun beneficiaryFullName(answers: FormAnswers): String =
+    BeneficiaryNameQuestionCodes.combinedNameAnswer(answers) ?: joinFullName(
+      first = answers.valueOf(QuestionCode.FIRST_NAME).orEmpty(),
+      middle = answers.valueOf(QuestionCode.MIDDLE_NAME),
+      last = answers.valueOf(QuestionCode.LAST_NAME).orEmpty(),
+    )
 }

@@ -80,6 +80,10 @@ fun EnrollmentScreen(
    * Consent/Personal Info/Health History steps — those steps are only still reachable if this
    * callback is left as a no-op, kept for tests/previews that don't wire real navigation. */
   onPregnantWomanSelected: () -> Unit = {},
+  /** CR-020: Child enrollment runs through the dynamic, backend-schema-driven
+   * `DynamicChildRegistrationScreen` (a standalone fork of the mother flow). Left as a no-op for
+   * tests/previews that don't wire real navigation. */
+  onChildSelected: () -> Unit = {},
   viewModel: EnrollmentViewModel = hiltViewModel(),
 ) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -126,7 +130,6 @@ fun EnrollmentScreen(
           title = stringResource(R.string.enrollment_back_title),
           subtitle = today,
           onBack = { if (inStepper) showExitDialog = true else exitFlow() },
-          onAvatarClick = onProfile,
         )
         Surface(
           color = White,
@@ -141,6 +144,7 @@ fun EnrollmentScreen(
               state = state,
               viewModel = viewModel,
               onPregnantWomanSelected = onPregnantWomanSelected,
+              onChildSelected = onChildSelected,
             )
           }
         }
@@ -187,6 +191,7 @@ private fun EnrollmentBody(
   state: EnrollmentUiState,
   viewModel: EnrollmentViewModel,
   onPregnantWomanSelected: () -> Unit,
+  onChildSelected: () -> Unit,
 ) {
   // Tab labels wrap to two lines on mobile; tablet shows them on one line
   // (QA 2026-07-13), so the resource's line break becomes a space there.
@@ -228,11 +233,19 @@ private fun EnrollmentBody(
         EnrollmentStep.ENTRY -> EntrySelector(
           selectedType = state.beneficiaryType,
           onSelect = { type ->
-            viewModel.selectBeneficiaryType(type)
-            // CR-018: Pregnant Woman now goes straight to the dynamic, backend-schema-driven
-            // form instead of this screen's own static Consent/Personal Info/Health History
-            // steps — those steps' fields are superseded by the MOTHER_REGISTRATION schema.
-            if (type == BeneficiaryType.PREGNANT_WOMAN) onPregnantWomanSelected()
+            // CR-018/CR-020: both beneficiary types now go straight to their dynamic,
+            // backend-schema-driven forms instead of this screen's static steps.
+            when (type) {
+              BeneficiaryType.PREGNANT_WOMAN -> {
+                viewModel.selectBeneficiaryType(type)
+                onPregnantWomanSelected()
+              }
+              // Child navigates straight to its own dynamic flow. selectBeneficiaryType(CHILD) is
+              // deliberately NOT called: in the (untouched) static EnrollmentViewModel it only
+              // emits a legacy "coming soon" toast and keeps the PW-only latch — which is now
+              // superseded by the real Children Register screen this navigates to.
+              BeneficiaryType.CHILD -> onChildSelected()
+            }
           },
         )
         else -> {
@@ -245,7 +258,6 @@ private fun EnrollmentBody(
               viewModel.goToStep(EnrollmentStep.entries[EnrollmentStep.CONSENT.ordinal + index])
             },
             distributeEvenly = true,
-            indicatorOverhang = Dimens.TabIndicatorOverhang,
             modifier = Modifier.padding(top = Dimens.ItemSpacing),
           )
           StepContent(state = state, viewModel = viewModel)

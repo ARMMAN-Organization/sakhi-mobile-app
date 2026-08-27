@@ -82,11 +82,15 @@ fun ConsentStep(
           .size(Dimens.ConsentPlayBadge)
           .background(MaterialTheme.colorScheme.primary, CircleShape),
       ) {
+        // ic_play_triangle, not ic_play_circle — ic_play_circle bundles its own ring outline
+        // around the triangle, which doubled up with this Box's own purple CircleShape background
+        // and rendered as an unwanted extra ring inside the badge (2026-08 QA). This is a plain
+        // triangle glyph with no built-in circle, meant to sit inside a circle we draw ourselves.
         Icon(
-          painter = painterResource(R.drawable.ic_play_circle),
+          painter = painterResource(R.drawable.ic_play_triangle),
           contentDescription = stringResource(R.string.enrollment_consent_play_video),
           tint = White,
-          modifier = Modifier.size(18.dp),
+          modifier = Modifier.size(16.dp),
         )
       }
     }

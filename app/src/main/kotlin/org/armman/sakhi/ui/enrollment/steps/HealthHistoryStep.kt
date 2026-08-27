@@ -15,6 +15,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
@@ -91,7 +93,7 @@ fun HealthHistoryStep(
 ) {
   val banner = state.showValidationBanner
   Column(
-    verticalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
+    verticalArrangement = Arrangement.spacedBy(Dimens.FormFieldSpacing),
     modifier = modifier.fillMaxWidth(),
   ) {
     Text(
@@ -100,6 +102,11 @@ fun HealthHistoryStep(
       color = NeutralG200,
       modifier = Modifier.padding(top = Dimens.ItemSpacing),
     )
+
+    // Banner sits right after the instruction (top of the field list), not after the last field —
+    // see the matching note in PersonalInfoStep. validationScrollTrigger scrolls this step back to
+    // y=0 on a blocked Next tap, so the banner needs to already be on that first screenful.
+    if (banner) ValidationErrorBanner(errors = state.validationErrors)
 
     // --- Current Pregnancy (Q35–44) ---
     SectionHeader(stringResource(R.string.enrollment_hh_section_current))
@@ -304,8 +311,6 @@ fun HealthHistoryStep(
       singleLine = false,
       minLines = 3,
     )
-
-    if (banner) ValidationErrorBanner(errors = state.validationErrors)
   }
 }
 
@@ -445,12 +450,20 @@ private fun TdDoseRow(
 
 @Composable
 private fun TdCheckbox(label: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
+  val focusManager = LocalFocusManager.current
+  val keyboardController = LocalSoftwareKeyboardController.current
   Row(
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing),
     modifier = Modifier
       .fillMaxWidth()
-      .clickable { onChecked(!checked) },
+      .clickable {
+        // See FormFields.SelectableRow: a still-focused text field above (e.g. RCH number) can
+        // otherwise bring the keyboard back even though this checkbox isn't a text input.
+        focusManager.clearFocus()
+        keyboardController?.hide()
+        onChecked(!checked)
+      },
   ) {
     Icon(
       painter = painterResource(

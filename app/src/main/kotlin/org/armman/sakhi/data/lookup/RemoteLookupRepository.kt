@@ -50,11 +50,18 @@ class RemoteLookupRepository @Inject constructor(
         return fetched
       }
 
-      // Live fetch failed (offline, 401, category not seeded, etc.) — fall back to whatever was
-      // persisted from a prior successful fetch, defaulting to empty if nothing ever was.
-      val persisted = readPersistedValues(categoryCode) ?: emptyList()
-      cachedByCategory[categoryCode] = persisted
-      persisted
+      // Live fetch failed (offline, 401, weak network, category not seeded, etc.). Fall back to a
+      // prior successful fetch if one was persisted — and cache that, it's real data. But if there
+      // is NOTHING persisted, return empty WITHOUT caching it: caching an empty result here would
+      // poison the in-memory cache for the whole process, so a later call (login/reconnect prefetch,
+      // or a retry once the network recovers) would keep getting empty instead of re-fetching. This
+      // is exactly what left `caseTypeLookupId` unresolvable at submit on a flaky network.
+      val persisted = readPersistedValues(categoryCode)
+      if (persisted != null) {
+        cachedByCategory[categoryCode] = persisted
+        return persisted
+      }
+      emptyList()
     }
   }
 

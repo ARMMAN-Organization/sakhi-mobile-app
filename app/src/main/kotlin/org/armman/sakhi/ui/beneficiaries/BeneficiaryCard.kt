@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -69,7 +71,7 @@ fun BeneficiaryCard(
       modifier = Modifier
         .fillMaxWidth()
         .height(Dimens.CardAccentHeight)
-        .background(beneficiary.riskLevel.accentColor()),
+        .background(if (beneficiary.isAssessed) beneficiary.riskLevel.accentColor() else NeutralG200),
     )
     Column(modifier = Modifier.padding(Dimens.ItemSpacing)) {
       Row(
@@ -77,7 +79,11 @@ fun BeneficiaryCard(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth(),
       ) {
-        RiskBadge(riskLevel = beneficiary.riskLevel)
+        if (beneficiary.isAssessed) {
+          RiskBadge(riskLevel = beneficiary.riskLevel)
+        } else {
+          UnassessedBadge()
+        }
         DaysRemainingBadge(days = beneficiary.daysRemaining)
       }
       Row(
@@ -106,7 +112,10 @@ fun BeneficiaryCard(
         }
         Text(
           text = beneficiary.name,
-          style = MaterialTheme.typography.titleLarge,
+          // headlineSmall (24sp Bold) is the style guide's "Prominent names" token — using it
+          // here (not titleLarge/18sp) keeps the name proportionate against the 14sp bodyMedium
+          // meta row (pada / ANC / Sch Date) below it.
+          style = MaterialTheme.typography.headlineSmall,
           color = NeutralG400,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
@@ -152,6 +161,9 @@ fun BeneficiaryCard(
             onClick = { onCall(beneficiary) },
             trailingIcon = painterResource(R.drawable.ic_phone_call),
             height = Dimens.SmallButtonHeight,
+            // Blank only for a row whose phone lookup failed (e.g. a Pada Visits card) —
+            // existing callers always pass a real number, so this is a no-op for them.
+            enabled = beneficiary.phoneNumber.isNotBlank(),
           )
           PrimaryButton(
             text = stringResource(R.string.beneficiaries_see_profile),
@@ -173,6 +185,7 @@ fun BeneficiaryCard(
             onClick = { onCall(beneficiary) },
             trailingIcon = painterResource(R.drawable.ic_phone_call),
             height = Dimens.SmallButtonHeight,
+            enabled = beneficiary.phoneNumber.isNotBlank(),
             modifier = Modifier.weight(1f),
           )
           PrimaryButton(
@@ -229,6 +242,35 @@ private fun MetaItem(
       maxLines = 1,
       overflow = TextOverflow.Ellipsis,
       modifier = Modifier.padding(start = 4.dp),
+    )
+  }
+}
+
+/**
+ * Neutral badge for a row with [Beneficiary.isAssessed] == false — a remote-only beneficiary
+ * this device has no on-device risk assessment for (SRS FR-S-2.2: risk is computed entirely
+ * on-device). Shown instead of [RiskBadge] so a placeholder `LOW` value is never read as a real
+ * clearance (M3 fix). Uses existing neutral tokens only — no new colors introduced.
+ */
+@Composable
+private fun UnassessedBadge() {
+  Row(
+    verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier
+      .background(NeutralG50, RoundedCornerShape(6.dp))
+      .padding(horizontal = 10.dp, vertical = 6.dp),
+  ) {
+    Icon(
+      imageVector = Icons.Filled.Info,
+      contentDescription = null,
+      tint = NeutralG200,
+      modifier = Modifier.size(16.dp),
+    )
+    Text(
+      text = stringResource(R.string.beneficiaries_not_yet_assessed),
+      style = MaterialTheme.typography.labelLarge,
+      color = NeutralG200,
+      modifier = Modifier.padding(start = 6.dp),
     )
   }
 }
