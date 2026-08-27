@@ -10,7 +10,15 @@ import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val KEY_DASHBOARD_CACHE = "dashboard_summary_cache"
+private const val KEY_DASHBOARD_CACHE_PREFIX = "dashboard_summary_cache_"
+
+/** The on-disk cache key is scoped per-Sakhi (by session subjectId), not a single device-global
+ * key. Without this, a device previously used by a different Sakhi would still surface her stale
+ * cached [DashboardSummary.sakhiName] (and counts) after a new Sakhi logs in but before her first
+ * successful fetch completes — the same "stale device cache" class of bug that
+ * [org.armman.sakhi.data.auth.CurrentUserRepository.clearIfDifferentUser] guards against for the
+ * `/me` profile, which this cache was missing. */
+private fun cacheKeyFor(subjectId: String) = "$KEY_DASHBOARD_CACHE_PREFIX$subjectId"
 
 /** Wire shape persisted to disk — [DashboardSummary.lastSyncedAt] is a `java.time.Instant`, which
  * plain Gson cannot safely round-trip without a custom adapter, so the cached shape stores it as
@@ -54,17 +62,23 @@ class RemoteDashboardRepository @Inject constructor(
   private val mutex = Mutex()
 
   override suspend fun getSummary(): DashboardSummary = mutex.withLock {
-    val fetched = fetchSummary()
-    if (fetched != null) {
-      store.putString(KEY_DASHBOARD_CACHE, gson.toJson(fetched.toCached()))
+    val sakhiId = sessionStore.readSession()?.subjectId
+
+    val fetched = fetchSummary(sakhiId)
+    if (fetched != null && sakhiId != null) {
+      store.putString(cacheKeyFor(sakhiId), gson.toJson(fetched.toCached()))
       return fetched
     }
-    readPersisted()?.toDomain()
+    if (fetched != null) {
+      // No session to key the cache by — still fine to show, just nothing to persist.
+      return fetched
+    }
+    sakhiId?.let { readPersisted(it) }?.toDomain()
       ?: throw IllegalStateException("No dashboard summary available online or cached")
   }
 
-  private suspend fun fetchSummary(): DashboardSummary? {
-    val sakhiId = sessionStore.readSession()?.subjectId ?: return null
+  private suspend fun fetchSummary(sakhiId: String?): DashboardSummary? {
+    if (sakhiId == null) return null
     return try {
       dashboardApi.getDashboard(sakhiId)
         .takeIf { it.isSuccessful }
@@ -78,8 +92,8 @@ class RemoteDashboardRepository @Inject constructor(
     }
   }
 
-  private fun readPersisted(): CachedDashboardSummary? {
-    val json = store.getString(KEY_DASHBOARD_CACHE) ?: return null
+  private fun readPersisted(sakhiId: String): CachedDashboardSummary? {
+    val json = store.getString(cacheKeyFor(sakhiId)) ?: return null
     return try {
       gson.fromJson(json, CachedDashboardSummary::class.java)
     } catch (e: JsonSyntaxException) {

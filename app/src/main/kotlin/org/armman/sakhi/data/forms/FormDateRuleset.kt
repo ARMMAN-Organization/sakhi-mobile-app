@@ -401,6 +401,11 @@ object FormDateRuleset {
       VaccinationAtBirthQuestionCodes.VITAMIN_K_DATE_QUESTION_CODE,
       -> Bounds(min = null, max = registrationDate)
 
+      // INC/infant-visit form's OPV-0 dose date — same "not in the future" rule as the
+      // vaccination-at-birth dates above, but kept as its own case since this question belongs to
+      // a different form (INC/INFANT_VISIT, not CHILD_REGISTRATION).
+      "opv_0_date" -> Bounds(min = null, max = registrationDate)
+
       // Measured against registrationDate rather than `reference` on purpose: the ViewModel's
       // eligibility gate counts days from the same registrationDate, and prevention must not be able
       // to disagree with detection. CHILD_REGISTRATION v2 does declare a registration-date question,
@@ -545,6 +550,13 @@ object FormDateRuleset {
       VaccinationAtBirthQuestionCodes.HEPATITIS_B_DATE_QUESTION_CODE,
       VaccinationAtBirthQuestionCodes.VITAMIN_K_DATE_QUESTION_CODE,
       -> Violation.VACCINATION_AT_BIRTH_DATE_IN_FUTURE.takeIf { value.isAfter(registrationDate) }
+
+      // INC/infant-visit form's OPV-0 dose date — same "not in the future" rule as the
+      // vaccination-at-birth dates above, but kept as its own case since this question belongs to
+      // a different form (INC/INFANT_VISIT, not CHILD_REGISTRATION). No form-agnostic "date in
+      // future" violation exists in this enum (every existing case is field-specific), so this
+      // reuses VACCINATION_AT_BIRTH_DATE_IN_FUTURE rather than introducing a new constant.
+      "opv_0_date" -> Violation.VACCINATION_AT_BIRTH_DATE_IN_FUTURE.takeIf { value.isAfter(registrationDate) }
 
       // Only the "not future" half is detectable here — the "> registration/LMP" half needs
       // motherLmpDate, which this function has no parameter for (see DELIVERY_DATE_IN_FUTURE's own

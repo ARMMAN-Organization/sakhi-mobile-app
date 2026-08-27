@@ -2,7 +2,13 @@ package org.armman.sakhi.data.beneficiaryprofile
 
 import kotlinx.coroutines.test.runTest
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
+import org.armman.sakhi.data.beneficiary.LocalBeneficiaryStatusOverrideStore
 import org.armman.sakhi.data.beneficiary.LocalEnrolmentBeneficiarySource
+import org.armman.sakhi.data.motherlink.BeneficiaryApi
+import org.armman.sakhi.data.motherlink.BeneficiaryDetailDto
+import org.armman.sakhi.data.motherlink.BeneficiaryDetailResponseDto
+import org.armman.sakhi.data.motherlink.BeneficiaryListResponseDto
+import org.armman.sakhi.data.motherlink.BeneficiaryPiiDto
 import org.armman.sakhi.data.childregistration.ChildFormDraftEntity
 import org.armman.sakhi.data.childregistration.ChildFormDraftPayload
 import org.armman.sakhi.data.childregistration.FakeChildFormDraftDao
@@ -31,6 +37,8 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import retrofit2.Response
+import java.io.IOException
 import java.time.LocalDate
 
 /** CR-022f cases PR-1, PR-2, PR-3, PR-9, PR-10. */
@@ -43,6 +51,8 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
   private lateinit var childDraftDao: FakeChildFormDraftDao
   private lateinit var secureStore: FakeSecureKeyValueStore
   private lateinit var localEnrolments: LocalEnrolmentBeneficiarySource
+  private lateinit var beneficiaryApi: FakeBeneficiaryApi
+  private lateinit var remoteProfiles: RemoteBeneficiaryProfileRepository
   private lateinit var repository: ScheduleBackedBeneficiaryProfileRepository
   private lateinit var formsRepository: FakeFormsRepository
 
@@ -64,12 +74,72 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
       secureStore,
       schedules,
       formsRepository,
+      LocalBeneficiaryStatusOverrideStore(secureStore),
     )
+    // MOTHER_A/MOTHER_B stand in for "known server-side, not enrolled on this device" ids — the
+    // visit-schedule tests below (PR-9, PR-10, supersession, lapse) only care about the schedule
+    // layered on top, not identity, so a minimal successful detail response is enough to let them
+    // resolve via the real remote path (CR-037) rather than the removed static fallback.
+    beneficiaryApi = FakeBeneficiaryApi(
+      detailResponses = mapOf(
+        MOTHER_A to { detailOk(MOTHER_A) },
+        MOTHER_B to { detailOk(MOTHER_B) },
+      ),
+    )
+    remoteProfiles = RemoteBeneficiaryProfileRepository(beneficiaryApi, secureStore, localEnrolments)
     repository = ScheduleBackedBeneficiaryProfileRepository(
       staticProfiles = StaticBeneficiaryProfileRepository(),
+      remoteProfiles = remoteProfiles,
       scheduleRepository = schedules,
       localEnrolments = localEnrolments,
     )
+  }
+
+  private fun detailOk(id: String) = Response.success(
+    BeneficiaryDetailResponseDto(
+      success = true,
+      message = "OK",
+      data = BeneficiaryDetailDto(
+        id = id,
+        caseType = "MOTHER",
+        currentStatus = "ACTIVE",
+        registrationDate = null,
+        consentRecords = null,
+        pii = BeneficiaryPiiDto(
+          id = "pii-$id",
+          fullName = "Static Mother $id",
+          villageId = null,
+          padaId = null,
+          healthSubCentreId = null,
+          phcId = null,
+          healthBlockId = null,
+          dateOfBirth = "2000-01-01T00:00:00.000Z",
+          sex = "FEMALE",
+          stateId = null,
+          districtId = null,
+          talukaId = null,
+        ),
+      ),
+    ),
+  )
+
+  /** Minimal [BeneficiaryApi] test double — only [detail] is exercised by
+   * [RemoteBeneficiaryProfileRepository]; [list]/[listAll] belong to the beneficiary-list repositories. */
+  private class FakeBeneficiaryApi(
+    var detailResponses: Map<String, () -> Response<BeneficiaryDetailResponseDto>> = emptyMap(),
+  ) : BeneficiaryApi {
+    var detailCallCount = 0
+
+    override suspend fun list(caseType: String, status: String): Response<BeneficiaryListResponseDto> =
+      throw UnsupportedOperationException("not used by this test")
+
+    override suspend fun listAll(caseType: String?, status: String?): Response<BeneficiaryListResponseDto> =
+      throw UnsupportedOperationException("not used by this test")
+
+    override suspend fun detail(id: String): Response<BeneficiaryDetailResponseDto> {
+      detailCallCount++
+      return detailResponses[id]?.invoke() ?: throw IOException("no detail configured for id: $id")
+    }
   }
 
   /**
@@ -253,13 +323,14 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
     }
 
   @Test
-  fun `the static half of the profile is still served`() = runTest {
+  fun `a remote-only beneficiary resolves via the real detail API, not the static fixture`() = runTest {
     val profile = repository.getBeneficiary(MOTHER_A)
 
-    // Identity and vitals remain static until a beneficiary-detail API exists — this CR replaces
-    // only the visit list.
+    // CR-037: the static fixture is no longer consulted on this path — identity comes from the
+    // real beneficiary-detail API. lastVisitStats stays empty regardless of source (see this
+    // repository's class doc): vitals mapping is still pending a confirmed JSON sample from BE.
     assertTrue(profile.name.isNotBlank())
-    assertTrue(profile.lastVisitStats.isNotEmpty())
+    assertTrue(profile.lastVisitStats.isEmpty())
   }
 
   @Test
@@ -267,6 +338,24 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
     val result = runCatching { repository.getBeneficiary("does-not-exist") }
 
     assertTrue(result.exceptionOrNull() is NoSuchElementException)
+  }
+
+  // CR-037 RF-1/RF-2 — routing between the local and remote sources.
+  @Test
+  fun `a local miss falls through to the remote detail API`() = runTest {
+    repository.getBeneficiary(MOTHER_A)
+
+    assertEquals(1, beneficiaryApi.detailCallCount)
+  }
+
+  @Test
+  fun `a local hit never calls the remote detail API`() = runTest {
+    val localId = "local-uuid-routing"
+    saveLocalEnrolment(localId, firstName = "Meena", lastName = "Gavit")
+
+    repository.getBeneficiary(localId)
+
+    assertEquals(0, beneficiaryApi.detailCallCount)
   }
 
   // PR-10
@@ -466,7 +555,10 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
   )
 
   private companion object {
-    /** Ids that exist in the static profile records, so the delegate resolves. */
+    /** Ids configured with a successful [FakeBeneficiaryApi] detail response in [setUp], so the
+     * remote-detail delegate resolves (CR-037) — these used to be ids in the now-removed static
+     * fixture; the name is kept for the visit-schedule tests below, which only care about the
+     * schedule layered on top, not which source resolved identity. */
     const val MOTHER_A = "b01"
     const val MOTHER_B = "b02"
   }

@@ -39,4 +39,20 @@ object ChildRegistrationQuestionCodes {
    * a child's own weight instead of [org.armman.sakhi.data.beneficiaryprofile
    * .ScheduleBackedBeneficiaryProfileRepository]'s mother-only `weight_kg` code. */
   const val CHILD_WEIGHT_AT_BIRTH_KG = "child_weight_at_birth_in_kg"
+
+  /** The infant's own name, as registered — CHILD_REGISTRATION's single "Infant Details" name
+   * question. Needed by [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel]'s
+   * `prefillFromChildRegistration` (INC1/INFANT_VISIT's `name_of_the_child` field). */
+  const val NAME_OF_THE_CHILD = "name_of_the_child"
+
+  /** The infant's sex, as registered — options `male`/`female`/`intersex_other`. Needed by
+   * [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel]'s `prefillFromChildRegistration`,
+   * which maps this vocabulary onto INFANT_VISIT's own `sex_of_the_infant` options
+   * (`male`/`female`/`transgender` — `intersex_other` maps to `transgender`, not a verbatim copy). */
+  const val SEX_OF_CHILD = "sex_of_child"
+
+  /** The infant's length at birth in centimetres. Needed by
+   * [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel]'s `prefillFromChildRegistration`
+   * (INFANT_VISIT's `length_of_the_baby_at_the_time_of_birth_in_cm` field). */
+  const val CHILD_LENGTH_AT_BIRTH_CM = "child_length_at_birth_in_cm"
 }

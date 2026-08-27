@@ -17,11 +17,12 @@ class RemoteDashboardRepositoryTest {
 
   private class FakeDashboardApi(
     var response: (() -> Response<DashboardResponseDto>)? = null,
+    private val expectedSakhiId: String = "sakhi-1",
   ) : DashboardApi {
     var callCount = 0
     override suspend fun getDashboard(sakhiId: String): Response<DashboardResponseDto> {
       callCount++
-      assertEquals("sakhi-1", sakhiId)
+      assertEquals(expectedSakhiId, sakhiId)
       return response?.invoke() ?: throw IOException("offline")
     }
   }
@@ -41,12 +42,13 @@ class RemoteDashboardRepositoryTest {
     dueVisits: Int? = 15,
     overdueVisits: Int? = 4,
     endingSoonVisits: Int? = 3,
+    sakhiId: String = "sakhi-1",
   ) = Response.success(
     DashboardResponseDto(
       success = true,
       message = "OK",
       data = DashboardDataDto(
-        sakhi = DashboardSakhiDto(id = "sakhi-1", name = sakhiName),
+        sakhi = DashboardSakhiDto(id = sakhiId, name = sakhiName),
         lastSyncedAt = lastSyncedAt,
         beneficiarySummary = BeneficiarySummaryDto(
           totalActiveBeneficiaries = totalActive,
@@ -71,9 +73,9 @@ class RemoteDashboardRepositoryTest {
     ),
   )
 
-  private fun session() = UserSession(
-    username = "sakhi1",
-    subjectId = "sakhi-1",
+  private fun session(username: String = "sakhi1", subjectId: String = "sakhi-1") = UserSession(
+    username = username,
+    subjectId = subjectId,
     roles = listOf("SAKHI"),
     projectId = null,
     geographyUnitId = null,
@@ -82,10 +84,15 @@ class RemoteDashboardRepositoryTest {
     accessTokenExpiresAtEpochSeconds = Long.MAX_VALUE,
   )
 
-  private fun repo(api: DashboardApi, store: FakeSecureKeyValueStore = FakeSecureKeyValueStore()): RemoteDashboardRepository {
+  private fun repo(
+    api: DashboardApi,
+    store: FakeSecureKeyValueStore = FakeSecureKeyValueStore(),
+    subjectId: String = "sakhi-1",
+    username: String = "sakhi1",
+  ): RemoteDashboardRepository {
     val sessionKvStore = FakeSecureKeyValueStore()
     val sessionStore = SessionStore(sessionKvStore)
-    sessionStore.saveSession(session())
+    sessionStore.saveSession(session(username = username, subjectId = subjectId))
     return RemoteDashboardRepository(api, sessionStore, store)
   }
 
@@ -110,15 +117,15 @@ class RemoteDashboardRepositoryTest {
   }
 
   @Test
-  fun `successful fetch persists to cache`() = runTest {
+  fun `successful fetch persists to a cache key scoped by the session's subjectId`() = runTest {
     val store = FakeSecureKeyValueStore()
-    repo(FakeDashboardApi(response = { ok() }), store).getSummary()
+    repo(FakeDashboardApi(response = { ok() }), store, subjectId = "sakhi-1").getSummary()
 
-    assertEquals(true, store.getString("dashboard_summary_cache") != null)
+    assertEquals(true, store.getString("dashboard_summary_cache_sakhi-1") != null)
   }
 
   @Test
-  fun `network failure falls back to last cached summary`() = runTest {
+  fun `network failure falls back to last cached summary for the same Sakhi`() = runTest {
     val store = FakeSecureKeyValueStore()
     repo(FakeDashboardApi(response = { ok(sakhiName = "Cached Sakhi") }), store).getSummary()
 
@@ -126,6 +133,33 @@ class RemoteDashboardRepositoryTest {
     val summary = offline.getSummary()
 
     assertEquals("Cached Sakhi", summary.sakhiName)
+  }
+
+  @Test
+  fun `a different Sakhi logging in on the same device never sees the prior Sakhi's cached name`() = runTest {
+    // Regression test: the on-disk cache used to be one device-global key, so a device
+    // previously used by "Meera" would still show her cached name on the dashboard after
+    // "Meena" logged in on it, until Meena's first successful fetch completed.
+    val store = FakeSecureKeyValueStore()
+    repo(
+      FakeDashboardApi(response = { ok(sakhiName = "Meera", sakhiId = "meera-id") }, expectedSakhiId = "meera-id"),
+      store,
+      subjectId = "meera-id",
+      username = "meera.sakhi",
+    ).getSummary()
+
+    // Meena logs in on the same device (same underlying cache store), but her own fetch is
+    // offline / not yet synced.
+    val meenaOffline = repo(
+      FakeDashboardApi(response = null, expectedSakhiId = "meena-id"),
+      store,
+      subjectId = "meena-id",
+      username = "meena.sakhi",
+    )
+
+    assertThrows(IllegalStateException::class.java) {
+      kotlinx.coroutines.runBlocking { meenaOffline.getSummary() }
+    }
   }
 
   @Test

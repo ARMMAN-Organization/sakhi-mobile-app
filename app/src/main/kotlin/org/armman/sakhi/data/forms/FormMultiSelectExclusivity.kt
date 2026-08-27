@@ -41,6 +41,12 @@ object FormMultiSelectExclusivity {
     VaccinationAtBirthQuestionCodes.VACCINATION_QUESTION_CODE to setOf(
       VaccinationAtBirthQuestionCodes.NONE_VALUE_CODE,
     ),
+    "is_the_baby_showing_any_danger_signs_since_last_visit" to setOf(
+      "no_abnormal_signs_symptoms",
+    ),
+    "have_you_been_experiencing_any_of_these_since_the_last_visit" to setOf(
+      "no_abnormal_signs_and_symptoms",
+    ),
   )
 
   /**

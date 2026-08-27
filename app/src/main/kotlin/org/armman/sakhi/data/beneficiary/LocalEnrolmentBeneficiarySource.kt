@@ -291,6 +291,29 @@ class LocalEnrolmentBeneficiarySource @Inject constructor(
   }
 
   /**
+   * Resolves a bare `geographyUnitId` (as returned directly by beneficiary-service on a
+   * remote-only beneficiary with no local enrolment draft, e.g. `pii.villageId`/`pii.padaId` from
+   * `GET /beneficiaries/:id`) to its display name, without needing a [FormAnswers] instance the way
+   * [resolveGeography] does (CR-037).
+   *
+   * Shares the same active-version geography array [resolveGeography] reads for a locally-enrolled
+   * answer, so a remote-only row and a locally-enrolled row resolve the same id to the same name.
+   * [isChild] picks which form's geography array to resolve against, mirroring [resolveGeography]'s
+   * own [formCode] parameter and [padaLabel]'s call-site convention — a mother and child id can
+   * collide across the two forms' arrays, so the caller's own known case type must select one.
+   *
+   * Returns null when [id] is blank or unresolved; callers fall back to their own placeholder (a
+   * dash), matching [resolveGeography]'s null contract.
+   */
+  suspend fun resolveGeographyId(id: String?, isChild: Boolean): String? {
+    val geographyId = id?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    val formCode = if (isChild) CHILD_REGISTRATION_FORM_CODE else MOTHER_REGISTRATION_FORM_CODE
+    val units = formsRepository.getActiveVersion(formCode)?.geography
+    return units?.firstOrNull { it.geographyUnitId == geographyId }?.name
+  }
+
+
+  /**
    * The mother's self-reported chronic conditions (Q58) plus a positive sickle cell finding (Q60),
    * resolved to the same display labels the enrollment form itself showed — feeds the profile
    * screen's Diagnosis chips (reported bug: the chips never appeared because nothing read these

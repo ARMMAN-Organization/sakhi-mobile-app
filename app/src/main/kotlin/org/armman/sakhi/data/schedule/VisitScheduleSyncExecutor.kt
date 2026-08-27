@@ -2,6 +2,7 @@ package org.armman.sakhi.data.schedule
 
 import android.util.Log
 import org.armman.sakhi.data.enrollment.EnrollmentSyncOutcome
+import org.armman.sakhi.data.visitform.VisitFormSyncScheduler
 import retrofit2.HttpException
 import java.io.IOException
 import javax.inject.Inject
@@ -36,6 +37,7 @@ private const val TAG = "SakhiSync"
 class VisitScheduleSyncExecutor @Inject constructor(
   private val repository: VisitScheduleRepository,
   private val api: VisitScheduleApi,
+  private val visitFormSyncScheduler: VisitFormSyncScheduler,
 ) {
 
   /**
@@ -50,9 +52,24 @@ class VisitScheduleSyncExecutor @Inject constructor(
     if (pending.isEmpty()) return EnrollmentSyncOutcome.COMPLETED
 
     var anyRetryableFailure = false
+    var anySynced = false
 
     pending.groupBy { it.localBeneficiaryId }.forEach { (_, schedules) ->
-      if (uploadBatch(schedules) == BatchOutcome.RETRYABLE) anyRetryableFailure = true
+      when (uploadBatch(schedules)) {
+        BatchOutcome.RETRYABLE -> anyRetryableFailure = true
+        BatchOutcome.SYNCED -> anySynced = true
+        BatchOutcome.DEFERRED, BatchOutcome.PERMANENT -> Unit
+      }
+    }
+
+    // Closes the same cross-queue race DynamicFormSyncExecutor already closes for
+    // Registration -> Schedule: the visit_form_drafts WorkManager job is independent and
+    // unordered, so if it already ran (and found NotYetSynced) before this schedule got its
+    // serverScheduleId, nothing would ever re-check it within the same Data Upload tap.
+    // Re-enqueuing now (REPLACE-safe, idempotent per VisitFormSyncScheduler's own doc) picks
+    // any now-eligible visit form drafts up immediately instead of requiring another tap.
+    if (anySynced) {
+      visitFormSyncScheduler.syncNow()
     }
 
     return if (anyRetryableFailure) {

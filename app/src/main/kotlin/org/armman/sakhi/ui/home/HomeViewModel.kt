@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -62,6 +61,12 @@ data class DuplicateReview(
 
 private const val SUBSCRIPTION_TIMEOUT_MS = 5_000L
 
+/** [FormUploadRecord.formCode] for the mother/child registration queues — same literals
+ * [org.armman.sakhi.data.beneficiary.LocalEnrolmentBeneficiarySource] and each queue's own
+ * repository already duplicate privately rather than sharing one constant across files. */
+private const val MOTHER_REGISTRATION_FORM_CODE = "MOTHER_REGISTRATION"
+private const val CHILD_REGISTRATION_FORM_CODE = "CHILD_REGISTRATION"
+
 /** One-shot Home events the screen reacts to (currently just the offline Data Upload toast) —
  * same "Channel + receiveAsFlow" shape as [org.armman.sakhi.ui.visitform.DynamicVisitFormEvent]. */
 sealed interface HomeEvent {
@@ -81,7 +86,6 @@ class HomeViewModel @Inject constructor(
 ) : ViewModel() {
 
   private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
-  val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
   private val _events = Channel<HomeEvent>(Channel.BUFFERED)
   val events: Flow<HomeEvent> = _events.receiveAsFlow()
@@ -102,6 +106,58 @@ class HomeViewModel @Inject constructor(
     uploadRecords
       .map { records -> records.count { it.syncStatus != EnrollmentSyncStatus.SYNCED } }
       .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS), 0)
+
+  /**
+   * Local mother-registration drafts not yet represented server-side — same [uploadRecords] source
+   * as [pendingUploadCount], narrowed to `formCode == "MOTHER_REGISTRATION"` and the identical
+   * "not yet synced" condition ([EnrollmentSyncStatus.SYNCED] exclusive). [EnrollmentSyncStatus]'s
+   * own doc defines SYNCED as exactly the point
+   * [org.armman.sakhi.data.enrollment.EnrollmentDraftEntity.remoteBeneficiaryId] /
+   * [org.armman.sakhi.data.forms.DynamicFormDraftEntity.remoteBeneficiaryId] gets populated, so this
+   * is the same "not yet synced" rule [org.armman.sakhi.data.beneficiary.OfflineFirstBeneficiaryRepository]
+   * applies via `remoteBeneficiaryId == null` — just read off the projection that's already reactive
+   * here instead of a second Room query.
+   *
+   * Feeds [uiState]'s overlay: a beneficiary registered while offline shows up in
+   * [DashboardSummary.activeMothersCount] the moment her draft is saved, not after the next sync +
+   * server refetch.
+   */
+  private val pendingMotherCount: Flow<Int> =
+    uploadRecords.map { records ->
+      records.count { it.formCode == MOTHER_REGISTRATION_FORM_CODE && it.syncStatus != EnrollmentSyncStatus.SYNCED }
+    }
+
+  /** Same as [pendingMotherCount], for the Children Register queue (`formCode ==
+   * "CHILD_REGISTRATION"`) — feeds [DashboardSummary.activeChildrenCount] in [uiState]. */
+  private val pendingChildCount: Flow<Int> =
+    uploadRecords.map { records ->
+      records.count { it.formCode == CHILD_REGISTRATION_FORM_CODE && it.syncStatus != EnrollmentSyncStatus.SYNCED }
+    }
+
+  /**
+   * Public dashboard state consumed by [HomeScreen]: [_uiState]'s raw server snapshot with
+   * [pendingMotherCount]/[pendingChildCount] added onto the three beneficiary-count fields
+   * ([DashboardSummary.activeMothersCount], [DashboardSummary.activeChildrenCount],
+   * [DashboardSummary.totalActiveBeneficiaries]) via [overlayPendingCounts]. Every other field on
+   * [DashboardSummary] — risk/referral/visit-due counts, sakhiName, lastSyncedAt — is left exactly
+   * as the server returned it; those genuinely need server-side computation and are out of scope
+   * for this overlay.
+   *
+   * Recomputed fresh from [_uiState] and the current pending counts on every emission rather than
+   * writing the overlaid numbers back into [_uiState] itself, so the raw server value [_uiState]
+   * holds — and later re-emits verbatim, e.g. from [refreshSummaryQuietly] — is never corrupted by
+   * an earlier overlay.
+   *
+   * [SharingStarted.Eagerly], not the [SUBSCRIPTION_TIMEOUT_MS]-gated `WhileSubscribed` used for
+   * [pendingUploadCount]/[uploadModalState] above: those are only read once [HomeScreen] actively
+   * collects them, but [uiState] is the primary state the screen (and this class's own callers, and
+   * tests reading `.value` directly) expect to be live from construction on — the same always-on
+   * contract the plain `_uiState.asStateFlow()` this replaces already had.
+   */
+  val uiState: StateFlow<HomeUiState> =
+    combine(_uiState, pendingMotherCount, pendingChildCount) { state, motherPending, childPending ->
+      overlayPendingCounts(state, motherPending, childPending)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, HomeUiState.Loading)
 
   /**
    * Watches [pendingUploadCount] for a sync finishing (count drops back to zero after being above
@@ -149,6 +205,27 @@ class HomeViewModel @Inject constructor(
       return
     }
     _uiState.value = HomeUiState.Success(refreshed)
+  }
+
+  /** Adds [motherPending]/[childPending] onto a [HomeUiState.Success]'s beneficiary-count fields;
+   * [HomeUiState.Loading]/[HomeUiState.Error] pass through unchanged since there's no summary to
+   * overlay onto. See [uiState]'s doc for why this recomputes rather than mutating [_uiState] in
+   * place. */
+  private fun overlayPendingCounts(
+    state: HomeUiState,
+    motherPending: Int,
+    childPending: Int,
+  ): HomeUiState {
+    if (state !is HomeUiState.Success) return state
+    if (motherPending == 0 && childPending == 0) return state
+    val summary = state.summary
+    return state.copy(
+      summary = summary.copy(
+        activeMothersCount = summary.activeMothersCount + motherPending,
+        activeChildrenCount = summary.activeChildrenCount + childPending,
+        totalActiveBeneficiaries = summary.totalActiveBeneficiaries + motherPending + childPending,
+      ),
+    )
   }
 
   private val _modalVisible = MutableStateFlow(false)

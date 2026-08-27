@@ -4,7 +4,9 @@ import com.google.gson.Gson
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
+import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
+import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.motherlink.BeneficiaryApi
 import org.armman.sakhi.data.motherlink.BeneficiaryDetailResponseDto
 import org.armman.sakhi.data.motherlink.BeneficiaryListItemDto
@@ -87,8 +89,30 @@ class RemoteBeneficiaryRepositoryTest {
       BeneficiaryListResponseDto(success = true, message = "OK", data = Gson().toJsonTree(rows.toList())),
     )
 
-  private fun repo(api: BeneficiaryApi, store: FakeSecureKeyValueStore = FakeSecureKeyValueStore()) =
-    RemoteBeneficiaryRepository(api, store)
+  private fun session(username: String = "sakhi1", subjectId: String = "sakhi-1") = UserSession(
+    username = username,
+    subjectId = subjectId,
+    roles = listOf("SAKHI"),
+    projectId = null,
+    geographyUnitId = null,
+    accessToken = "token",
+    refreshToken = "refresh",
+    accessTokenExpiresAtEpochSeconds = Long.MAX_VALUE,
+  )
+
+  private fun sessionStoreFor(subjectId: String, username: String = "sakhi1"): SessionStore {
+    val sessionStore = SessionStore(FakeSecureKeyValueStore())
+    sessionStore.saveSession(session(username = username, subjectId = subjectId))
+    return sessionStore
+  }
+
+  /** [repository] is the same [RemoteBeneficiaryRepository] instance across calls so tests can
+   * exercise its in-memory cache; pass a fresh one only when simulating a new process/app launch. */
+  private fun repo(
+    api: BeneficiaryApi,
+    store: FakeSecureKeyValueStore = FakeSecureKeyValueStore(),
+    subjectId: String = "sakhi-1",
+  ) = RemoteBeneficiaryRepository(api, sessionStoreFor(subjectId), store)
 
   private val today = LocalDate.of(2026, 8, 7)
 
@@ -208,15 +232,16 @@ class RemoteBeneficiaryRepositoryTest {
   }
 
   @Test
-  fun `persists a successful fetch`() = runTest {
+  fun `persists a successful fetch under a key scoped to the session's subjectId`() = runTest {
     val store = FakeSecureKeyValueStore()
-    repo(FakeBeneficiaryApi(listAllResponse = { ok(row()) }), store).fetchRemoteBeneficiaries(today)
+    repo(FakeBeneficiaryApi(listAllResponse = { ok(row()) }), store, subjectId = "sakhi-1")
+      .fetchRemoteBeneficiaries(today)
 
-    assertTrue(store.getString("remote_beneficiary_list_cache") != null)
+    assertTrue(store.getString("remote_beneficiary_list_cache_sakhi-1") != null)
   }
 
   @Test
-  fun `falls back to the persisted list when a later fetch fails`() = runTest {
+  fun `falls back to the persisted list when a later fetch fails, for the same Sakhi`() = runTest {
     val store = FakeSecureKeyValueStore()
     repo(FakeBeneficiaryApi(listAllResponse = { ok(row(id = "cached-1")) }), store)
       .fetchRemoteBeneficiaries(today)
@@ -233,6 +258,41 @@ class RemoteBeneficiaryRepositoryTest {
 
     api.listAllResponse = null // any further network attempt now fails
     assertEquals(listOf("remote-1"), repository.fetchRemoteBeneficiaries(today)?.map { it.id })
+  }
+
+  @Test
+  fun `a different Sakhi's session on the same disk store never reads the prior Sakhi's cache`() = runTest {
+    // Regression test: the disk cache used to be one device-global key, so a device previously
+    // used by "Meera" (or here, any prior Sakhi) would still surface her cached caseload after a
+    // different Sakhi logged in on it and her own fetch failed/hadn't synced yet.
+    val store = FakeSecureKeyValueStore()
+    repo(FakeBeneficiaryApi(listAllResponse = { ok(row(id = "meera-case")) }), store, subjectId = "meera-id")
+      .fetchRemoteBeneficiaries(today)
+
+    val meenaOffline = repo(FakeBeneficiaryApi(listAllResponse = null), store, subjectId = "meena-id")
+    assertNull(meenaOffline.fetchRemoteBeneficiaries(today))
+  }
+
+  @Test
+  fun `a different Sakhi's session never reads the prior Sakhi's in-memory cache either`() = runTest {
+    // Regression test: this repository is an app-wide singleton, so the in-memory `cached` field
+    // used to be unscoped too — a stale in-memory list would win over even a cold disk cache when
+    // a new Sakhi's session logged in within the same app process.
+    val api = FakeBeneficiaryApi(listAllResponse = { ok(row(id = "meera-case")) })
+    val store = FakeSecureKeyValueStore()
+    val sharedSessionSlot = FakeSecureKeyValueStore()
+
+    val meeraSession = SessionStore(sharedSessionSlot).apply { saveSession(session(subjectId = "meera-id")) }
+    val repository = RemoteBeneficiaryRepository(api, meeraSession, store)
+    repository.fetchRemoteBeneficiaries(today)
+
+    // Same repository instance, but the session underneath it now belongs to a different Sakhi
+    // and her fetch fails — must not fall back to Meera's in-memory list.
+    sharedSessionSlot.remove("session_json")
+    SessionStore(sharedSessionSlot).saveSession(session(subjectId = "meena-id"))
+    api.listAllResponse = null
+
+    assertNull(repository.fetchRemoteBeneficiaries(today))
   }
 
   @Test
@@ -279,7 +339,7 @@ class RemoteBeneficiaryRepositoryTest {
   @Test
   fun `a corrupted disk cache reads as absent, not a crash`() = runTest {
     val store = FakeSecureKeyValueStore()
-    store.putRawCorrupted("remote_beneficiary_list_cache")
+    store.putRawCorrupted("remote_beneficiary_list_cache_sakhi-1")
 
     assertNull(repo(FakeBeneficiaryApi(listAllResponse = null), store).fetchRemoteBeneficiaries(today))
   }

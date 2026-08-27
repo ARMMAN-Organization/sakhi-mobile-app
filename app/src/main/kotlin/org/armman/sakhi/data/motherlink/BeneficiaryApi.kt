@@ -140,13 +140,86 @@ data class SocioDemographicsDto(
   val childrenUnder5Count: Int?,
 )
 
+/** `motherCaseDetails` block of `GET /beneficiaries/:id` (CR-037) — MOTHER cases only; null on a
+ * CHILD case's response. */
+data class MotherCaseDetailsDto(
+  val lmpDate: String?,
+  val eddDate: String?,
+  val gravida: Int?,
+  val parity: Int?,
+  val heightCm: Double?,
+  val bmiAtRegistration: Double?,
+)
+
+/** `childCaseDetails` block of `GET /beneficiaries/:id` (CR-037) — CHILD cases only; null on a
+ * MOTHER case's response. [currentPhase] and [ccvOpeningRiskState] are BE's own documented known
+ * gaps as of this cycle: `currentPhase` is set once at enrolment and can go stale rather than
+ * advancing with the case (NN -> INC -> CCV), and `ccvOpeningRiskState` may read null even for a
+ * CCV-phase child until its write-path is exercised — not something this app can detect or correct
+ * client-side, so both are surfaced as-is rather than validated. */
+data class ChildCaseDetailsDto(
+  val currentPhase: String?,
+  val ccvOpeningRiskState: String?,
+)
+
+/** One `riskConditionSummaries` entry of `GET /beneficiaries/:id` (CR-037) — a single risk
+ * condition's latest grading. [conditionCode]/[conditionName]/[gradeScale] are all independently
+ * nullable per BE: they read null (not an error) when risk-referral-service is briefly unreachable
+ * at request time, so a caller must tolerate a summary with no name rather than treat it as
+ * malformed. [gradeScale] does not imply a different grade vocabulary — every [latestGrade] comes
+ * from the same shared 6-value set (`NORMAL, MILD, MODERATE, SEVERE, HIGH, CRITICAL`); it only
+ * describes which subset of those a given condition realistically produces. */
+data class RiskConditionSummaryDto(
+  val riskConditionId: String?,
+  val phase: String?,
+  val latestGrade: String?,
+  val latestAssessedAt: String?,
+  val everHighestGrade: String?,
+  val everAtRiskFlag: Boolean?,
+  val currentReferralTriggerFlag: Boolean?,
+  val currentHrVisitTriggerFlag: Boolean?,
+  val conditionCode: String?,
+  val conditionName: String?,
+  val gradeScale: String?,
+)
+
 data class BeneficiaryDetailDto(
   val id: String?,
+  /** `MOTHER` / `CHILD` — needed by the profile mapper (CR-037) to pick MOTHER vs CHILD case
+   * fields; earlier readers of this DTO ([RemoteMotherLinkRepository]) never needed it since their
+   * caller already knows the case type going in. */
+  val caseType: String? = null,
+  val currentStatus: String? = null,
+  val registrationDate: String? = null,
   val consentRecords: List<ConsentRecordDto>?,
   /** Only [BeneficiaryPiiDto.address]/[BeneficiaryPiiDto.mobileNumber] are read from here — every
-   * other `pii` property CR-031 needs already comes from the list row. */
+   * other `pii` property CR-031 needs already comes from the list row. CR-037's profile mapper
+   * additionally reads [BeneficiaryPiiDto.fullName]/[dateOfBirth]/[villageId]/[padaId] from the
+   * same block, since a remote-only beneficiary has no list row already cached to read them from. */
   val pii: BeneficiaryPiiDto? = null,
   val socioDemographics: SocioDemographicsDto? = null,
+  /** MOTHER-only; null on a CHILD case (CR-037). */
+  val motherCaseDetails: MotherCaseDetailsDto? = null,
+  /** CHILD-only; null on a MOTHER case (CR-037). */
+  val childCaseDetails: ChildCaseDetailsDto? = null,
+  /** Per-condition risk grading (CR-037) — empty (not null) for a beneficiary with no assessment
+   * yet, e.g. a "Not yet assessed" row. */
+  val riskConditionSummaries: List<RiskConditionSummaryDto>? = null,
+  /** BE-aggregated overall risk across every entry in [riskConditionSummaries]
+   * (`none`/`mild`/`moderate`/`high`) — worst grade wins, same rule as the pada visit-list badge.
+   * `none` when there are no summaries or none are graded (CR-037). A same-cycle `riskColor` field
+   * also exists on this response but is deliberately not modelled here: the app already derives its
+   * own risk colours from [org.armman.sakhi.data.beneficiary.RiskLevel] via
+   * [org.armman.sakhi.ui.components.RiskBadge], so a second, BE-asserted colour would be redundant
+   * at best and a second source of truth to keep in sync at worst. */
+  val riskLevel: String? = null,
+  /** Deliberately NOT modelled yet. `lastVisitVitals` is new on this endpoint this cycle
+   * (weight/BP/temperature/hemoglobin/MUAC/respiratory-rate extracted from the most recent visit's
+   * form data), but its exact JSON shape has not been confirmed against a live sample — mapping a
+   * guessed shape risks silently misreading a real clinical reading. Add the field and its mapping
+   * together, once a real response is available; until then [BeneficiaryProfile.lastVisitStats]
+   * stays empty for a beneficiary served by [RemoteBeneficiaryProfileRepository], same as it always
+   * has been for one served by [StaticBeneficiaryProfileRepository]. */
 )
 
 data class BeneficiaryDetailResponseDto(
@@ -160,8 +233,10 @@ data class BeneficiaryDetailResponseDto(
  * and Bearer token as every other service ([org.armman.sakhi.data.auth.AuthInterceptor]).
  *
  * Originally the mother-link picker's alone (CR-031); now also consumed by
- * [org.armman.sakhi.data.beneficiary.RemoteBeneficiaryRepository] for My Beneficiaries. Backend
- * caveats that shape how BOTH callers use it, verified against the live service:
+ * [org.armman.sakhi.data.beneficiary.RemoteBeneficiaryRepository] for My Beneficiaries, and by
+ * [org.armman.sakhi.data.beneficiaryprofile.RemoteBeneficiaryProfileRepository] for the beneficiary
+ * profile screen (CR-037). Backend caveats that shape how these callers use it, verified against the
+ * live service:
  *
  * 1. **No pagination.** The repository hardcodes `take: 50, orderBy createdAt desc` and returns no
  *    total. Above 50 rows the caller silently truncates — tracked as risk R3.

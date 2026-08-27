@@ -14,26 +14,30 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Serves the profile screen with **real** visit schedules while the rest of the profile stays
- * static (CR-022f).
- *
- * A deliberate half-step. Wiring the whole profile needs a beneficiary-detail API that does not
- * exist yet, but the visit list can be real today — and it is the part that proves the scheduling
- * engine works end to end. So this delegates to [StaticBeneficiaryProfileRepository] for identity,
- * vitals and diagnoses, and replaces only [BeneficiaryProfile.visits].
- *
- * What that fixes immediately: the static repository returns the *same five-row visit list for
- * every beneficiary*, so today two different women show identical visit histories. After this,
- * each shows her own schedule.
+ * Resolves the profile screen's beneficiary detail from whichever source actually has it, then
+ * layers a real, per-beneficiary visit schedule on top of the result (CR-022f):
+ *  - a locally enrolled beneficiary (this device has a draft/synced enrolment) resolves from
+ *    [LocalEnrolmentBeneficiarySource] — real identity, real diagnoses, own visit schedule.
+ *  - a remote-only beneficiary (no local draft — e.g. a "Not yet assessed" row sourced from
+ *    [org.armman.sakhi.data.beneficiary.RemoteBeneficiaryRepository]) resolves from
+ *    [RemoteBeneficiaryProfileRepository] against the real beneficiary-detail API (CR-037).
+ *    [StaticBeneficiaryProfileRepository]'s fourteen-sample-id fixture is no longer consulted on
+ *    this path — it previously threw for any real server id, which was the reported "We
+ *    couldn't load this beneficiary" bug; it remains bound only for CR-014's own unit tests.
  *
  * ### Still static, deliberately
- * The Visit Tracker, Dashboard and My Beneficiaries screens keep their hardcoded visit data until
- * CR-024. The tracker and this screen will therefore disagree for the rest of M2 — expected, and
- * called out in the demo script rather than left to be discovered.
+ * `lastVisitStats` stays empty for both sources: it comes from a completed visit's clinical
+ * outcome, which — per the last-visit-vitals endpoint BE shipped this cycle — has a confirmed
+ * source but not yet a confirmed JSON shape (see
+ * [org.armman.sakhi.data.motherlink.BeneficiaryDetailDto]'s doc). The Visit Tracker, Dashboard and
+ * My Beneficiaries screens also keep their own hardcoded visit data until CR-024 — this screen's
+ * visit list and theirs will therefore disagree for the rest of M2, expected and called out in
+ * the demo script rather than left to be discovered.
  */
 @Singleton
 class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
   private val staticProfiles: StaticBeneficiaryProfileRepository,
+  private val remoteProfiles: RemoteBeneficiaryProfileRepository,
   private val scheduleRepository: VisitScheduleRepository,
   private val localEnrolments: LocalEnrolmentBeneficiarySource,
 ) : BeneficiaryProfileRepository {
@@ -58,8 +62,16 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
         diagnoses = answers?.let { with(localEnrolments) { it.diagnosisLabels() } }.orEmpty(),
       )
     }
-      // Propagates NoSuchElementException for a genuinely unknown id, per the interface contract.
-      ?: staticProfiles.getBeneficiary(id)
+      // A remote-only beneficiary (no local enrolment draft on this device -- e.g. a "Not yet
+      // assessed" row from RemoteBeneficiaryRepository) resolves against the real beneficiary-
+      // detail API instead of the static fixture, which only ever knew fourteen sample ids and
+      // threw NoSuchElementException for any real server id (CR-037 -- the reported "We couldn't
+      // load this beneficiary" bug). staticProfiles is no longer consulted on this path; it
+      // remains bound only as StaticBeneficiaryProfileRepository's own dev/demo fixture data,
+      // referenced directly by CR-014's unit tests.
+      // Propagates NoSuchElementException for a genuinely unknown/unreachable id, per the
+      // interface contract.
+      ?: remoteProfiles.getBeneficiary(id)
 
     val schedules = scheduleRepository.getActiveForBeneficiary(id)
 
@@ -68,6 +80,12 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
     // showing none, and the screen renders a distinct empty state for it.
     return profile.copy(visits = schedules.toProfileVisits(LocalDate.now()))
   }
+
+  /** Delegates to [LocalEnrolmentBeneficiarySource.answersFor] — null for a remote-only
+   * beneficiary (no local CHILD_REGISTRATION draft/submission on this device), same "leave the
+   * Sakhi to fill it in fresh" fallback every other prefill in this app already uses. */
+  override suspend fun getChildRegistrationAnswers(id: String): FormAnswers? =
+    localEnrolments.answersFor(id)
 
   /**
    * Builds the profile header from what the enrolment form actually captured.
