@@ -48,6 +48,18 @@ data class ProfileVisit(
    * Visit Form. Only meaningful when [action] is START_VISIT or FILL_FORM.
    */
   val hasPreVisitHistory: Boolean = false,
+  /**
+   * True when this visit's form was submitted while offline and is still queued for the next
+   * Data Upload — i.e. a [org.armman.sakhi.data.visitform.VisitFormDraftEntity] row exists for
+   * this visit's `localScheduleUuid` with `syncStatus` PENDING/SYNCING. The underlying schedule
+   * row only flips to [org.armman.sakhi.data.schedule.VisitScheduleStatus.COMPLETED] once
+   * [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator.submit] actually succeeds
+   * against the server, so without this flag a queued-offline visit renders identically to one
+   * never touched at all — "Start Visit" stays tappable until Data Upload runs. When true, the
+   * card shows a "Queued for upload" chip instead of the days-remaining one and disables the
+   * action button, regardless of [startable].
+   */
+  val pendingSync: Boolean = false,
 )
 
 /**
@@ -71,6 +83,9 @@ data class BeneficiaryProfile(
   val lmp: String? = null,
   /** MOTHER only. */
   val edd: String? = null,
+  /** MOTHER only — captured at MOTHER_REGISTRATION (`input_rch_number`); null if the
+   * beneficiary has no RCH card on file. */
+  val rchNumber: String? = null,
   /** CHILD only. */
   val dob: String? = null,
   /** CHILD only. */

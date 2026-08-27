@@ -43,6 +43,7 @@ class LocalEnrolmentBaselineRiskTest {
       secureStore,
       RoomVisitScheduleRepository(FakeVisitScheduleDao()),
       FakeFormsRepository(geography = emptyList()),
+      LocalBeneficiaryStatusOverrideStore(FakeSecureKeyValueStore()),
     )
   }
 

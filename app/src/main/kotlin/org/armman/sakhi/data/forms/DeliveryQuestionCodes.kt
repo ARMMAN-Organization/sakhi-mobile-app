@@ -74,4 +74,25 @@ object DeliveryQuestionCodes {
   fun childBirthLengthCm(childIndex: Int): String = "child${childIndex + 1}_birth_length_cm"
   fun childBirthWeightKg(childIndex: Int): String = "child${childIndex + 1}_birth_weight_kg"
   fun childRelatedComplications(childIndex: Int): String = "child${childIndex + 1}_related_complications"
+
+  /**
+   * The `childN: delivery outcome` dropdown (spec row 13/19/25 — "Live Birth" / "Antepartum Still
+   * Birth (Fresh)" / "Intrapartum still birth (Macerated)"). Confirmed against the backend's own
+   * `form.service.ts` (`child1_delivery_outcome`/`child2_delivery_outcome`/`child3_delivery_outcome`)
+   * and `resolveDeliveryChildren`'s own `outcome !== 'live_birth'` guard (backend team, 2026-08-26)
+   * — not a snake-cased guess like [DATE_OF_DISCHARGE]/[DATE_OF_DEATH] above.
+   *
+   * Used to re-align [org.armman.sakhi.data.forms.SubmissionResponseData.childBeneficiaryIds]'s
+   * already-filtered (stillbirths excluded) order back onto each live child's REAL birth-order
+   * slot, instead of assuming array position == birth order — see
+   * [org.armman.sakhi.data.delivery.DeliverySessionEntity.child1BirthOrder]'s own doc for the
+   * exact bug this closes (reported 2026-08-26: a stillborn non-last twin/triplet caused the next
+   * LIVE child's Child Registration screen to be prefilled with the DEAD child's own
+   * sex/weight/length/complications answers).
+   */
+  fun childDeliveryOutcome(childIndex: Int): String = "child${childIndex + 1}_delivery_outcome"
+
+  /** The `value_code` [childDeliveryOutcome] holds when that slot was a live birth — confirmed
+   * against the backend's own `resolveDeliveryChildren` guard, see [childDeliveryOutcome]'s doc. */
+  const val DELIVERY_OUTCOME_LIVE_BIRTH = "live_birth"
 }

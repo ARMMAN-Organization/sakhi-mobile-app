@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -64,6 +65,12 @@ fun PadaVisitsScreen(
   val today = remember {
     LocalDate.now().format(DateTimeFormatter.ofPattern("EEE, d MMM", Locale.getDefault()))
   }
+
+  // Bug fix (2026-08-21): same stale-counts gap as PadaSelectionScreen — PadaVisitsViewModel only
+  // loaded once, in `init`, so returning here via popBackStack() (e.g. after completing a visit
+  // from a beneficiary profile opened from this list) left the Open/Referral tabs and beneficiary
+  // cards showing pre-visit data. See PadaSelectionScreen's own LaunchedEffect for the same fix.
+  LaunchedEffect(Unit) { viewModel.loadVisits() }
 
   Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {

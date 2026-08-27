@@ -4,6 +4,7 @@ import org.armman.sakhi.data.audit.FormAuditRepository
 import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.enrollment.ApiErrorParser
 import org.armman.sakhi.data.forms.CreateSubmissionRequestDto
+import org.armman.sakhi.data.forms.DeliveryQuestionCodes
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormSubmissionApi
 import org.armman.sakhi.data.forms.SubmitErrorCopy
@@ -139,6 +140,7 @@ class DeliveryFormSubmissionCoordinator @Inject constructor(
       localSubmissionUuid = localSubmissionUuid,
       deliveryFormFilledOn = deliveryFormFilledOn,
       childIds = childIds,
+      answers = answers,
     )
 
     visitScheduleCoordinator.onDeliveryRecorded(
@@ -160,16 +162,34 @@ class DeliveryFormSubmissionCoordinator @Inject constructor(
    * PP1 (see [org.armman.sakhi.data.forms.SubmissionResponseData.childBeneficiaryIds]'s doc — this
    * is the one call site in the app that must honor that distinction). An empty (non-null) list is
    * treated the same as null for stepping purposes — the backend contract says this should not
-   * happen, but there is no live child to register either way. */
+   * happen, but there is no live child to register either way.
+   *
+   * [answers] (the just-submitted DELIVERY_VISIT answers) is used to compute each compacted
+   * [childIds] entry's REAL birth-order slot, via [liveBirthOrderSlots] — see
+   * [DeliverySessionEntity.child1BirthOrder]'s own doc for why [childIds]'s array position alone
+   * is not that slot whenever a non-last child was stillborn. */
   private suspend fun advanceSession(
     localSessionUuid: String,
     localBeneficiaryId: String,
     localSubmissionUuid: String,
     deliveryFormFilledOn: LocalDate,
     childIds: List<String>?,
+    answers: FormAnswers,
   ) {
     val now = Instant.now().toEpochMilli()
     val existing = deliverySessionRepository.getBySessionUuid(localSessionUuid)
+    // Zipped 1:1 in order: childIds[i] is the i-th LIVE child in birth order, and
+    // liveBirthOrderSlots[i] is that same live child's real 1-based slot number. If the counts
+    // don't line up (a malformed/unanswered outcome field — should not happen, but must not crash
+    // a successful delivery submission over it), pairs simply come up short and the unmatched
+    // trailing child(ren) fall back to birthOrder = null — DeliveryToChildRegistrationPrefill and
+    // friends already treat that as "use the old positional assumption," the exact behavior before
+    // this fix existed, not a new failure mode.
+    val liveBirthOrderSlots = (0..2).filter {
+      answers.valueOf(DeliveryQuestionCodes.childDeliveryOutcome(it)) ==
+        DeliveryQuestionCodes.DELIVERY_OUTCOME_LIVE_BIRTH
+    }.map { it + 1 }
+    val childBirthOrders = childIds?.zip(liveBirthOrderSlots)?.map { it.second }
     deliverySessionRepository.save(
       DeliverySessionEntity(
         localSessionUuid = localSessionUuid,
@@ -180,6 +200,9 @@ class DeliveryFormSubmissionCoordinator @Inject constructor(
         child1BeneficiaryId = childIds?.getOrNull(0),
         child2BeneficiaryId = childIds?.getOrNull(1),
         child3BeneficiaryId = childIds?.getOrNull(2),
+        child1BirthOrder = childBirthOrders?.getOrNull(0),
+        child2BirthOrder = childBirthOrders?.getOrNull(1),
+        child3BirthOrder = childBirthOrders?.getOrNull(2),
         nextChildIndexToRegister = 0,
         createdAtEpochMillis = existing?.createdAtEpochMillis ?: now,
         updatedAtEpochMillis = now,

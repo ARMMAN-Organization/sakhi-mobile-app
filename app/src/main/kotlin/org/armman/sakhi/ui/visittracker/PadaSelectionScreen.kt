@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -60,6 +61,15 @@ fun PadaSelectionScreen(
   val today = remember {
     LocalDate.now().format(DateTimeFormatter.ofPattern("EEE, d MMM", Locale.getDefault()))
   }
+
+  // Bug fix (2026-08-21): PadaSelectionViewModel only loaded its pada counts once, in `init` —
+  // this screen's own ViewModel instance (and back-stack entry) survives every popBackStack() on
+  // the way back from a pada's visits / a beneficiary profile / a completed visit form, so the
+  // counts stayed frozen at first-load even after a visit was just submitted. Mirrors
+  // HomeScreen's own `LaunchedEffect(Unit) { viewModel.loadSummary() }`, which reruns on every
+  // (re)composition of this screen — including returning via back-navigation, not just the first
+  // time it's ever opened.
+  LaunchedEffect(Unit) { viewModel.loadVisits() }
 
   Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {

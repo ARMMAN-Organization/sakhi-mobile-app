@@ -231,6 +231,7 @@ private fun DeliveryChildFormFieldList(
         answers = state.answers,
         registrationDate = LocalDate.now(),
         beneficiaryRegistrationDate = null,
+        deliveryDate = state.deliveryDate,
         mediaCompleted = field.questionCode in state.mediaCompleted,
         capturedImageUri = state.capturedImages[field.questionCode],
         loadOptions = { viewModel.optionsFor(field) },

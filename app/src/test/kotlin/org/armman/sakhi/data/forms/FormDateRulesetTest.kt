@@ -2,6 +2,7 @@ package org.armman.sakhi.data.forms
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -72,6 +73,36 @@ class FormDateRulesetTest {
     assertNull(violationForDob(requireNotNull(bounds.max)))
     assertNull(violationForDob(requireNotNull(bounds.min)))
     assertEquals(registrationDate.minusYears(FormDateRuleset.MIN_AGE_YEARS), bounds.max)
+  }
+
+  // --- Bug fix (2026-08-22): date_of_birth on an infant-family visit form is the CHILD's DOB,
+  // not the mother's — the 10..50 adult age rule must not apply there. ---
+
+  @Test
+  fun `date of birth has no adult-age violation on an INC_VISIT form`() {
+    val infantDobValue = registrationDate.minusMonths(3)
+    val answers = answers(DOB_QUESTION_CODE to infantDobValue.toString())
+
+    assertNull(FormDateRuleset.violationFor(DOB_QUESTION_CODE, answers, registrationDate, formCode = "INC_VISIT"))
+  }
+
+  @Test
+  fun `date of birth has no picker bounds on a CCV_VISIT form`() {
+    assertNull(
+      FormDateRuleset.boundsFor(DOB_QUESTION_CODE, FormAnswers(), registrationDate, formCode = "CCV_VISIT"),
+    )
+  }
+
+  @Test
+  fun `date of birth still applies the adult age rule when formCode is not an infant-family form`() {
+    val tooYoung = registrationDate.minusYears(FormDateRuleset.MIN_AGE_YEARS).plusDays(1)
+    val answers = answers(DOB_QUESTION_CODE to tooYoung.toString())
+
+    assertEquals(
+      FormDateRuleset.Violation.AGE_OUT_OF_RANGE,
+      FormDateRuleset.violationFor(DOB_QUESTION_CODE, answers, registrationDate, formCode = "MOTHER_REGISTRATION"),
+    )
+    assertNotNull(FormDateRuleset.boundsFor(DOB_QUESTION_CODE, FormAnswers(), registrationDate, formCode = null))
   }
 
   // --- Mother's DOB on the child form: same age 10..50 rule (Infant Registration row 20.0) ------
@@ -786,7 +817,7 @@ class FormDateRulesetTest {
         FormDateRuleset.DATE_OF_EVENT_QUESTION_CODE,
         FormAnswers(),
         registrationDate,
-        beneficiaryRegistrationDate,
+        beneficiaryRegistrationDate = beneficiaryRegistrationDate,
       ),
     )
     assertEquals(beneficiaryRegistrationDate, bounds.min)
@@ -914,4 +945,47 @@ class FormDateRulesetTest {
 
   private fun violationForRaw(questionCode: String, raw: String) =
     FormDateRuleset.violationFor(questionCode, answers(questionCode to raw), registrationDate)
+
+  // --- INC1 per-dose vaccination dates must not be in the future (spec rows 39/43/45/49/51) -----
+  // Bug fix (found in manual QA, 2026-08-21), reopened same day: "hepatitis_b_birth_dose_date" was
+  // the wrong guessed question_code for Q39 "Hepatitis B date– Birth Dose", so future dates kept
+  // getting through even after opv_1_date/pentavalent_1_dpt1_date/rotavirus1_date/pcv1_date were
+  // confirmed fixed. These tests cover both the original guess and the added
+  // "hepatitis_b_date_birth_dose" candidate, so a regression on either can't slip through silently
+  // again the way the first miss did.
+
+  @Test
+  fun `hepatitis b birth-dose date rejects a future date under both candidate question codes`() {
+    val future = registrationDate.plusDays(1).toString()
+
+    assertEquals(
+      FormDateRuleset.Violation.VACCINATION_AT_BIRTH_DATE_IN_FUTURE,
+      violationForRaw("hepatitis_b_birth_dose_date", future),
+    )
+    assertEquals(
+      FormDateRuleset.Violation.VACCINATION_AT_BIRTH_DATE_IN_FUTURE,
+      violationForRaw("hepatitis_b_date_birth_dose", future),
+    )
+  }
+
+  @Test
+  fun `hepatitis b birth-dose date accepts today under both candidate question codes`() {
+    assertNull(violationForRaw("hepatitis_b_birth_dose_date", registrationDate.toString()))
+    assertNull(violationForRaw("hepatitis_b_date_birth_dose", registrationDate.toString()))
+  }
+
+  @Test
+  fun `hepatitis b birth-dose date picker is capped at registration date under both candidates`() {
+    val boundsOriginalGuess = requireNotNull(
+      FormDateRuleset.boundsFor("hepatitis_b_birth_dose_date", FormAnswers(), registrationDate),
+    )
+    val boundsLiteralOrderGuess = requireNotNull(
+      FormDateRuleset.boundsFor("hepatitis_b_date_birth_dose", FormAnswers(), registrationDate),
+    )
+
+    assertEquals(registrationDate, boundsOriginalGuess.max)
+    assertNull(boundsOriginalGuess.min)
+    assertEquals(registrationDate, boundsLiteralOrderGuess.max)
+    assertNull(boundsLiteralOrderGuess.min)
+  }
 }

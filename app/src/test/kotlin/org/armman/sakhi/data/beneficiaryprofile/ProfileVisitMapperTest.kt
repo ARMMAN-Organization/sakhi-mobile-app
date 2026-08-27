@@ -219,6 +219,31 @@ class ProfileVisitMapperTest {
     assertTrue(onClosingDay.startable)
   }
 
+  /**
+   * Reported bug: an ANC1 submitted while offline stays queued (its schedule row cannot flip to
+   * COMPLETED until the real server call succeeds — see [ProfileVisit.pendingSync]'s doc), so the
+   * mapper is the layer that must stop it looking startable in the meantime.
+   */
+  @Test
+  fun `a visit with a pending sync draft is not startable regardless of its window`() {
+    val visit = listOf(
+      row("s1", "ANC1", 1, today, windowStart = today.minusDays(5), windowEnd = today.plusDays(5)),
+    ).toProfileVisits(today, pendingSyncScheduleUuids = setOf("s1")).single()
+
+    assertFalse("A queued-offline visit must not stay tappable", visit.startable)
+    assertTrue(visit.pendingSync)
+  }
+
+  @Test
+  fun `a visit not in the pending sync set is unaffected`() {
+    val visit = listOf(
+      row("s1", "ANC1", 1, today, windowStart = today.minusDays(5), windowEnd = today.plusDays(5)),
+    ).toProfileVisits(today, pendingSyncScheduleUuids = setOf("some-other-schedule-uuid")).single()
+
+    assertTrue(visit.startable)
+    assertFalse(visit.pendingSync)
+  }
+
   // ---- FR-S-4.6 pre-visit history --------------------------------------------------------------
 
   @Test

@@ -172,6 +172,7 @@
   <string name="beneficiary_profile_visit_complete_short">Complete</string>
   <string name="beneficiary_profile_schedule_date">Schedule Date : %1$s</string>
   <string name="beneficiary_profile_referral_incomplete">Referral Followup Incomplete</string>
+  <string name="beneficiary_profile_pending_sync">Queued for upload</string>
   <string name="beneficiary_profile_start_visit">Start Visit</string>
   <string name="beneficiary_profile_fill_form">Fill Form</string>
   <string name="beneficiary_profile_see_data">See Data</string>
@@ -290,7 +291,7 @@
   <string name="enrollment_error_name_chars">Only letters and spaces are allowed</string>
   <string name="enrollment_error_age_range">Age must be between 10 and 50 years</string>
   <string name="enrollment_error_mobile">Enter a valid 10-digit mobile number</string>
-  <string name="enrollment_error_number_range">Must be between %1$d and %2$d</string>
+  <string name="enrollment_error_number_range">Must be between %1$s and %2$s</string>
   <!-- Cross-field rules from the form's validationJson; see CrossFieldMessages. -->
   <string name="form_error_cross_field_lte">%1$s cannot be more than %2$s</string>
   <string name="form_error_cross_field_sum_equals">%1$s must equal the total of %2$s</string>

@@ -166,6 +166,7 @@
   <string name="beneficiary_profile_visit_complete_short">पूर्ण</string>
   <string name="beneficiary_profile_schedule_date">नियोजित तारीख : %1$s</string>
   <string name="beneficiary_profile_referral_incomplete">संदर्भ पाठपुरावा अपूर्ण</string>
+  <string name="beneficiary_profile_pending_sync">अपलोडसाठी प्रलंबित</string>
   <string name="beneficiary_profile_start_visit">भेट सुरू करा</string>
   <string name="beneficiary_profile_fill_form">फॉर्म भरा</string>
   <string name="beneficiary_profile_see_data">डेटा पहा</string>
@@ -276,7 +277,7 @@
   <string name="enrollment_error_age_range">वय १० ते ५० वर्षांदरम्यान असावे</string>
   <string name="enrollment_error_mobile">वैध १० अंकी मोबाईल क्रमांक भरा</string>
   <string name="enrollment_error_registration_date_future">नोंदणीची तारीख भविष्यातील असू शकत नाही</string>
-  <string name="enrollment_error_number_range">%1$d ते %2$d दरम्यान असावे</string>
+  <string name="enrollment_error_number_range">%1$s ते %2$s दरम्यान असावे</string>
   <string name="form_error_cross_field_lte">%1$s हे %2$s पेक्षा जास्त असू शकत नाही</string>
   <string name="form_error_cross_field_sum_equals">%1$s हे %2$s च्या एकूण बेरजेइतके असावे</string>
   <string name="enrollment_error_household_range">२ ते १५ दरम्यान असावे</string>

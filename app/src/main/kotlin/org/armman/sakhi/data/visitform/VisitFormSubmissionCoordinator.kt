@@ -3,6 +3,7 @@ package org.armman.sakhi.data.visitform
 import android.util.Log
 import org.armman.sakhi.data.audit.FormAuditRepository
 import org.armman.sakhi.data.auth.session.SessionStore
+import org.armman.sakhi.data.childregistration.ChildFormDraftDao
 import org.armman.sakhi.data.delivery.DeliverySessionEntity
 import org.armman.sakhi.data.delivery.DeliverySessionRepository
 import org.armman.sakhi.data.delivery.DeliverySessionStep
@@ -69,6 +70,23 @@ sealed class VisitFormSubmissionException(message: String) : Exception(message) 
   data object VisitStatusLookupUnavailable :
     VisitFormSubmissionException("VISIT_STATUS/COMPLETED lookup value not available")
 
+  /**
+   * CR-042 defect-fix defense in depth (2026-08-21): NN now only ever generates anchored to a
+   * registered child's own local beneficiary id (see
+   * [org.armman.sakhi.data.schedule.VisitScheduleCoordinator.onDeliveryRecorded]'s doc), so a
+   * genuinely new NN schedule row should never reach this exception. It exists for a schedule row
+   * that predates this fix shipping — created by the old code against the MOTHER's own id, with no
+   * child ever registered behind it — so an app update does not silently let a stale, wrongly
+   * anchored NN visit complete. Surfaced as a submission failure rather than silently skipped so
+   * the Sakhi knows to complete Child Registration first, same as a fresh session would require.
+   */
+  data object NoRegisteredChildForNnVisit : VisitFormSubmissionException(
+    "Cannot submit an NN visit for a beneficiary with no registered child behind it",
+  ) {
+    override val userMessage: String
+      get() = "This infant hasn't been registered yet. Complete Child Registration before this visit."
+  }
+
   data class VisitInstanceCreationFailed(
     val httpCode: Int,
     val body: String?,
@@ -134,6 +152,7 @@ class VisitFormSubmissionCoordinator @Inject constructor(
   private val visitCodeFormResolver: VisitCodeFormResolver,
   private val formAuditRepository: FormAuditRepository,
   private val deliverySessionRepository: DeliverySessionRepository,
+  private val childFormDraftDao: ChildFormDraftDao,
 ) {
 
   suspend fun submit(
@@ -174,6 +193,15 @@ class VisitFormSubmissionCoordinator @Inject constructor(
     val schedule = visitScheduleRepository.getByLocalScheduleUuid(localScheduleUuid)
       ?: throw VisitFormSubmissionException.ScheduleNotFound
     val formCode = visitCodeFormResolver.resolve(schedule.visitType)
+
+    // CR-042 defense in depth — see NoRegisteredChildForNnVisit's own doc: a fresh NN row can
+    // never fail this check post-fix (it's only ever generated against a registered child's own
+    // id), so this only ever fires against a stale pre-fix row.
+    if (schedule.visitType == VisitCodeType.NN &&
+      childFormDraftDao.getByLocalBeneficiaryId(schedule.localBeneficiaryId) == null
+    ) {
+      throw VisitFormSubmissionException.NoRegisteredChildForNnVisit
+    }
 
     val serverScheduleId = schedule.serverScheduleId
     val serverBeneficiaryId = schedule.serverBeneficiaryId

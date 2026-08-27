@@ -134,6 +134,17 @@ private fun SolidRiskChip(label: String) {
 @Composable
 private fun StatusChip(visit: ProfileVisit) {
   when {
+    // Checked before the days-remaining chip below: a queued-offline visit still carries
+    // daysRemaining (its window hasn't changed), but "queued for upload" is the more useful thing
+    // to tell the Sakhi right now than a countdown to a form she has already filled in.
+    visit.pendingSync -> Text(
+      text = stringResource(R.string.beneficiary_profile_pending_sync),
+      style = MaterialTheme.typography.labelLarge,
+      color = NeutralG400,
+      modifier = Modifier
+        .background(NeutralG50, RoundedCornerShape(6.dp))
+        .padding(horizontal = 10.dp, vertical = 6.dp),
+    )
     visit.state == ProfileVisitState.OPEN && visit.daysRemaining != null -> Text(
       text = stringResource(R.string.beneficiaries_days_remaining, visit.daysRemaining),
       style = MaterialTheme.typography.labelLarge,

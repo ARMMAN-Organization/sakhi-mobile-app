@@ -82,7 +82,19 @@ class RoomChildFormDraftRepositoryTest {
       ),
     )
 
-    repository = RoomChildFormDraftRepository(dao, secureStore, connectivityChecker, syncExecutor, scheduleTrigger)
+    val visitScheduleSyncExecutor = org.armman.sakhi.data.schedule.VisitScheduleSyncExecutor(
+      scheduleRepository,
+      org.armman.sakhi.data.schedule.FakeVisitScheduleApi(),
+      org.armman.sakhi.data.visitform.FakeVisitFormSyncScheduler(),
+    )
+    repository = RoomChildFormDraftRepository(
+      dao,
+      secureStore,
+      connectivityChecker,
+      syncExecutor,
+      scheduleTrigger,
+      visitScheduleSyncExecutor,
+    )
   }
 
   private val answers = FormAnswers(

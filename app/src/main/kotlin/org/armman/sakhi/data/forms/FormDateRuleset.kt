@@ -63,6 +63,19 @@ object FormDateRuleset {
   const val MIN_AGE_YEARS = 10L
   const val MAX_AGE_YEARS = 50L
 
+  /** Bug fix (2026-08-22): [DOB_QUESTION_CODE] ("date_of_birth") is reused by two unrelated
+   * fields — MOTHER_REGISTRATION's own beneficiary DOB (needs [MIN_AGE_YEARS]..[MAX_AGE_YEARS],
+   * an adult range) and INFANT_VISIT/INC_VISIT/CCV_VISIT's child-registration-carried-forward DOB
+   * in the visit form's "Tests" section (an infant, already validated against
+   * [CHILD_AGE_CEILING_DAYS_MOTHER_LINKED]/[CHILD_AGE_CEILING_DAYS_INDEPENDENT] at registration
+   * time — re-applying an adult age range here rejected every real infant DOB with
+   * "Age must be between 10 and 50 years"). [boundsFor]/[violationFor] take the field's [formCode]
+   * to tell the two apart; literal strings, not a reference to
+   * [org.armman.sakhi.ui.visitform.FORM_CODES_INFANT_FAMILY], for the same reason [FALLBACK_MAP]
+   * in [VisitCodeFormResolver] duplicates its own literals — this is the data layer, and a
+   * data->ui import would invert the app's dependency direction. */
+  private val CHILD_VISIT_FORM_CODES = setOf("INFANT_VISIT", "INC_VISIT", "CCV_VISIT")
+
   /**
    * Inclusive upper bound, in days, on the infant's age at registration when the child is linked to
    * an enrolled mother (SRS FR-S-2.3: "child must be registered between 0 and 6 months (0-183
@@ -313,6 +326,10 @@ object FormDateRuleset {
     questionCode: String,
     answers: FormAnswers,
     registrationDate: LocalDate,
+    /** The active form's own code — only meaningful for disambiguating [DOB_QUESTION_CODE]
+     * between MOTHER_REGISTRATION and the infant-visit family (see [CHILD_VISIT_FORM_CODES]'s
+     * doc). Every other question code ignores it. */
+    formCode: String? = null,
     /** The beneficiary's actual enrollment date, only meaningful for
      * [DATE_OF_EVENT_QUESTION_CODE] — see that constant's doc. Every other caller (registration
      * forms, visit forms) leaves this null; it has no bearing on any other question code. */
@@ -324,6 +341,15 @@ object FormDateRuleset {
      * only caller that ever passes this; null (unbounded lower end) when unavailable, same
      * "missing data gap" convention as [beneficiaryRegistrationDate]. */
     motherLmpDate: LocalDate? = null,
+    /** The mother's actual delivery date (spec/reported bug, 2026-08-25: "Baby's date of birth
+     * cannot be earlier than the mother's delivery date"). Only meaningful for
+     * [ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT] — floors that field's picker at the
+     * delivery date instead of the wider age-ceiling window when a delivery event produced this
+     * registration. Sourced from the submitted `DELIVERY_VISIT` answers by
+     * [org.armman.sakhi.ui.delivery.DeliveryChildRegistrationViewModel]; null for the standalone
+     * Child Registration flow (no delivery event to floor against), same "missing data gap"
+     * convention as [beneficiaryRegistrationDate]/[motherLmpDate] above. */
+    deliveryDate: LocalDate? = null,
   ): Bounds? {
     val reference = referenceDate(answers, registrationDate)
     return when (questionCode) {
@@ -349,12 +375,15 @@ object FormDateRuleset {
 
       FURTHER_REFERRAL_PLANNED_DATE_QUESTION_CODE -> Bounds(min = registrationDate, max = null)
 
-      DOB_QUESTION_CODE, MOTHER_DOB_QUESTION_CODE -> Bounds(
-        // A DOB on this boundary still floors to MAX_AGE_YEARS; one day earlier would floor to
-        // MAX_AGE_YEARS + 1 and be out of range.
-        min = reference.minusYears(MAX_AGE_YEARS + 1).plusDays(1),
-        max = reference.minusYears(MIN_AGE_YEARS),
-      )
+      DOB_QUESTION_CODE -> if (formCode in CHILD_VISIT_FORM_CODES) {
+        // Child's DOB in the visit form — already bounded at registration time; no adult age
+        // rule applies here (see this constant's own doc).
+        null
+      } else {
+        adultDobBounds(reference)
+      }
+
+      MOTHER_DOB_QUESTION_CODE -> adultDobBounds(reference)
 
       LMP_DATE_QUESTION_CODE -> Bounds(
         min = reference.minusDays(LMP_MAX_DAYS_BEFORE_REGISTRATION),
@@ -406,13 +435,46 @@ object FormDateRuleset {
       // a different form (INC/INFANT_VISIT, not CHILD_REGISTRATION).
       "opv_0_date" -> Bounds(min = null, max = registrationDate)
 
+      // Bug fix (found in manual QA, 2026-08-21): none of INC1's other per-dose vaccination dates
+      // had a bounds case at all, so each one silently fell through to `else -> null` (no picker
+      // limit, no violation) and accepted future dates — same gap opv_0_date had before its own
+      // fix above. Spec rows 39/43/45/49/51 (Infant Visits CSV). Same "not in the future" rule,
+      // same registrationDate ceiling as every other dose date in this file.
+      //
+      // UNCONFIRMED — these `question_code`s are a snake_case guess from the spec's own field
+      // labels, following this file's established naming convention (see DATE_OF_DISCHARGE's own
+      // doc for the exact silent-failure risk of an unverified code). Verify each against a live
+      // `GET /forms/INFANT_VISIT/active-version` response and correct here if any differ — a wrong
+      // guess means this case never matches and the field is right back to unbounded.
+      //
+      // Reopened bug (2026-08-21): QA confirmed OPV-1/Pentavalent-1/Rotavirus1/PCV1 all validate
+      // correctly now, but Hepatitis B date still accepted future dates — "hepatitis_b_birth_dose_date"
+      // was the wrong guess for that one field. Every OTHER guess above is a literal word-order
+      // transform of its own spec label (e.g. "Rotavirus1 date" -> "rotavirus1_date", "PCV1 date" ->
+      // "pcv1_date"), but "hepatitis_b_birth_dose_date" reorders Q39's label ("Hepatitis B date—
+      // Birth Dose") by moving "date" to the end instead of keeping it in the middle. Adding the
+      // literal-order equivalent, "hepatitis_b_date_birth_dose", alongside the original guess —
+      // still UNCONFIRMED against a live schema, so both stay listed rather than replacing one
+      // guess with another equally-unverified one.
+      "hepatitis_b_birth_dose_date", // Q39 "Hepatitis B date– Birth Dose" (original guess)
+      "hepatitis_b_date_birth_dose", // Q39, literal-order guess — see reopened-bug note above
+      "opv_1_date", // Q43 "OPV-1 date"
+      "pentavalent_1_dpt1_date", // Q45 "Pentavalent-1/DPT1 date"
+      "rotavirus1_date", // Q49 "Rotavirus1 date"
+      "pcv1_date", // Q51 "PCV1 date (if Applicable)"
+      -> Bounds(min = null, max = registrationDate)
+
       // Measured against registrationDate rather than `reference` on purpose: the ViewModel's
       // eligibility gate counts days from the same registrationDate, and prevention must not be able
       // to disagree with detection. CHILD_REGISTRATION v2 does declare a registration-date question,
       // but it is prefilled with — and capped at — today, so the two values agree in practice; this
       // keeps them agreeing even if a Sakhi back-dates it.
       ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT -> Bounds(
-        min = registrationDate.minusDays(childAgeCeilingDays(answers)),
+        // Floored at the mother's actual delivery date when known (a delivery-session
+        // registration) — a baby cannot be born before the delivery that produced this
+        // registration. Falls back to the wider age-ceiling window when there is no delivery event
+        // to floor against (the standalone/direct Child Registration flow).
+        min = deliveryDate ?: registrationDate.minusDays(childAgeCeilingDays(answers)),
         // "Should not accept future date" (spec row 6.0) — an infant aged 0 days is valid, so today
         // is selectable.
         max = registrationDate,
@@ -471,6 +533,23 @@ object FormDateRuleset {
       else -> CHILD_AGE_CEILING_DAYS_INDEPENDENT
     }
 
+  /** Shared DOB bound for [DOB_QUESTION_CODE] (when not the visit-form child DOB) and
+   * [MOTHER_DOB_QUESTION_CODE] — same [MIN_AGE_YEARS]..[MAX_AGE_YEARS] adult range either way. */
+  private fun adultDobBounds(reference: LocalDate): Bounds = Bounds(
+    // A DOB on this boundary still floors to MAX_AGE_YEARS; one day earlier would floor to
+    // MAX_AGE_YEARS + 1 and be out of range.
+    min = reference.minusYears(MAX_AGE_YEARS + 1).plusDays(1),
+    max = reference.minusYears(MIN_AGE_YEARS),
+  )
+
+  /** Shared DOB violation check for [DOB_QUESTION_CODE] (when not the visit-form child DOB) and
+   * [MOTHER_DOB_QUESTION_CODE] — same [MIN_AGE_YEARS]..[MAX_AGE_YEARS] adult range either way. */
+  private fun adultDobViolation(value: LocalDate, reference: LocalDate): Violation? {
+    // Floored whole years, per the spec's "consider floor".
+    val age = ChronoUnit.YEARS.between(value, reference)
+    return Violation.AGE_OUT_OF_RANGE.takeIf { age < MIN_AGE_YEARS || age > MAX_AGE_YEARS }
+  }
+
   /**
    * The rule [questionCode]'s current answer breaks, or null if it's fine — the detection half of
    * the rule, for values the picker never gated: drafts saved by an older build, answers restored
@@ -483,16 +562,20 @@ object FormDateRuleset {
     questionCode: String,
     answers: FormAnswers,
     registrationDate: LocalDate,
+    /** See [boundsFor]'s own [formCode] doc — same disambiguation, same default. */
+    formCode: String? = null,
   ): Violation? {
     val value = parse(answers.valueOf(questionCode)) ?: return null
     val reference = referenceDate(answers, registrationDate)
 
     return when (questionCode) {
-      DOB_QUESTION_CODE, MOTHER_DOB_QUESTION_CODE -> {
-        // Floored whole years, per the spec's "consider floor".
-        val age = ChronoUnit.YEARS.between(value, reference)
-        Violation.AGE_OUT_OF_RANGE.takeIf { age < MIN_AGE_YEARS || age > MAX_AGE_YEARS }
+      DOB_QUESTION_CODE -> if (formCode in CHILD_VISIT_FORM_CODES) {
+        null
+      } else {
+        adultDobViolation(value, reference)
       }
+
+      MOTHER_DOB_QUESTION_CODE -> adultDobViolation(value, reference)
 
       LMP_DATE_QUESTION_CODE -> {
         val daysBefore = ChronoUnit.DAYS.between(value, reference)
@@ -557,6 +640,20 @@ object FormDateRuleset {
       // future" violation exists in this enum (every existing case is field-specific), so this
       // reuses VACCINATION_AT_BIRTH_DATE_IN_FUTURE rather than introducing a new constant.
       "opv_0_date" -> Violation.VACCINATION_AT_BIRTH_DATE_IN_FUTURE.takeIf { value.isAfter(registrationDate) }
+
+      // Bug fix (found in manual QA, 2026-08-21) — see the matching case in boundsFor() above for
+      // why these codes are added together and why they're UNCONFIRMED guesses pending live
+      // schema verification. Reopened same day: "hepatitis_b_birth_dose_date" alone didn't cover
+      // Hepatitis B's real question_code (still accepted future dates after the other 4 were
+      // confirmed fixed), so "hepatitis_b_date_birth_dose" — the same literal-label-order pattern
+      // every other guess here follows — was added alongside it. See boundsFor()'s own note.
+      "hepatitis_b_birth_dose_date",
+      "hepatitis_b_date_birth_dose",
+      "opv_1_date",
+      "pentavalent_1_dpt1_date",
+      "rotavirus1_date",
+      "pcv1_date",
+      -> Violation.VACCINATION_AT_BIRTH_DATE_IN_FUTURE.takeIf { value.isAfter(registrationDate) }
 
       // Only the "not future" half is detectable here — the "> registration/LMP" half needs
       // motherLmpDate, which this function has no parameter for (see DELIVERY_DATE_IN_FUTURE's own

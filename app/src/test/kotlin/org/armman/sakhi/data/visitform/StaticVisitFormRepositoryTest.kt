@@ -28,7 +28,12 @@ class StaticVisitFormRepositoryTest {
     }
   }
 
-  private fun realEnrolmentProfile(id: String, lmp: String? = "1 Dec 2025", weight: String? = null) = BeneficiaryProfile(
+  private fun realEnrolmentProfile(
+    id: String,
+    lmp: String? = "1 Dec 2025",
+    weight: String? = null,
+    rchNumber: String? = null,
+  ) = BeneficiaryProfile(
     id = id,
     name = "Test Beneficiary",
     type = BeneficiaryType.MOTHER,
@@ -41,6 +46,7 @@ class StaticVisitFormRepositoryTest {
     riskLevel = RiskLevel.LOW,
     lmp = lmp,
     weight = weight,
+    rchNumber = rchNumber,
   )
 
   @Test
@@ -104,10 +110,41 @@ class StaticVisitFormRepositoryTest {
 
     assertEquals("ANC1", context.visitTypeLabel)
     assertEquals(LocalDate.of(2025, 12, 1), context.lmp)
+    assertEquals("", context.rchNumber)
     assertNull(context.heightCm)
     assertNull(context.previousHb)
     assertNull(context.advisedDeliveryPlace)
     assertNull(context.sickleCell)
+  }
+
+  /**
+   * Reported bug: RCH number entered at registration always showed blank on ANC1 because
+   * [StaticVisitFormRepository.syntheticContext] hardcoded `rchNumber = ""` for every real
+   * (non-seeded-demo) beneficiary instead of reading it off her profile.
+   */
+  @Test
+  fun `real enrolment context carries the RCH number entered at registration`() = runTest {
+    val realEnrolmentId = "b6f1c6d2-91a2-4e3a-9c3e-000000000006"
+    val repo = StaticVisitFormRepository(
+      FakeLocalEnrolmentProfileRepository(realEnrolmentProfile(realEnrolmentId, rchNumber = "RCH-2026-000123")),
+    )
+
+    val context = repo.getVisitContext(realEnrolmentId, "v1")
+
+    assertEquals("RCH-2026-000123", context.rchNumber)
+  }
+
+  /** No RCH card on file at registration -- context correctly stays blank/editable, not a crash. */
+  @Test
+  fun `real enrolment context leaves RCH number blank when the profile has none`() = runTest {
+    val realEnrolmentId = "b6f1c6d2-91a2-4e3a-9c3e-000000000007"
+    val repo = StaticVisitFormRepository(
+      FakeLocalEnrolmentProfileRepository(realEnrolmentProfile(realEnrolmentId, rchNumber = null)),
+    )
+
+    val context = repo.getVisitContext(realEnrolmentId, "v1")
+
+    assertEquals("", context.rchNumber)
   }
 
   @Test

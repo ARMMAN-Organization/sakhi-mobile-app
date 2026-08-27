@@ -321,7 +321,7 @@ private fun VisitFormBody(
               onSelect(VisitFormOuterTab.VISIT_DATA, firstSection)
             },
           )
-          selectedOuterTab == VisitFormOuterTab.SUMMARY && state.formCode == FORM_CODE_INFANT -> InfantSummaryTabContent(
+          selectedOuterTab == VisitFormOuterTab.SUMMARY && state.formCode in FORM_CODES_INFANT_FAMILY -> InfantSummaryTabContent(
             state = state,
             viewModel = viewModel,
           )
@@ -796,6 +796,7 @@ private fun DynamicVisitFormFieldList(
           captureTargetCode = field.questionCode
           takePictureLauncher.launch(uri)
         },
+        formCode = state.formCode,
       )
     }
   }

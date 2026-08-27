@@ -61,6 +61,7 @@ class OfflineFirstBeneficiaryRepositoryTest {
       secureStore,
       RoomVisitScheduleRepository(FakeVisitScheduleDao()),
       FakeFormsRepository(),
+      LocalBeneficiaryStatusOverrideStore(FakeSecureKeyValueStore()),
     )
   }
 

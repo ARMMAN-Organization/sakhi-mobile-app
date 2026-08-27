@@ -120,4 +120,187 @@ class FormMultiSelectExclusivityTest {
     assertFalse(FormMultiSelectExclusivity.isDisabled(q44, noneReceivedYet, invalidCombo))
     assertFalse(FormMultiSelectExclusivity.isDisabled(q44, td1, invalidCombo))
   }
+
+  // ---- PP1 row 24: contraceptive_side_effects / "none" -----------------------------------------
+
+  @Test
+  fun `PP1 - checking a side effect disables None`() {
+    val selected = listOf(contraceptiveSideEffectHeadache)
+
+    assertTrue(FormMultiSelectExclusivity.isDisabled(pp1ContraceptiveSideEffects, noneSideEffect, selected))
+    assertFalse(
+      FormMultiSelectExclusivity.isDisabled(pp1ContraceptiveSideEffects, contraceptiveSideEffectNausea, selected),
+    )
+  }
+
+  @Test
+  fun `PP1 - checking None disables every other side effect`() {
+    val selected = listOf(noneSideEffect)
+
+    assertTrue(
+      FormMultiSelectExclusivity.isDisabled(pp1ContraceptiveSideEffects, contraceptiveSideEffectHeadache, selected),
+    )
+    assertTrue(
+      FormMultiSelectExclusivity.isDisabled(pp1ContraceptiveSideEffects, contraceptiveSideEffectNausea, selected),
+    )
+  }
+
+  @Test
+  fun `PP1 - an already-checked side effect is never disabled`() {
+    val invalidCombo = listOf(noneSideEffect, contraceptiveSideEffectHeadache)
+
+    assertFalse(FormMultiSelectExclusivity.isDisabled(pp1ContraceptiveSideEffects, noneSideEffect, invalidCombo))
+    assertFalse(
+      FormMultiSelectExclusivity.isDisabled(pp1ContraceptiveSideEffects, contraceptiveSideEffectHeadache, invalidCombo),
+    )
+  }
+
+  // ---- NN1/NN2 row 7: danger_signs / "no_abnormal_signs_symptoms" ------------------------------
+
+  @Test
+  fun `NN - checking a danger sign disables No abnormal signs`() {
+    val selected = listOf(dangerSignLethargic)
+
+    assertTrue(FormMultiSelectExclusivity.isDisabled(nnDangerSigns, noAbnormalSignsSymptoms, selected))
+    assertFalse(FormMultiSelectExclusivity.isDisabled(nnDangerSigns, dangerSignCough, selected))
+  }
+
+  @Test
+  fun `NN - checking No abnormal signs disables every danger sign`() {
+    val selected = listOf(noAbnormalSignsSymptoms)
+
+    assertTrue(FormMultiSelectExclusivity.isDisabled(nnDangerSigns, dangerSignLethargic, selected))
+    assertTrue(FormMultiSelectExclusivity.isDisabled(nnDangerSigns, dangerSignCough, selected))
+  }
+
+  @Test
+  fun `NN - an already-checked danger sign is never disabled`() {
+    val invalidCombo = listOf(noAbnormalSignsSymptoms, dangerSignLethargic)
+
+    assertFalse(FormMultiSelectExclusivity.isDisabled(nnDangerSigns, noAbnormalSignsSymptoms, invalidCombo))
+    assertFalse(FormMultiSelectExclusivity.isDisabled(nnDangerSigns, dangerSignLethargic, invalidCombo))
+  }
+
+  // ---- ANC_VISIT Q29: urine_test / "normal" ---------------------------------------------------
+
+  @Test
+  fun `Urine Test - checking a non-normal result disables Normal`() {
+    assertTrue(FormMultiSelectExclusivity.isDisabled(urineTest, urineNormal, listOf(urineInfection)))
+    assertFalse(FormMultiSelectExclusivity.isDisabled(urineTest, urineSugar, listOf(urineInfection)))
+  }
+
+  @Test
+  fun `Urine Test - checking Normal disables every other result`() {
+    val selected = listOf(urineNormal)
+
+    assertTrue(FormMultiSelectExclusivity.isDisabled(urineTest, urineInfection, selected))
+    assertTrue(FormMultiSelectExclusivity.isDisabled(urineTest, urineSugar, selected))
+    assertTrue(FormMultiSelectExclusivity.isDisabled(urineTest, urineProtein, selected))
+  }
+
+  // ---- ANC_VISIT Q33: vaccination_status / "none" (distinct from Q44's registration-form code) --
+
+  @Test
+  fun `Vaccination status - checking None disables every dose, and does not share Q44's map entry`() {
+    val selected = listOf(ancVaccinationNone)
+
+    assertTrue(FormMultiSelectExclusivity.isDisabled(ancVaccinationStatus, "td1_date", selected))
+    // Confirms this is its own entry, not accidentally aliasing has_the_women_received_td_dose's.
+    assertFalse(FormMultiSelectExclusivity.isDisabled(q44, ancVaccinationNone, selected))
+  }
+
+  // ---- POSTPARTUM_VISIT row 4/10: form-unscoped, question_codes unique to this form -------------
+
+  @Test
+  fun `PP danger signs - checking No abnormal signs disables every danger sign`() {
+    val selected = listOf(ppNoAbnormalSigns)
+    assertTrue(FormMultiSelectExclusivity.isDisabled(ppDangerSigns, "lower_abdominal_pain", selected))
+  }
+
+  @Test
+  fun `PP episiotomy wound site - checking None of the above disables every symptom`() {
+    val selected = listOf(ppNoneOfTheAbove)
+    assertTrue(FormMultiSelectExclusivity.isDisabled(ppEpisiotomyWoundSite, "severe_pain", selected))
+  }
+
+  // ---- dehydration/swelling: form-scoped, now applied to BOTH ANC_VISIT and POSTPARTUM_VISIT ---
+  // ---- (POSTPARTUM_VISIT's validationJson declares it; ANC_VISIT's is a UI-only product call, --
+  // ---- 2026-08-21 — see FORM_SCOPED_EXCLUSIVE_VALUE_CODES's doc) --------------------------------
+
+  @Test
+  fun `dehydration - No is exclusive on POSTPARTUM_VISIT and ANC_VISIT, but not with no formCode`() {
+    val selected = listOf(ppDehydrationNo)
+
+    assertTrue(
+      FormMultiSelectExclusivity.isDisabled(dehydration, "loss_of_skin_turgor", selected, formCode = "POSTPARTUM_VISIT"),
+    )
+    assertTrue(
+      FormMultiSelectExclusivity.isDisabled(dehydration, "loss_of_skin_turgor", selected, formCode = "ANC_VISIT"),
+    )
+    // No formCode at all (every non-Visit-Form caller, and INFANT_VISIT/NEONATAL_VISIT, which
+    // reuse neither field) sees no rule.
+    assertFalse(FormMultiSelectExclusivity.isDisabled(dehydration, "loss_of_skin_turgor", selected))
+    assertFalse(
+      FormMultiSelectExclusivity.isDisabled(dehydration, "loss_of_skin_turgor", selected, formCode = "INFANT_VISIT"),
+    )
+  }
+
+  @Test
+  fun `swelling - No swelling is exclusive on POSTPARTUM_VISIT and ANC_VISIT, but not with no formCode`() {
+    val selected = listOf(ppNoSwelling)
+
+    assertTrue(
+      FormMultiSelectExclusivity.isDisabled(swelling, "swollen_face", selected, formCode = "POSTPARTUM_VISIT"),
+    )
+    assertTrue(
+      FormMultiSelectExclusivity.isDisabled(swelling, "swollen_face", selected, formCode = "ANC_VISIT"),
+    )
+    assertFalse(FormMultiSelectExclusivity.isDisabled(swelling, "swollen_face", selected))
+    assertFalse(
+      FormMultiSelectExclusivity.isDisabled(swelling, "swollen_face", selected, formCode = "INFANT_VISIT"),
+    )
+  }
+
+  @Test
+  fun `PP dehydration and swelling - an already-checked option is never disabled regardless of formCode`() {
+    val invalidCombo = listOf(ppDehydrationNo, "loss_of_skin_turgor")
+
+    assertFalse(
+      FormMultiSelectExclusivity.isDisabled(dehydration, ppDehydrationNo, invalidCombo, formCode = "POSTPARTUM_VISIT"),
+    )
+    assertFalse(
+      FormMultiSelectExclusivity.isDisabled(
+        dehydration,
+        "loss_of_skin_turgor",
+        invalidCombo,
+        formCode = "POSTPARTUM_VISIT",
+      ),
+    )
+  }
+
+  private companion object {
+    const val pp1ContraceptiveSideEffects = "contraceptive_side_effects"
+    const val noneSideEffect = "none"
+    const val contraceptiveSideEffectHeadache = "headache"
+    const val contraceptiveSideEffectNausea = "nausea"
+    const val nnDangerSigns = "danger_signs"
+    const val noAbnormalSignsSymptoms = "no_abnormal_signs_symptoms"
+    const val dangerSignLethargic = "lethargic"
+    const val dangerSignCough = "cough"
+    const val urineTest = "urine_test"
+    const val urineNormal = "normal"
+    const val urineInfection = "infection"
+    const val urineSugar = "sugar"
+    const val urineProtein = "protein"
+    const val ancVaccinationStatus = "vaccination_status"
+    const val ancVaccinationNone = "none"
+    const val ppDangerSigns = "danger_signs_since_delivery_or_last_visit"
+    const val ppNoAbnormalSigns = "no_abnormal_signs_and_symptoms"
+    const val ppEpisiotomyWoundSite = "episiotomy_or_csection_wound_issues"
+    const val ppNoneOfTheAbove = "none_of_the_above"
+    const val dehydration = "dehydration"
+    const val ppDehydrationNo = "no"
+    const val swelling = "swelling"
+    const val ppNoSwelling = "no_swelling"
+  }
 }

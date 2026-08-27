@@ -32,7 +32,14 @@ private val DATE_LABEL_FORMAT = DateTimeFormatter.ofPattern("d MMM yyyy", Locale
  * buries her next visit under every future one: on a freshly generated ten-visit ANC series she
  * would see ANC10, eight months away, at the top and today's ANC1 at the very bottom.
  */
-fun List<VisitScheduleEntity>.toProfileVisits(today: LocalDate): List<ProfileVisit> {
+fun List<VisitScheduleEntity>.toProfileVisits(
+  today: LocalDate,
+  /** [org.armman.sakhi.data.schedule.VisitScheduleEntity.localScheduleUuid]s with a queued
+   * (PENDING/SYNCING) [org.armman.sakhi.data.visitform.VisitFormDraftEntity] — see
+   * [ProfileVisit.pendingSync]'s doc. Empty by default so every existing call site (and test)
+   * keeps behaving exactly as before this parameter existed. */
+  pendingSyncScheduleUuids: Set<String> = emptySet(),
+): List<ProfileVisit> {
   // Retired rows never appear: a superseded visit was replaced by an LMP correction, and a
   // cancelled one lapsed at delivery. Neither is something the Sakhi can act on, and showing them
   // would imply a backlog that does not exist.
@@ -46,7 +53,11 @@ fun List<VisitScheduleEntity>.toProfileVisits(today: LocalDate): List<ProfileVis
 
   val (completed, upcoming) = visible
     .mapIndexed { index, visit ->
-      visit to visit.toProfileVisit(today, priorCompletedCount = completedBefore[index])
+      visit to visit.toProfileVisit(
+        today,
+        priorCompletedCount = completedBefore[index],
+        pendingSync = visit.localScheduleUuid in pendingSyncScheduleUuids,
+      )
     }
     .partition { (_, profileVisit) -> profileVisit.state == ProfileVisitState.COMPLETED }
 
@@ -57,6 +68,7 @@ fun List<VisitScheduleEntity>.toProfileVisits(today: LocalDate): List<ProfileVis
 private fun VisitScheduleEntity.toProfileVisit(
   today: LocalDate,
   priorCompletedCount: Int,
+  pendingSync: Boolean,
 ): ProfileVisit {
   val completed = status == VisitScheduleStatus.COMPLETED
   val missed = status == VisitScheduleStatus.MISSED
@@ -76,7 +88,10 @@ private fun VisitScheduleEntity.toProfileVisit(
     // nothing about. A proper "Missed" treatment needs a third ProfileVisitState and a card design;
     // raised for CR-024 rather than invented here.
     daysRemaining = if (completed || missed) null else daysRemaining(today),
-    startable = !completed && !missed && isInWindow(today),
+    // A queued-but-not-yet-uploaded submission must not stay tappable — see
+    // ProfileVisit.pendingSync's doc.
+    startable = !completed && !missed && !pendingSync && isInWindow(today),
+    pendingSync = pendingSync,
     // FR-S-4.6: the Pre-Visit Health History screen needs at least one earlier completed visit to
     // have anything to show. A beneficiary's genuine first visit skips straight to the form.
     hasPreVisitHistory = priorCompletedCount > 0,

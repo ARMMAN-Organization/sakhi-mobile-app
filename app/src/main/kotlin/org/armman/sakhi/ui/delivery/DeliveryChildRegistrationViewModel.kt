@@ -22,7 +22,9 @@ import org.armman.sakhi.data.delivery.DeliverySessionRepository
 import org.armman.sakhi.data.delivery.DeliverySessionStep
 import org.armman.sakhi.data.delivery.DeliveryToChildRegistrationPrefill
 import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
+import org.armman.sakhi.data.forms.DeliveryQuestionCodes
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormComputedFieldEvaluator
 import org.armman.sakhi.data.forms.FormCrossFieldRule
 import org.armman.sakhi.data.forms.FormCrossFieldValidator
 import org.armman.sakhi.data.forms.FormFieldInputType
@@ -84,6 +86,14 @@ data class DeliveryChildRegistrationUiState(
    * [DeliveryChildRegistrationViewModel]'s class doc for why this is injected rather than obtained
    * from a `POST /beneficiaries` call. Null only before the first successful [load]. */
   val serverBeneficiaryId: String? = null,
+  /** The mother's answered [DeliveryQuestionCodes.DATE_OF_DELIVERY], parsed — forwarded to
+   * [FormDateRuleset.boundsFor] so the infant DOB picker can't be scrolled back before the delivery
+   * that produced this registration (reported bug, 2026-08-25). Null only if the delivery answer is
+   * somehow missing/unparseable — see [DeliveryChildRegistrationViewModel.load]'s own "shouldn't
+   * happen" caveat for [deliveryAnswers] — in which case the DOB bound simply falls back to the
+   * wider age-ceiling window, same "missing data gap" convention as every other optional bound in
+   * [FormDateRuleset]. */
+  val deliveryDate: LocalDate? = null,
 )
 
 sealed interface DeliveryChildRegistrationEvent {
@@ -171,6 +181,10 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
       }
       val childIndex = session.nextChildIndexToRegister
       val serverBeneficiaryId = childBeneficiaryIdAt(session, childIndex)
+      // The REAL birth-order slot this compacted childIndex maps to (see
+      // DeliverySessionEntity.child1BirthOrder's own doc) — falls back to childIndex itself when
+      // unknown, i.e. exactly today's (imperfect but not new) behavior, not a new failure mode.
+      val prefillChildIndex = childBirthOrderAt(session, childIndex)?.minus(1) ?: childIndex
       if (serverBeneficiaryId == null) {
         // Defensive: step is CHILD_REGISTRATION but no child is recorded at this index — nothing
         // this screen can do about that, same "can't render" fallback as a missing schema.
@@ -188,6 +202,8 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
       // it just returns null), so the Sakhi degrades to filling everything in fresh rather than
       // being blocked outright.
       val deliveryAnswers = deliveryFormDraftRepository.getAnswers(deliverySubmissionLocalUuid) ?: FormAnswers()
+      val deliveryDate = deliveryAnswers.valueOf(DeliveryQuestionCodes.DATE_OF_DELIVERY)
+        ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
       // The mother's own MOTHER_REGISTRATION answers — read locally (no network call, see
       // DeliveryToChildRegistrationPrefill.singleValueAnswersFor's own doc) so her name, DOB/age,
       // geography, mobile/address, consent and household socio-demographics can all prefill onto
@@ -197,12 +213,12 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
       val prefilledAnswers = FormAnswers(
         singleValues = DeliveryToChildRegistrationPrefill.singleValueAnswersFor(
           deliveryAnswers = deliveryAnswers,
-          childIndex = childIndex,
+          childIndex = prefillChildIndex,
           motherAnswers = motherAnswers,
           motherGeography = version.geography.orEmpty(),
           registrationDate = LocalDate.now(),
         ),
-        multiValues = DeliveryToChildRegistrationPrefill.multiValueAnswersFor(deliveryAnswers, childIndex),
+        multiValues = DeliveryToChildRegistrationPrefill.multiValueAnswersFor(deliveryAnswers, prefillChildIndex),
       )
       // registrtion_date and project_name are both hidden from the Sakhi (HIDDEN_QUESTION_CODES
       // includes ChildNonRenderableQuestionCodes.ALL) on the promise -- see that object's own doc --
@@ -217,9 +233,30 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
           answers = initialAnswers,
           childIndex = childIndex,
           serverBeneficiaryId = serverBeneficiaryId,
+          deliveryDate = deliveryDate,
         )
       }
+      // Bug fix (2026-08-21): `current_age_of_infant_in_days` ("Age of infant") is declared
+      // `computedFrom: "CHILD_AGE_MONTHS"` on the live CHILD_REGISTRATION schema (see
+      // FormComputedFieldEvaluator's own doc on that token) and derives from
+      // `date_of_birth_of_infant`, which `initialAnswers` above already prefilled from the
+      // Delivery form's date of delivery. But unlike DynamicChildRegistrationViewModel (the
+      // standalone registration path), this ViewModel never actually evaluated any
+      // `computedFrom` field — so the age field stayed blank on open even though its source DOB
+      // was already there. Mirrors DynamicChildRegistrationViewModel.recomputeDerivedFields().
+      recomputeDerivedFields()
     }
+  }
+
+  private fun recomputeDerivedFields() {
+    val version = _uiState.value.version ?: return
+    var answers = _uiState.value.answers
+    version.schemaJson.forEach { field ->
+      val computedFrom = field.computedFrom ?: return@forEach
+      val value = FormComputedFieldEvaluator.compute(computedFrom, answers, LocalDate.now())
+      answers = answers.withSingleValue(field.questionCode, value)
+    }
+    _uiState.update { it.copy(answers = answers) }
   }
 
   /**
@@ -252,6 +289,7 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
       val updatedAnswers = previousAnswers.withSingleValue(questionCode, value)
       it.copy(answers = FormHiddenFieldReset.apply(fields, previousAnswers, updatedAnswers))
     }
+    recomputeDerivedFields()
   }
 
   fun setMultiAnswer(questionCode: String, values: List<String>) {
@@ -261,6 +299,7 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
       val updatedAnswers = previousAnswers.withMultiValue(questionCode, values)
       it.copy(answers = FormHiddenFieldReset.apply(fields, previousAnswers, updatedAnswers))
     }
+    recomputeDerivedFields()
   }
 
   fun setCapturedImage(questionCode: String, uri: String?) {
@@ -483,6 +522,16 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
     0 -> session.child1BeneficiaryId
     1 -> session.child2BeneficiaryId
     2 -> session.child3BeneficiaryId
+    else -> null
+  }
+
+  /** See [DeliverySessionEntity.child1BirthOrder]'s own doc — the REAL 1-based `DELIVERY_VISIT`
+   * birth-order slot for the child at compacted [index], or null if unknown (pre-migration session
+   * row, or the delivery answers didn't parse cleanly at submit time). */
+  private fun childBirthOrderAt(session: DeliverySessionEntity, index: Int): Int? = when (index) {
+    0 -> session.child1BirthOrder
+    1 -> session.child2BirthOrder
+    2 -> session.child3BirthOrder
     else -> null
   }
 

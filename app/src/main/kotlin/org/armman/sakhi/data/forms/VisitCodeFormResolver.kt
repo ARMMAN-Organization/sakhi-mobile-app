@@ -26,9 +26,12 @@ private const val TAG = "SakhiSync"
  * literals. Keep in sync with those constants if either ever changes.
  *
  * PP/INC/CCV/HR entries here are placeholders pending backend content, exactly as described in
- * `docs/test-cases/visit-form.md` (CR-033 — INC/CCV alias INFANT_VISIT's schema; CR-034 — every
- * `*_HR` code routes to its base visit's form). They are not a guess this resolver is making on
- * its own; they mirror what the backend's live map currently returns for those codes too.
+ * `docs/test-cases/visit-form.md` (CR-033 — INC/CCV schema is a placeholder copy of INFANT_VISIT's;
+ * CR-034 — every `*_HR` code routes to its base visit's form). Bug fix (2026-08-22): INC/CCV used
+ * to alias "INFANT_VISIT" here, but the backend's live map now returns the distinct "INC_VISIT"/
+ * "CCV_VISIT" codes for them — updated to match. See
+ * [org.armman.sakhi.ui.visitform.FORM_CODES_INFANT_FAMILY] for where the app still treats all
+ * three as one family until real INC/CCV-specific schemas ship.
  */
 private val FALLBACK_MAP: Map<String, String> = mapOf(
   "ANC" to "ANC_VISIT",
@@ -37,10 +40,10 @@ private val FALLBACK_MAP: Map<String, String> = mapOf(
   "DELIVERY" to "DELIVERY_VISIT",
   "PP" to "POSTPARTUM_VISIT",
   "NN" to "NEONATAL_VISIT",
-  "INC" to "INFANT_VISIT",
-  "INC_HR" to "INFANT_VISIT",
-  "CCV" to "INFANT_VISIT",
-  "CCV_HR" to "INFANT_VISIT",
+  "INC" to "INC_VISIT",
+  "INC_HR" to "INC_VISIT",
+  "CCV" to "CCV_VISIT",
+  "CCV_HR" to "CCV_VISIT",
 )
 
 private val MAP_TYPE = object : TypeToken<Map<String, String>>() {}.type

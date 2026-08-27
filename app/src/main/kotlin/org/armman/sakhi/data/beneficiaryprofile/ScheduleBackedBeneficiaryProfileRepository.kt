@@ -3,10 +3,12 @@ package org.armman.sakhi.data.beneficiaryprofile
 import org.armman.sakhi.data.beneficiary.Beneficiary
 import org.armman.sakhi.data.beneficiary.BeneficiaryType
 import org.armman.sakhi.data.beneficiary.LocalEnrolmentBeneficiarySource
+import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.GeographyQuestionCodes
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
+import org.armman.sakhi.data.visitform.VisitFormDraftRepository
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -40,6 +42,7 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
   private val remoteProfiles: RemoteBeneficiaryProfileRepository,
   private val scheduleRepository: VisitScheduleRepository,
   private val localEnrolments: LocalEnrolmentBeneficiarySource,
+  private val visitFormDraftRepository: VisitFormDraftRepository,
 ) : BeneficiaryProfileRepository {
 
   override suspend fun getBeneficiary(id: String): BeneficiaryProfile {
@@ -75,10 +78,24 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
 
     val schedules = scheduleRepository.getActiveForBeneficiary(id)
 
+    // Bug fix (ANC1 "Start Visit" not updating after an offline submit): a visit submitted while
+    // offline stays queued in this app-wide drafts table until the next Data Upload actually
+    // reaches the server — see VisitFormSubmissionCoordinator.submit's doc for why the schedule
+    // row itself can't flip to COMPLETED any earlier. Best-effort like every other lookup in this
+    // method: a failure here just leaves every visit looking un-queued rather than failing the
+    // whole profile load.
+    val pendingSyncScheduleUuids = runCatching { visitFormDraftRepository.getUploadRecords() }
+      .getOrDefault(emptyList())
+      .filter { it.syncStatus == EnrollmentSyncStatus.PENDING || it.syncStatus == EnrollmentSyncStatus.SYNCING }
+      .map { it.localBeneficiaryId } // carries localScheduleUuid for this queue — see getUploadRecords's own doc
+      .toSet()
+
     // A beneficiary enrolled before this build has no schedule rows. Return an empty list rather
     // than falling back to the static sample: showing another woman's visits would be worse than
     // showing none, and the screen renders a distinct empty state for it.
-    return profile.copy(visits = schedules.toProfileVisits(LocalDate.now()))
+    return profile.copy(
+      visits = schedules.toProfileVisits(LocalDate.now(), pendingSyncScheduleUuids),
+    )
   }
 
   /** Delegates to [LocalEnrolmentBeneficiarySource.answersFor] — null for a remote-only
@@ -121,6 +138,11 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
     riskLevel = riskLevel,
     lmp = answers?.displayDate(QuestionCode.LMP_DATE),
     edd = answers?.displayDate(QuestionCode.EDD),
+    // CR (RCH-number-blank-on-ANC1 bugfix): captured at MOTHER_REGISTRATION under the same
+    // `input_rch_number` code the submission mapper reads (DynamicFormSubmissionMapper's
+    // QuestionCode.RCH_NUMBER) -- was never read back out here, so it stayed blank on the
+    // Visit Form's carried-forward context regardless of what the Sakhi entered.
+    rchNumber = answers?.displayValue(QuestionCode.RCH_NUMBER),
     // CHILD_REGISTRATION stores the infant's own DOB/weight under different question codes than
     // MOTHER_REGISTRATION's `date_of_birth`/`weight_kg` (used below for a MOTHER profile). Reading
     // the mother's codes for a child left both fields permanently blank on every child's profile.
@@ -165,6 +187,7 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
     const val LMP_DATE = "lmp_date"
     const val EDD = "edd"
     const val WEIGHT_KG = "weight_kg"
+    const val RCH_NUMBER = "input_rch_number"
   }
 
   private companion object {

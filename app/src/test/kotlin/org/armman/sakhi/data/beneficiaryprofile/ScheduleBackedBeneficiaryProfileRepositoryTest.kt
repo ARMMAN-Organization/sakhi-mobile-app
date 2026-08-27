@@ -22,8 +22,10 @@ import org.armman.sakhi.data.forms.FakeFormsRepository
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
+import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.MotherRegistrationQuestionCodes
+import org.armman.sakhi.data.visitform.VisitFormDraftRepository
 import org.armman.sakhi.data.forms.dynamicFormDraftGson
 import org.armman.sakhi.data.forms.dynamicFormDraftPayloadKey
 import org.armman.sakhi.data.schedule.AncScheduleGenerator
@@ -55,6 +57,7 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
   private lateinit var remoteProfiles: RemoteBeneficiaryProfileRepository
   private lateinit var repository: ScheduleBackedBeneficiaryProfileRepository
   private lateinit var formsRepository: FakeFormsRepository
+  private lateinit var visitFormDraftRepository: FakeVisitFormDraftRepository
 
   private val lmp = LocalDate.of(2026, 1, 1)
   private val edd = LocalDate.of(2026, 10, 8)
@@ -87,12 +90,35 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
       ),
     )
     remoteProfiles = RemoteBeneficiaryProfileRepository(beneficiaryApi, secureStore, localEnrolments)
+    visitFormDraftRepository = FakeVisitFormDraftRepository()
     repository = ScheduleBackedBeneficiaryProfileRepository(
       staticProfiles = StaticBeneficiaryProfileRepository(),
       remoteProfiles = remoteProfiles,
       scheduleRepository = schedules,
       localEnrolments = localEnrolments,
+      visitFormDraftRepository = visitFormDraftRepository,
     )
+  }
+
+  /** Configurable in-memory stand-in — [uploadRecords] is set per-test to simulate whatever
+   * [VisitFormDraftEntity] rows a real drafts table would hold; `submitDraft` is never exercised by
+   * this profile-read-only test class. */
+  private class FakeVisitFormDraftRepository : VisitFormDraftRepository {
+    var uploadRecords: List<FormUploadRecord> = emptyList()
+
+    override suspend fun submitDraft(
+      localScheduleUuid: String,
+      formCode: String,
+      formVersionId: String,
+      answers: FormAnswers,
+      visitDate: LocalDate,
+    ): org.armman.sakhi.data.visitform.VisitFormSubmitResult =
+      throw NotImplementedError("not exercised by this profile-read-only test class")
+
+    override suspend fun getUploadRecords(): List<FormUploadRecord> = uploadRecords
+
+    override fun observeUploadRecords(): kotlinx.coroutines.flow.Flow<List<FormUploadRecord>> =
+      kotlinx.coroutines.flow.MutableStateFlow(uploadRecords)
   }
 
   private fun detailOk(id: String) = Response.success(
@@ -183,6 +209,34 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
     saveLocalEnrolment(localId, firstName = "Asha", lastName = "Jadhav")
 
     assertEquals("", repository.getBeneficiary(localId).husbandName)
+  }
+
+  /**
+   * Reported bug: a Sakhi entered the RCH number at Mother Registration, but ANC1's carried-
+   * forward context always showed it blank -- `input_rch_number` was captured and synced but
+   * never read back into the profile. Regression coverage for that read-back.
+   */
+  @Test
+  fun `RCH number is read from the answers`() = runTest {
+    val localId = "local-uuid-rch-1"
+    saveLocalEnrolment(
+      localId,
+      firstName = "Sunita",
+      lastName = "Pawar",
+      extraSingleValues = mapOf("input_rch_number" to "RCH-2026-000123"),
+    )
+
+    assertEquals("RCH-2026-000123", repository.getBeneficiary(localId).rchNumber)
+  }
+
+  /** No RCH card on file at registration -- profile correctly reports null, not a crash or a
+   * stale/wrong value. */
+  @Test
+  fun `an unanswered RCH number renders null rather than failing`() = runTest {
+    val localId = "local-uuid-rch-2"
+    saveLocalEnrolment(localId, firstName = "Asha", lastName = "Jadhav")
+
+    assertEquals(null, repository.getBeneficiary(localId).rchNumber)
   }
 
   /**
@@ -291,6 +345,44 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
     // Soonest first — her next visit tops the list, not the one eight months out.
     assertEquals("ANC1", profile.visits.first().label)
     assertEquals("ANC10", profile.visits.last().label)
+  }
+
+  /**
+   * Reported bug: after ANC1 is submitted while offline, its "Start Visit" button stayed tappable
+   * (and the card looked untouched) until the Sakhi went online and ran Data Upload. Root cause —
+   * the schedule row only flips to COMPLETED once [org.armman.sakhi.data.visitform
+   * .VisitFormSubmissionCoordinator.submit] actually succeeds against the server, which an offline
+   * submission never reaches; it just sits PENDING in the visit-form drafts queue instead. This
+   * asserts the profile now reads that queue and marks the still-open ANC1 row as queued/
+   * not-startable instead of leaving it looking exactly like a never-touched visit.
+   */
+  @Test
+  fun `an ANC visit queued offline is not startable and shows as pending sync`() = runTest {
+    generateAncFor(MOTHER_A)
+    val anc1 = schedules.getForBeneficiary(MOTHER_A).first()
+    visitFormDraftRepository.uploadRecords = listOf(
+      FormUploadRecord(
+        localBeneficiaryId = anc1.localScheduleUuid, // carries localScheduleUuid for this queue
+        formCode = "ANC_VISIT",
+        syncStatus = EnrollmentSyncStatus.PENDING,
+        createdAtEpochMillis = 1_754_265_600_000L,
+      ),
+    )
+
+    val anc1Visit = repository.getBeneficiary(MOTHER_A).visits.first { it.id == anc1.localScheduleUuid }
+
+    assertTrue("A queued-offline visit must not stay tappable", !anc1Visit.startable)
+    assertTrue(anc1Visit.pendingSync)
+  }
+
+  /** A visit with no queued draft at all is unaffected — the common case. */
+  @Test
+  fun `a visit with no queued draft is unaffected by the pending-sync check`() = runTest {
+    generateAncFor(MOTHER_A)
+
+    val anc1Visit = repository.getBeneficiary(MOTHER_A).visits.first()
+
+    assertTrue(!anc1Visit.pendingSync)
   }
 
   /**

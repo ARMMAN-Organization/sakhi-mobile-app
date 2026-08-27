@@ -34,6 +34,13 @@ package org.armman.sakhi.data.forms
  * through a set of related boxes, and an error that fires before she could possibly have finished
  * teaches her to ignore errors. Required-ness is a separate, already-enforced gate.
  *
+ * **The Gravida total is the one exception**, and deliberately so: its outcome counts read as zero
+ * while unanswered ([outcomeCount]), so entering a Gravida of 2+ reports the mismatch straight
+ * away. Gravida is the field that governs whether those boxes are shown at all, so the message is
+ * what tells her they need filling - and unlike the other rules, waiting for "every figure" here
+ * meant the same Gravida behaved differently depending on hidden state. A genuinely non-numeric
+ * entry still fails open.
+ *
  * Row 47's "L < P" and row 48's ">= 2" entries are **risk** classifications, not validations, and are
  * deliberately not enforced — flagging them as errors would block registering exactly the high-risk
  * pregnancy the risk logic exists to escalate.
@@ -80,14 +87,22 @@ object FormObstetricRuleset {
     val para = intAnswer(answers, PARA)
     val living = intAnswer(answers, LIVING_CHILDREN)
     val abortions = intAnswer(answers, ABORTIONS)
-    val stillBirths = intAnswer(answers, STILL_BIRTHS)
     val deadChildren = intAnswer(answers, DEAD_CHILDREN)
 
     return when (questionCode) {
       GRAVIDA -> {
-        if (gravida == null || living == null || stillBirths == null || abortions == null) return null
+        if (gravida == null) return null
+        // An outcome count she hasn't reached yet reads as zero rather than skipping the rule, so a
+        // Gravida of 2+ is flagged the moment it is entered instead of staying silent until all
+        // three boxes happen to hold a value. Before this, the same Gravida produced an error or no
+        // error depending only on whether those fields had been through a hide/show cycle (which
+        // leaves "0" behind - see [FormHiddenFieldReset]), so the Sakhi saw the message on a
+        // re-entered 2 but not on a freshly typed one.
+        val living0 = outcomeCount(answers, LIVING_CHILDREN) ?: return null
+        val stillBirths0 = outcomeCount(answers, STILL_BIRTHS) ?: return null
+        val abortions0 = outcomeCount(answers, ABORTIONS) ?: return null
         Violation.GRAVIDA_TOTAL.takeIf {
-          living + stillBirths + abortions != gravida - CURRENT_PREGNANCY
+          living0 + stillBirths0 + abortions0 != gravida - CURRENT_PREGNANCY
         }
       }
 
@@ -128,4 +143,16 @@ object FormObstetricRuleset {
 
   private fun intAnswer(answers: FormAnswers, questionCode: String): Int? =
     answers.valueOf(questionCode)?.takeIf { it.isNotBlank() }?.toIntOrNull()
+
+  /**
+   * An outcome count for the Gravida total: `0` when it is blank or absent - the same substitution
+   * [DynamicFormSubmissionMapper] already makes at submit, so this checks the figures the backend
+   * will actually receive - the entered number when it parses, and null when it holds something
+   * non-numeric, which keeps that case failing open exactly as [intAnswer] does.
+   */
+  private fun outcomeCount(answers: FormAnswers, questionCode: String): Int? {
+    val raw = answers.valueOf(questionCode)
+    if (raw.isNullOrBlank()) return 0
+    return raw.toIntOrNull()
+  }
 }

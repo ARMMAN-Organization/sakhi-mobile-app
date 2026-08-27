@@ -494,7 +494,18 @@ class DynamicMotherRegistrationViewModel @Inject constructor(
     // Spec date rules (DOB age 10-50, LMP 31..239 days before registration, registration date not
     // future). Blank/unparseable is not a date-range failure — the required-field gate above owns
     // blank. See FormDateRuleset.
-    val datesValid = FormDateRuleset.allDatesValid(fields, state.answers, registrationDate)
+    // Bug fix: the non-renderable date fields (registration_date and its typo twin — see
+    // NonRenderableQuestionCodes) are stripped out of `fields` by visibleFields(), so a future
+    // value carried in by an older draft or a backend-restored answer was never gated at all.
+    // RegistrationDatePrefill normally writes today's date, which is why this never surfaced in
+    // the happy path — but "normally" is not a validation guarantee, and this is the only gate
+    // that would catch it. Union rather than replacement: the visible fields still gate exactly
+    // as before.
+    val hiddenDateFields = allFields().filter {
+      it.questionCode in NonRenderableQuestionCodes.ALL && it !in fields
+    }
+    val datesValid =
+      FormDateRuleset.allDatesValid(fields + hiddenDateFields, state.answers, registrationDate)
 
     // Obstetric-history consistency (Gravida = Para + abortions + 1, Para/abortions <= Gravida, dead
     // children <= live births). Gated per-tab as well as at submit so the Sakhi is stopped on the
