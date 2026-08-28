@@ -3,6 +3,7 @@ package org.armman.sakhi.data.beneficiaryprofile
 import org.armman.sakhi.data.beneficiary.BeneficiaryStatus
 import org.armman.sakhi.data.beneficiary.BeneficiaryType
 import org.armman.sakhi.data.beneficiary.RiskLevel
+import org.armman.sakhi.data.referral.ReferralStatus
 
 /**
  * A single last-visit vital reading shown as a stat tile on the profile.
@@ -39,7 +40,19 @@ data class ProfileVisit(
   val action: ProfileVisitAction,
   val daysRemaining: Int? = null,
   val startable: Boolean = false,
+  /** True only for [ReferralStatus.PENDING_FOLLOWUP] — kept as its own flag (rather than derived
+   * inline at every call site) since it is what drives the pink "Referral Followup Incomplete"
+   * chip specifically; [referralStatus] below carries the full picture for the other chip
+   * variants (CR-Referral-01). */
   val referralIncomplete: Boolean = false,
+  /** The linked referral's current status (CR-Referral-01), or null when this visit has none.
+   * Drives both the visit card's chip variant (pending/completed/lapsed) and whether the "Fill
+   * Form" action opens the referral follow-up form instead of the Visit Form flow — see
+   * [org.armman.sakhi.ui.beneficiaryprofile.BeneficiaryProfileScreen]'s routing. */
+  val referralStatus: ReferralStatus? = null,
+  /** The linked referral's id (CR-Referral-01), or null when [referralStatus] is null — needed by
+   * the follow-up/conversion screens, which act on a specific referral, not a visit. */
+  val referralId: String? = null,
   val riskLabel: String? = null,
   /**
    * FR-S-4.6: whether at least one prior completed visit exists, so the

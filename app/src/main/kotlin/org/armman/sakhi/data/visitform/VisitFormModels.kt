@@ -54,17 +54,26 @@ data class VisitContext(
 data class CriticalCondition(val messageRes: Int)
 
 /**
- * The fixed 4-tab shell every Visit Form (mother or infant) renders into, matching the retired
- * hand-coded flow's `VisitFormStep` one-for-one (same [org.armman.sakhi.R.string.visit_form_tab_visit_data]
- * /`visit_form_tab_summary`/`visit_form_tab_health_info`/`visit_form_tab_referral` labels). Unlike
- * the retired flow, the *content* under [VISIT_DATA] is no longer hand-coded — it's every one of
- * the active schema's sections, in order, shown as pill sub-tabs (ANC_VISIT: "Visit
- * data"/"Health info"/"Referrals"; INFANT_VISIT: "Tests"/"Symptoms"/"History") — see
+ * The 3-tab shell every Visit Form (mother or infant) renders into, matching the retired
+ * hand-coded flow's `VisitFormStep` one-for-one for [VISIT_DATA]/[SUMMARY]/[HEALTH_INFO] (same
+ * [org.armman.sakhi.R.string.visit_form_tab_visit_data]/`visit_form_tab_summary`
+ * /`visit_form_tab_health_info` labels). Unlike the retired flow, the *content* under
+ * [VISIT_DATA] is no longer hand-coded — it's every one of the active schema's sections, in
+ * order, shown as pill sub-tabs (ANC_VISIT: "Visit data"/"Health info"/"Referrals"; INFANT_VISIT:
+ * "Tests"/"Symptoms"/"History") — see
  * [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel.subSections].
  *
- * [SUMMARY], [HEALTH_INFO], and [REFERRAL] have no schema mapping for either beneficiary type
- * this pass (bharath, 2026-08-07: confirmed explicitly — ANC_VISIT's "Health info"/"Referrals"
- * section names happen to match these tab labels, but that's coincidental; their fields still
- * live under VISIT_DATA, not here) and always render a placeholder.
+ * [SUMMARY] and [HEALTH_INFO] have no schema mapping for either beneficiary type this pass
+ * (bharath, 2026-08-07: confirmed explicitly — ANC_VISIT's "Health info"/"Referrals" section
+ * names happen to match these tab labels, but that's coincidental; their fields still live under
+ * VISIT_DATA, not here) and always render a placeholder.
+ *
+ * [REFERRAL] still exists as an enum value (referenced by legacy label-lookup `when` branches in
+ * [org.armman.sakhi.ui.visitform.DynamicVisitFormScreen]) but is no longer part of the tab order
+ * itself — CR-Referral-01 Pass 4 (2026-08-27) moved referral capture out of a persistent tab
+ * into a conditional post-visit step, gated by the on-device risk result rather than always
+ * shown; see [org.armman.sakhi.ui.visitform.DynamicVisitFormUiState.showReferralCaptureStep]'s
+ * doc for why (matches the PRD's "Visit completed — Risk assessment — Referral decision" tree,
+ * and works identically online or offline).
  */
 enum class VisitFormOuterTab { VISIT_DATA, SUMMARY, HEALTH_INFO, REFERRAL }

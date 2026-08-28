@@ -42,7 +42,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -63,6 +62,9 @@ import org.armman.sakhi.ui.components.ConditionChip
 import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.components.RiskBadge
 import org.armman.sakhi.ui.components.SecondaryButton
+import org.armman.sakhi.data.referral.FacilityType
+import org.armman.sakhi.data.referral.ReferralType
+import org.armman.sakhi.ui.components.AppTextField
 import org.armman.sakhi.ui.enrollment.components.AppDateField
 import org.armman.sakhi.ui.enrollment.components.AppDropdownField
 import org.armman.sakhi.ui.enrollment.components.AppRadioGroup
@@ -157,6 +159,9 @@ fun DynamicVisitFormScreen(
         when {
           state.isLoading -> Centered { CircularProgressIndicator() }
           state.hasError -> LoadError(onRetry = viewModel::load)
+          // CR-Referral-01 Pass 4: swaps the whole body for the referral capture step - see
+          // DynamicVisitFormUiState.showReferralCaptureStep's doc for when/why this is set.
+          state.showReferralCaptureStep -> ReferralCaptureStep(state = state, viewModel = viewModel)
           else -> VisitFormBody(
             visitLabel = viewModel.visitLabel,
             state = state,
@@ -220,11 +225,15 @@ private fun LoadError(onRetry: () -> Unit) {
  * outer tab has nothing mapped and renders [BlankTabPlaceholder]. */
 private data class VisitFormFlatStep(val outerTab: VisitFormOuterTab, val section: String?)
 
+// CR-Referral-01 Pass 4 (2026-08-27): REFERRAL deliberately excluded -- referral capture is now a
+// conditional step (see ReferralCaptureStep / DynamicVisitFormUiState.showReferralCaptureStep),
+// not a tab in this fixed order. The enum value itself stays (VisitFormOuterTab's own doc
+// explains why) but nothing in this list ever selects it, so outerTabLabel/nextOuterTabLabel's
+// REFERRAL branches below are unreachable dead code, kept only so those `when`s stay exhaustive.
 private val OUTER_TAB_ORDER = listOf(
   VisitFormOuterTab.VISIT_DATA,
   VisitFormOuterTab.SUMMARY,
   VisitFormOuterTab.HEALTH_INFO,
-  VisitFormOuterTab.REFERRAL,
 )
 
 @Composable
@@ -337,7 +346,6 @@ private fun VisitFormBody(
               onSelect(VisitFormOuterTab.VISIT_DATA, firstSection)
             },
           )
-          selectedOuterTab == VisitFormOuterTab.REFERRAL -> ReferralTabContent(state = state, viewModel = viewModel)
           else -> BlankTabPlaceholder()
         }
       }
@@ -678,52 +686,134 @@ private fun FieldSummaryReviewRow(label: String, value: String) {
 }
 
 /**
- * Referral outer tab (bharath, 2026-08-08) — a standalone hand-built form (Date/Facility/Type),
- * NOT schema-driven. Facility options are a hardcoded placeholder list (same labels as the
- * ANC_VISIT schema's own "Advised place of delivery" options, Q42) until a real facility
- * directory API exists — see this feature's scope discussion. Submit isn't wired to a backend
- * this pass; it fires the same [DynamicVisitFormEvent.ComingSoon] toast the rest of the form uses.
+ * Referral capture step — CR-Referral-01 Pass 4 (2026-08-27): moved out of a persistent outer
+ * tab (see [VisitFormOuterTab]'s doc) into this conditional, full-screen step that replaces the
+ * normal tab body only when [DynamicVisitFormUiState.showReferralCaptureStep] is true — i.e. only
+ * once [DynamicVisitFormViewModel.onFinish] has already determined, from the on-device risk
+ * result, that this visit needs a referral decision. Matches the PRD's decision tree ("Visit
+ * completed — Risk assessment — Referral decision (by Sakhi)") far more closely than the old
+ * always-visible tab did, and — because the trigger check is on-device — appears identically
+ * whether she's online or offline when she taps Submit.
+ *
+ * Still a standalone hand-built form (Date/Facility name+type/Referral type), NOT schema-driven
+ * — intentionally separate from the ANC_VISIT schema's own "Referrals" section (a different set
+ * of questions, already rendered as a Visit Data sub-tab).
+ *
+ * Facility capture is free-text name + a [FacilityType] enum, matching `POST /referrals`'s actual
+ * contract exactly (backend-confirmed 2026-08-27) — there is no facility directory/search
+ * endpoint, so this deliberately does NOT try to be a lookup field.
+ *
+ * These fields are bundled into a [org.armman.sakhi.data.referral.ReferralCapture] by
+ * [DynamicVisitFormViewModel.onFinish]'s second (post-capture) call and only ever become an
+ * actual referral once the visit submission succeeds AND the server's OWN risk-assessment
+ * response ALSO confirms a trigger — see
+ * [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator.maybeCreateReferral]'s doc for
+ * why the on-device result that gates this screen isn't treated as authoritative on its own.
+ * [DynamicVisitFormViewModel.skipReferralCapture] clears these fields and submits anyway (her
+ * judgement call, per the PRD, that no referral is actually needed); leaving them blank and
+ * tapping Submit here has the identical effect.
  */
 @Composable
-private fun ReferralTabContent(state: DynamicVisitFormUiState, viewModel: DynamicVisitFormViewModel) {
-  val facilityOptions = stringArrayResource(R.array.visit_form_referral_facility_options).toList()
+private fun ReferralCaptureStep(state: DynamicVisitFormUiState, viewModel: DynamicVisitFormViewModel) {
   val typeOptions = listOf(
     stringResource(R.string.visit_form_referral_type_accompanied),
     stringResource(R.string.visit_form_referral_type_standard),
   )
-  Column(
-    verticalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
-    modifier = Modifier
-      .fillMaxSize()
-      .verticalScroll(rememberScrollState())
-      .padding(Dimens.ScreenPadding),
-  ) {
-    Text(
-      text = stringResource(R.string.visit_form_referral_details_title),
-      style = MaterialTheme.typography.titleLarge,
-      color = NeutralG400,
-    )
-    AppDateField(
-      label = stringResource(R.string.visit_form_referral_date),
-      placeholder = "",
-      value = state.referralDate,
-      onDateSelected = viewModel::setReferralDate,
-      maxDate = viewModel.visitDate,
-    )
-    AppDropdownField(
-      label = stringResource(R.string.visit_form_referral_facility),
-      placeholder = "",
-      options = facilityOptions,
-      selectedIndex = facilityOptions.indexOf(state.referralFacility).takeIf { it >= 0 },
-      onSelected = { index -> viewModel.setReferralFacility(facilityOptions.getOrNull(index)) },
-    )
-    AppRadioGroup(
-      label = stringResource(R.string.visit_form_referral_type),
-      options = typeOptions,
-      selectedIndex = typeOptions.indexOf(state.referralType).takeIf { it >= 0 },
-      onSelected = { index -> viewModel.setReferralType(typeOptions.getOrNull(index)) },
-      horizontal = true,
-    )
+  val typeValues = listOf(ReferralType.ACCOMPANIED, ReferralType.STANDARD)
+  val facilityTypeOptions = listOf(
+    stringResource(R.string.visit_form_referral_facility_type_public),
+    stringResource(R.string.visit_form_referral_facility_type_private),
+    stringResource(R.string.visit_form_referral_facility_type_phc),
+    stringResource(R.string.visit_form_referral_facility_type_rh),
+    stringResource(R.string.visit_form_referral_facility_type_dh),
+    stringResource(R.string.visit_form_referral_facility_type_other),
+  )
+  val facilityTypeValues = listOf(
+    FacilityType.PUBLIC,
+    FacilityType.PRIVATE,
+    FacilityType.PHC,
+    FacilityType.RH,
+    FacilityType.DH,
+    FacilityType.OTHER,
+  )
+  Column(modifier = Modifier.fillMaxSize()) {
+    Column(
+      verticalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
+      modifier = Modifier
+        .weight(1f)
+        .verticalScroll(rememberScrollState())
+        .padding(Dimens.ScreenPadding),
+    ) {
+      Text(
+        text = stringResource(R.string.visit_form_referral_details_title),
+        style = MaterialTheme.typography.titleLarge,
+        color = NeutralG400,
+      )
+      // CR-Referral-01 Pass 4: explains WHY this screen appeared, since it's no longer a tab she
+      // chose to open herself.
+      Text(
+        text = stringResource(R.string.visit_form_referral_step_explainer),
+        style = MaterialTheme.typography.bodyMedium,
+        color = NeutralG200,
+      )
+      AppDateField(
+        label = stringResource(R.string.visit_form_referral_date),
+        placeholder = "",
+        value = state.referralDate,
+        onDateSelected = viewModel::setReferralDate,
+        maxDate = viewModel.visitDate,
+      )
+      AppTextField(
+        label = stringResource(R.string.visit_form_referral_facility_name),
+        placeholder = "",
+        value = state.referralFacilityName.orEmpty(),
+        onValueChange = { viewModel.setReferralFacilityName(it) },
+      )
+      AppDropdownField(
+        label = stringResource(R.string.visit_form_referral_facility_type),
+        placeholder = "",
+        options = facilityTypeOptions,
+        selectedIndex = facilityTypeValues.indexOf(state.referralFacilityType).takeIf { it >= 0 },
+        onSelected = { index -> viewModel.setReferralFacilityType(facilityTypeValues.getOrNull(index)) },
+      )
+      AppRadioGroup(
+        label = stringResource(R.string.visit_form_referral_type),
+        options = typeOptions,
+        selectedIndex = typeValues.indexOf(state.referralType).takeIf { it >= 0 },
+        onSelected = { index -> viewModel.setReferralType(typeValues.getOrNull(index)) },
+        horizontal = true,
+      )
+    }
+    HorizontalDivider(color = NeutralG50)
+    Row(
+      horizontalArrangement = Arrangement.End,
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = Dimens.ScreenPadding, vertical = Dimens.ItemSpacing),
+    ) {
+      SecondaryButton(
+        text = stringResource(R.string.visit_form_back),
+        onClick = viewModel::cancelReferralCapture,
+        height = Dimens.SmallButtonHeight,
+      )
+      Spacer(modifier = Modifier.weight(1f))
+      SecondaryButton(
+        text = stringResource(R.string.visit_form_referral_skip),
+        onClick = viewModel::skipReferralCapture,
+        enabled = !state.isSubmitting,
+        height = Dimens.SmallButtonHeight,
+        modifier = Modifier.padding(end = Dimens.SmallSpacing),
+      )
+      PrimaryButton(
+        text = stringResource(R.string.visit_form_submit),
+        onClick = viewModel::onFinish,
+        enabled = !state.isSubmitting,
+        loading = state.isSubmitting,
+        fullWidth = false,
+        height = Dimens.SmallButtonHeight,
+        trailingIcon = painterResource(R.drawable.ic_arrow_right),
+      )
+    }
   }
 }
 

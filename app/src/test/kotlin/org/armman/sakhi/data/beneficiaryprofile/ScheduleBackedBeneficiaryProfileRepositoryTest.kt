@@ -92,6 +92,7 @@ class ScheduleBackedBeneficiaryProfileRepositoryTest {
       remoteProfiles = remoteProfiles,
       scheduleRepository = schedules,
       localEnrolments = localEnrolments,
+      referralLinkDao = org.armman.sakhi.data.referral.FakeReferralLinkDao(),
     )
   }
 

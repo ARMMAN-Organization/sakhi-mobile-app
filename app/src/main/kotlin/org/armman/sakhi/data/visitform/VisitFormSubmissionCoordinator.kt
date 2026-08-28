@@ -1,6 +1,8 @@
 package org.armman.sakhi.data.visitform
 
 import android.util.Log
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import org.armman.sakhi.data.audit.FormAuditRepository
 import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.childregistration.ChildFormDraftDao
@@ -14,6 +16,16 @@ import org.armman.sakhi.data.forms.FormSubmissionApi
 import org.armman.sakhi.data.forms.SubmitErrorCopy
 import org.armman.sakhi.data.forms.VisitCodeFormResolver
 import org.armman.sakhi.data.lookup.LookupRepository
+import org.armman.sakhi.data.referral.CreateReferralOutcome
+import org.armman.sakhi.data.referral.Referral
+import org.armman.sakhi.data.referral.ReferralLinkDao
+import org.armman.sakhi.data.referral.ReferralLinkEntity
+import org.armman.sakhi.data.referral.ReferralCapture
+import org.armman.sakhi.data.referral.ReferralRepository
+import com.google.gson.Gson
+import org.armman.sakhi.data.riskassessment.RiskAssessmentDao
+import org.armman.sakhi.data.riskassessment.RiskAssessmentEntity
+import org.armman.sakhi.data.riskassessment.RiskFlagEntity
 import org.armman.sakhi.data.rules.RuleSetIds
 import org.armman.sakhi.data.schedule.VisitCodeType
 import org.armman.sakhi.data.schedule.VisitScheduleEntity
@@ -29,6 +41,17 @@ import javax.inject.Singleton
 
 private const val CATEGORY_VISIT_STATUS = "VISIT_STATUS"
 private const val VALUE_CODE_COMPLETED = "COMPLETED"
+
+/**
+ * Retry policy for [VisitFormSubmissionCoordinator.createRiskAssessmentWithRetry] —
+ * confirmed with backend 2026-08-27: grading is synchronous server-side, not queued, so a
+ * failure here is permanent (nothing server-side will complete it later just because more
+ * time passed) — a short, tight retry to catch a transient network blip is useful; a long
+ * backoff is not, since there is nothing to "wait out". Product decision (Option A): silent,
+ * no Sakhi-facing indicator either way — see that function's own doc.
+ */
+private const val RISK_ASSESSMENT_MAX_ATTEMPTS = 3
+private const val RISK_ASSESSMENT_RETRY_DELAY_MILLIS = 15_000L
 
 /** Temporary diagnostic tag for the online-enrollment-to-visit-submit chain (CR-026 debugging). */
 private const val TAG = "SakhiSync"
@@ -155,7 +178,12 @@ class VisitFormSubmissionCoordinator @Inject constructor(
   private val deliverySessionRepository: DeliverySessionRepository,
   private val childFormDraftDao: ChildFormDraftDao,
   private val riskAssessmentApi: RiskAssessmentApi,
+  private val referralRepository: ReferralRepository,
+  private val referralLinkDao: ReferralLinkDao,
+  private val riskAssessmentDao: RiskAssessmentDao,
 ) {
+
+  private val riskAssessmentJsonMapper = Gson()
 
   suspend fun submit(
     localScheduleUuid: String,
@@ -180,6 +208,14 @@ class VisitFormSubmissionCoordinator @Inject constructor(
      * always creates fresh, exactly as before this parameter existed.
      */
     existingVisitId: String? = null,
+    /**
+     * CR-Referral-01: whatever the Sakhi filled on the visit form's standalone Referral tab
+     * (date/facility/type) — see [org.armman.sakhi.data.visitform.VisitFormDraftPayload.referralCapture]'s
+     * doc. Null when she left that tab untouched, in which case [maybeCreateReferral] never fires
+     * even if the risk assessment below comes back with a referral trigger — this app never
+     * creates a referral the Sakhi didn't actually fill in facility/type for.
+     */
+    referralCapture: ReferralCapture? = null,
     /**
      * Fired the moment step 1 succeeds, with the server's visit id — before step 2 is even
      * attempted. The background executor uses this to persist that id onto the draft immediately,
@@ -281,11 +317,13 @@ class VisitFormSubmissionCoordinator @Inject constructor(
     // actually succeeded, same as advanceDeliverySessionIfDue — see triggerRiskAssessment's own
     // doc for why a failure here never fails this whole submit() call.
     triggerRiskAssessment(
+      localScheduleUuid = localScheduleUuid,
       formCode = formCode,
       serverBeneficiaryId = serverBeneficiaryId,
       visitId = visitId,
       serverSubmissionId = serverSubmissionId,
       answers = answers,
+      referralCapture = referralCapture,
     )
   }
 
@@ -312,18 +350,27 @@ class VisitFormSubmissionCoordinator @Inject constructor(
    *
    * Best-effort, not submission-blocking: by the time this runs, `POST /visits` and
    * `POST /forms/:formCode/submissions` have both already succeeded and the local schedule is
-   * already marked COMPLETED — a failure here (network drop, unexpected 4xx/5xx) must not flip an
-   * otherwise-successful visit submission to Failed/retryable, especially since backend's own
-   * server-side trigger likely already fired for the exact same submission regardless of whether
-   * this call succeeds. Failures are swallowed via [runCatching] and left for a future explicit
-   * retry mechanism if one proves necessary — none exists yet.
+   * already marked COMPLETED — a failure here must not flip an otherwise-successful visit
+   * submission to Failed/retryable.
+   *
+   * Retries via [createRiskAssessmentWithRetry] (added 2026-08-27, product decision: silent,
+   * Option A — no Sakhi-facing indicator either way) before giving up. Confirmed with backend:
+   * grading is synchronous, not queued server-side, so a failure here is permanent — nothing
+   * completes it later just because time passed. A short, tight retry only helps catch a
+   * transient failure in *this* request (a network blip); it is not "waiting for a queue to
+   * drain", so the retry policy is short attempts close together, not a long backoff. If every
+   * attempt fails, this beneficiary simply has no risk assessment for this visit until her next
+   * visit happens to produce one — a known, accepted gap (no server-side self-healing exists),
+   * not a bug in this retry logic.
    */
   private suspend fun triggerRiskAssessment(
+    localScheduleUuid: String,
     formCode: String,
     serverBeneficiaryId: String,
     visitId: String,
     serverSubmissionId: String?,
     answers: FormAnswers,
+    referralCapture: ReferralCapture?,
   ) {
     val riskPhase = riskPhaseFor(formCode) ?: return
     val ruleSetId = riskRuleSetIdFor(formCode) ?: return
@@ -332,26 +379,224 @@ class VisitFormSubmissionCoordinator @Inject constructor(
       return
     }
 
+    val request = CreateRiskAssessmentRequestDto(
+      beneficiaryId = serverBeneficiaryId,
+      visitId = visitId,
+      submissionId = serverSubmissionId,
+      ruleSetId = ruleSetId,
+      riskPhase = riskPhase,
+      answers = answers.singleValues + answers.multiValues,
+    )
+    val data = createRiskAssessmentWithRetry(request, formCode) ?: return
+
+    cacheRiskAssessment(localScheduleUuid, data)
+
+    maybeCreateReferral(
+      localScheduleUuid = localScheduleUuid,
+      visitId = visitId,
+      beneficiaryId = serverBeneficiaryId,
+      submissionId = serverSubmissionId,
+      referralCapture = referralCapture,
+      riskFlags = data.riskFlags,
+    )
+  }
+
+  /**
+   * Up to [RISK_ASSESSMENT_MAX_ATTEMPTS] attempts at `POST /risk-assessments`, [RISK_ASSESSMENT_RETRY_DELAY_MILLIS]
+   * apart, before giving up and returning null. See [triggerRiskAssessment]'s doc for why this is
+   * a short, tight retry rather than a long backoff.
+   *
+   * A non-2xx response in the 4xx range is treated as non-retryable and returns null immediately
+   * without spending the remaining attempts — the request itself was rejected (bad data, an
+   * unknown beneficiary/visit id, validation failure), and retrying the exact same payload will
+   * never produce a different result. A 5xx response or a thrown exception (offline, timeout) is
+   * treated as transient and retried.
+   *
+   * Every attempt (success or failure) is logged; the final give-up is logged once, distinctly,
+   * so "we tried and gave up" is distinguishable in logs from "we tried once and stopped" without
+   * needing to count earlier log lines.
+   */
+  private suspend fun createRiskAssessmentWithRetry(
+    request: CreateRiskAssessmentRequestDto,
+    formCode: String,
+  ): RiskAssessmentResponseData? {
+    repeat(RISK_ASSESSMENT_MAX_ATTEMPTS) { attempt ->
+      val isLastAttempt = attempt == RISK_ASSESSMENT_MAX_ATTEMPTS - 1
+      val outcome = runCatching { riskAssessmentApi.createRiskAssessment(request) }
+      val response = outcome.getOrNull()
+
+      if (response != null && response.isSuccessful) {
+        return response.body()?.data
+      }
+      if (response != null && response.code() in 400..499) {
+        Log.w(
+          TAG,
+          "triggerRiskAssessment($formCode): non-retryable HTTP ${response.code()} — " +
+            "${response.errorBody()?.string()} — visit submission still succeeded",
+        )
+        return null
+      }
+
+      val reason = outcome.exceptionOrNull()?.let { "${it::class.simpleName}: ${it.message}" }
+        ?: "HTTP ${response?.code()}"
+      if (isLastAttempt) {
+        Log.w(
+          TAG,
+          "triggerRiskAssessment($formCode): attempt ${attempt + 1}/$RISK_ASSESSMENT_MAX_ATTEMPTS " +
+            "failed ($reason) — giving up silently, visit submission still succeeded",
+        )
+      } else {
+        Log.w(
+          TAG,
+          "triggerRiskAssessment($formCode): attempt ${attempt + 1}/$RISK_ASSESSMENT_MAX_ATTEMPTS " +
+            "failed ($reason), retrying",
+        )
+        delay(RISK_ASSESSMENT_RETRY_DELAY_MILLIS)
+      }
+    }
+    return null
+  }
+
+  /**
+   * CR-Referral-01: creates exactly one referral for this visit, using the SERVER's own
+   * authoritative `isReferralTrigger` flags from the just-completed `POST /risk-assessments` call
+   * (not the on-device GoRules result — the server re-evaluates from raw answers independently,
+   * same rationale [RiskAssessmentApi]'s own doc gives for why the two aren't assumed identical).
+   *
+   * Deliberately does nothing (no referral, no log-worthy warning) when [referralCapture] is null
+   * — a risk-assessment response flagging a referral trigger does not, by itself, create a referral;
+   * the Sakhi must have actually filled in the Referral tab's facility/type for this pass. That
+   * product question (should the app proactively prompt her to fill it in when triggered but she
+   * hasn't yet) is out of scope here — see CR-Referral-01's RTM.
+   *
+   * One referral per visit is enforced server-side (a DB-level unique constraint on `visitId`,
+   * confirmed 2026-08-27) — [CreateReferralOutcome.AlreadyExists] is the expected, silent outcome
+   * of a retried submission attempt (e.g. a resumed background sync) hitting a visit that already
+   * got its referral created on a prior attempt; not logged as a warning, since it is not one.
+   *
+   * Best-effort and non-blocking, exactly like [triggerRiskAssessment] itself: a failure here must
+   * never flip an otherwise-successful visit submission to Failed/retryable.
+   */
+  private suspend fun maybeCreateReferral(
+    localScheduleUuid: String,
+    visitId: String,
+    beneficiaryId: String,
+    submissionId: String?,
+    referralCapture: ReferralCapture?,
+    riskFlags: List<RiskAssessmentFlagDto>,
+  ) {
+    if (referralCapture == null || submissionId == null) return
+    val triggeringConditionIds = riskFlags.filter { it.isReferralTrigger }.map { it.riskConditionId }
+    if (triggeringConditionIds.isEmpty()) return
+
+    // try/catch as well as relying on createReferral's own Result: the interface returns a Result,
+    // and RemoteReferralRepository honours that by wrapping its whole body — but a THROWN exception
+    // from any implementation (or from a dependency it doesn't wrap, e.g. lookupRepository in a
+    // future refactor) would propagate straight out of this function and flip an already-succeeded
+    // visit submission to Failed. That is exactly what this function's own doc promises can never
+    // happen, so the guarantee is enforced here rather than assumed of every implementation.
+    val creation = try {
+      referralRepository.createReferral(
+        visitId = visitId,
+        beneficiaryId = beneficiaryId,
+        sourceSubmissionId = submissionId,
+        capture = referralCapture,
+        triggeringConditionIds = triggeringConditionIds,
+      )
+    } catch (e: CancellationException) {
+      // Not a failure: the scope is going away. Rethrown so structured concurrency still holds.
+      throw e
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+
+    creation.onFailure { error ->
+      Log.w(TAG, "maybeCreateReferral(visitId=$visitId) failed — visit submission still succeeded", error)
+    }.onSuccess { outcome ->
+      when (outcome) {
+        is CreateReferralOutcome.Created -> {
+          Log.i(TAG, "maybeCreateReferral(visitId=$visitId): created referral ${outcome.referral.referralId}")
+          cacheReferralLink(localScheduleUuid, outcome.referral)
+        }
+        is CreateReferralOutcome.AlreadyExists -> {
+          // Idempotent per backend's #197 fix: this visit already had a referral (e.g. a resumed
+          // background sync retrying a submission whose referral was already created on a prior
+          // attempt) — the existing one is returned untouched, not a new one, so this is the
+          // one-referral-per-visit rule working correctly, not a warning-worthy condition.
+          Log.i(TAG, "maybeCreateReferral(visitId=$visitId): referral already existed (${outcome.referral.referralId}), one-per-visit held")
+          cacheReferralLink(localScheduleUuid, outcome.referral)
+        }
+      }
+    }
+  }
+
+  /**
+   * Mirrors the just-accepted [Referral] into [referralLinkDao], keyed by [localScheduleUuid] —
+   * see [ReferralLinkEntity]'s own doc for why that key, not the server [Referral.visitId]. Best
+   * effort like everything else in this chain: a local-cache write failure must not flip an
+   * otherwise-successful visit submission to Failed/retryable, so it is swallowed the same way
+   * [maybeCreateReferral]'s own network call is.
+   */
+  private suspend fun cacheReferralLink(localScheduleUuid: String, referral: Referral) {
     runCatching {
-      riskAssessmentApi.createRiskAssessment(
-        CreateRiskAssessmentRequestDto(
-          beneficiaryId = serverBeneficiaryId,
-          visitId = visitId,
-          submissionId = serverSubmissionId,
-          ruleSetId = ruleSetId,
-          riskPhase = riskPhase,
-          answers = answers.singleValues + answers.multiValues,
+      referralLinkDao.upsert(
+        ReferralLinkEntity(
+          localScheduleUuid = localScheduleUuid,
+          referralId = referral.referralId,
+          visitId = referral.visitId ?: return@runCatching,
+          status = referral.status.name,
+          referralTypeLookupValueId = referral.referralTypeLookupValueId,
+          validTill = referral.validTill,
+          createdAtEpochMillis = System.currentTimeMillis(),
         ),
       )
     }.onFailure { error ->
-      Log.w(TAG, "triggerRiskAssessment($formCode) failed — visit submission still succeeded", error)
-    }.onSuccess { response ->
-      if (!response.isSuccessful) {
-        Log.w(
-          TAG,
-          "triggerRiskAssessment($formCode): HTTP ${response.code()} — ${response.errorBody()?.string()}",
+      Log.w(TAG, "cacheReferralLink(localScheduleUuid=$localScheduleUuid) failed — visit submission still succeeded", error)
+    }
+  }
+
+  /**
+   * Mirrors a just-accepted `POST /risk-assessments` response into [riskAssessmentDao] — punch-
+   * list items 1/2 (2026-08-27): local persistence of `risk_assessments`/`risk_flags`, so a visit
+   * card / risk badge can read the last-known grading offline instead of needing a network call.
+   *
+   * Best effort like everything else in this chain (mirrors [cacheReferralLink] exactly): a local
+   * cache write failure must never flip an otherwise-successful visit submission to
+   * Failed/retryable — [triggerRiskAssessment] has already returned useful data to the Sakhi
+   * (the risk-assessment call itself succeeded) by the time this runs.
+   */
+  private suspend fun cacheRiskAssessment(localScheduleUuid: String, data: RiskAssessmentResponseData) {
+    runCatching {
+      val flags = data.riskFlags.map { flag ->
+        RiskFlagEntity(
+          localScheduleUuid = localScheduleUuid,
+          serverFlagId = flag.id,
+          riskConditionId = flag.riskConditionId,
+          riskGradeLookupValueId = flag.riskGradeLookupValueId,
+          observedValueJson = flag.observedValueJson?.let { riskAssessmentJsonMapper.toJson(it) },
+          isReferralTrigger = flag.isReferralTrigger,
+          isEducationTrigger = flag.isEducationTrigger,
+          isHrVisitTrigger = flag.isHrVisitTrigger,
         )
       }
+      riskAssessmentDao.upsertAssessmentWithFlags(
+        assessment = RiskAssessmentEntity(
+          localScheduleUuid = localScheduleUuid,
+          serverAssessmentId = data.id,
+          beneficiaryId = data.beneficiaryId,
+          visitId = data.visitId,
+          submissionId = data.submissionId,
+          ruleVersionId = data.ruleVersionId,
+          evaluatedAt = data.evaluatedAt,
+          overallRiskCategory = data.overallRiskCategory,
+          overallHighRiskFlag = data.overallHighRiskFlag,
+          hrDetectedFlag = data.hrDetectedFlag,
+          createdAtEpochMillis = System.currentTimeMillis(),
+        ),
+        flags = flags,
+      )
+    }.onFailure { error ->
+      Log.w(TAG, "cacheRiskAssessment(localScheduleUuid=$localScheduleUuid) failed — visit submission still succeeded", error)
     }
   }
 

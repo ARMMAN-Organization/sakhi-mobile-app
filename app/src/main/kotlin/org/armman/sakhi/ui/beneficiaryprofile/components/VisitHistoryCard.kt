@@ -26,6 +26,7 @@ import org.armman.sakhi.R
 import org.armman.sakhi.data.beneficiaryprofile.ProfileVisit
 import org.armman.sakhi.data.beneficiaryprofile.ProfileVisitAction
 import org.armman.sakhi.data.beneficiaryprofile.ProfileVisitState
+import org.armman.sakhi.data.referral.ReferralStatus
 import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.components.SecondaryButton
 import org.armman.sakhi.ui.theme.Dimens
@@ -33,8 +34,11 @@ import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG400
 import org.armman.sakhi.ui.theme.NeutralG50
 import org.armman.sakhi.ui.theme.PrimarySurface
+import org.armman.sakhi.ui.theme.NeutralG100
 import org.armman.sakhi.ui.theme.RiskHigh
 import org.armman.sakhi.ui.theme.RiskHighSurface
+import org.armman.sakhi.ui.theme.StatusSuccess
+import org.armman.sakhi.ui.theme.StatusSuccessSurface
 import org.armman.sakhi.ui.theme.White
 import org.armman.sakhi.ui.theme.softShadow
 
@@ -142,12 +146,33 @@ private fun StatusChip(visit: ProfileVisit) {
         .background(PrimarySurface, RoundedCornerShape(6.dp))
         .padding(horizontal = 10.dp, vertical = 6.dp),
     )
+    // CR-Referral-01: PENDING_FOLLOWUP keeps the original wording/styling (referralIncomplete is
+    // still set exactly for this case — see ProfileVisitMapper); COMPLETED/LAPSED are new chip
+    // variants layered on top now that referralStatus carries the full lifecycle. A referral
+    // that has moved past PENDING_FOLLOWUP no longer drives the visit's action (only the chip),
+    // so this branch is purely informational for those two.
     visit.referralIncomplete -> Text(
       text = stringResource(R.string.beneficiary_profile_referral_incomplete),
       style = MaterialTheme.typography.labelLarge,
       color = RiskHigh,
       modifier = Modifier
         .background(RiskHighSurface, RoundedCornerShape(6.dp))
+        .padding(horizontal = 10.dp, vertical = 6.dp),
+    )
+    visit.referralStatus == ReferralStatus.COMPLETED -> Text(
+      text = stringResource(R.string.beneficiary_profile_referral_completed),
+      style = MaterialTheme.typography.labelLarge,
+      color = StatusSuccess,
+      modifier = Modifier
+        .background(StatusSuccessSurface, RoundedCornerShape(6.dp))
+        .padding(horizontal = 10.dp, vertical = 6.dp),
+    )
+    visit.referralStatus == ReferralStatus.LAPSED -> Text(
+      text = stringResource(R.string.beneficiary_profile_referral_lapsed),
+      style = MaterialTheme.typography.labelLarge,
+      color = NeutralG100,
+      modifier = Modifier
+        .background(NeutralG50, RoundedCornerShape(6.dp))
         .padding(horizontal = 10.dp, vertical = 6.dp),
     )
   }

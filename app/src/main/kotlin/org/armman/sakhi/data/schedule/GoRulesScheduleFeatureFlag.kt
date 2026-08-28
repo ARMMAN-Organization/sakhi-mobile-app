@@ -27,5 +27,15 @@ package org.armman.sakhi.data.schedule
  * If that check fails, revert this to `false` immediately.
  */
 internal object GoRulesScheduleFeatureFlag {
-  const val ENABLED = true
+  // REVERTED 2026-08-27: the "real low-end/release-build check" this flag's own doc called out as
+  // STILL OPEN just failed. Release builds have zero ProGuard/R8 keep rules for io.gorules.** — R8
+  // renames the JNI-bound ZenEngine classes, breaking native linkage, throwing an
+  // UnsatisfiedLinkError/NoSuchMethodError (java.lang.Error, not Exception — so it skips both
+  // ZenRuleEvaluator's and GoRulesScheduleAdapter's `catch (e: Exception)` blocks) that only gets
+  // caught (silently, pre-2026-08-27) by MotherEnrolmentScheduleTrigger's outer runCatching. Net
+  // effect: every release-build enrolment silently generated zero visits, debug builds unaffected
+  // (isMinifyEnabled = false there). Per this flag's own rollback rule ("if that check fails,
+  // revert to false immediately") — do not re-enable until proguard-rules.pro has real io.gorules
+  // keep rules AND this has been re-verified on an actual release build on a real device.
+  const val ENABLED = false
 }

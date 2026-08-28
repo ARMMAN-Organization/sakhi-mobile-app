@@ -191,6 +191,28 @@ class WindowInsetsConfigTest {
     }
   }
 
+
+  /**
+   * The source of each Compose `Dialog(...) { ... }` call's own body — brace-matched from the
+   * opening `{` that follows the call, so a nested lambda inside the dialog is included while
+   * anything after the dialog closes is not. Used to ask "does a text input live INSIDE this
+   * dialog", which is the only case that needs `decorFitsSystemWindows = false`.
+   */
+  private fun dialogBodies(text: String): List<String> = composeDialog.findAll(text).mapNotNull { match ->
+    val open = text.indexOf('{', startIndex = match.range.last).takeIf { it >= 0 } ?: return@mapNotNull null
+    var depth = 0
+    for (i in open until text.length) {
+      when (text[i]) {
+        '{' -> depth++
+        '}' -> {
+          depth--
+          if (depth == 0) return@mapNotNull text.substring(open, i + 1)
+        }
+      }
+    }
+    null
+  }.toList()
+
   @Test
   fun `dialogs containing text inputs opt out of decorFitsSystemWindows`() {
     // A Dialog gets its own window, which keeps decor-fits-system-windows ON regardless of what the
@@ -200,9 +222,14 @@ class WindowInsetsConfigTest {
       .filter { it.isFile && it.extension == "kt" }
       .filter { file ->
         val text = file.readText()
-        composeDialog.containsMatchIn(text) &&
-          textInput.containsMatchIn(text) &&
-          !text.contains("decorFitsSystemWindows = false")
+        // Scoped to each Dialog's OWN lambda body, not the whole file: a big screen file can hold
+        // both a message-only Dialog and, elsewhere, a perfectly fine inline form field — that is
+        // not an offender, and matching file-wide reported one (DynamicVisitFormScreen.kt, whose
+        // two dialogs are icon+text+buttons while its AppTextField sits in the form body). Per
+        // this test's own rule above: only dialogs that actually take typed input need the
+        // override.
+        !text.contains("decorFitsSystemWindows = false") &&
+          dialogBodies(text).any { textInput.containsMatchIn(it) }
       }
       .map { it.name }
       .sorted()

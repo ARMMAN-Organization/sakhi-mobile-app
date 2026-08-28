@@ -174,6 +174,8 @@
   <string name="beneficiary_profile_visit_complete_short">Complete</string>
   <string name="beneficiary_profile_schedule_date">Schedule Date : %1$s</string>
   <string name="beneficiary_profile_referral_incomplete">Referral Followup Incomplete</string>
+  <string name="beneficiary_profile_referral_completed">Referral Completed</string>
+  <string name="beneficiary_profile_referral_lapsed">Referral Lapsed</string>
   <string name="beneficiary_profile_start_visit">Start Visit</string>
   <string name="beneficiary_profile_fill_form">Fill Form</string>
   <string name="beneficiary_profile_see_data">See Data</string>
@@ -414,8 +416,18 @@
   <string name="visit_form_submitted">Visit submitted successfully</string>
   <string name="visit_form_queued_offline">Visit saved. It will upload automatically on your next Data Upload.</string>
   <string name="visit_form_referral_details_title">Please fill referral details</string>
+  <string name="visit_form_referral_step_explainer">This visit was flagged high-risk. Fill in the referral details below, or skip if no referral is needed.</string>
+  <string name="visit_form_referral_skip">Skip</string>
   <string name="visit_form_referral_date">Date</string>
   <string name="visit_form_referral_facility">Referred Health Facility</string>
+  <string name="visit_form_referral_facility_name">Facility name</string>
+  <string name="visit_form_referral_facility_type">Facility type</string>
+  <string name="visit_form_referral_facility_type_public">Public</string>
+  <string name="visit_form_referral_facility_type_private">Private</string>
+  <string name="visit_form_referral_facility_type_phc">PHC</string>
+  <string name="visit_form_referral_facility_type_rh">RH</string>
+  <string name="visit_form_referral_facility_type_dh">DH</string>
+  <string name="visit_form_referral_facility_type_other">Other</string>
   <string name="visit_form_referral_type">Type of Referral</string>
   <string name="visit_form_referral_type_accompanied">Accompanied</string>
   <string name="visit_form_referral_type_standard">Standard</string>

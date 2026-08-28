@@ -93,7 +93,17 @@ class ZenRuleEvaluator @Inject constructor() : RuleEvaluator {
         )
         JsonParser.parseString(response.result.toString()).asJsonObject
       }
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
+      // Widened from `Exception` to `Throwable` 2026-08-27: the zen-engine's JNI-bound native
+      // methods throw UnsatisfiedLinkError/NoSuchMethodError (java.lang.Error, NOT Exception) when
+      // R8 renames the binding classes in a release build with no io.gorules.** keep rules — that
+      // slipped straight through this catch and crashed the app (real incident: ANC visit form,
+      // "met beneficiary" = Yes, then typing into RCH number — every keystroke re-runs risk
+      // grading via GoRulesRiskAdapter, which calls this). The io.gorules.** proguard keep rules
+      // (proguard-rules.pro) are the real fix; this catch is the second line of defense so any
+      // future native/engine hiccup degrades to "no result" instead of crashing — which is exactly
+      // what the comment below already promised, before Error slipped past it.
+      //
       // Malformed graph, engine error, an unhandled loader/custom-node call above, or a shape the
       // caller doesn't understand — all treated as "could not evaluate"; callers fall back the
       // same way they would for no cached rule at all. Never let a rule-engine failure crash a

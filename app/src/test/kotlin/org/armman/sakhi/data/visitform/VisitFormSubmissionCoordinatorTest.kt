@@ -10,6 +10,8 @@ import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.childregistration.ChildFormDraftEntity
 import org.armman.sakhi.data.childregistration.FakeChildFormDraftDao
+import org.armman.sakhi.data.referral.FakeReferralLinkDao
+import org.armman.sakhi.data.riskassessment.FakeRiskAssessmentDao
 import org.armman.sakhi.data.delivery.DeliverySessionEntity
 import org.armman.sakhi.data.delivery.DeliverySessionRepository
 import org.armman.sakhi.data.delivery.DeliverySessionStep
@@ -24,6 +26,12 @@ import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.SubmissionResponseData
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.armman.sakhi.data.lookup.LookupValue
+import org.armman.sakhi.data.referral.CreateReferralOutcome
+import org.armman.sakhi.data.referral.FacilityType
+import org.armman.sakhi.data.referral.Referral
+import org.armman.sakhi.data.referral.ReferralCapture
+import org.armman.sakhi.data.referral.ReferralStatus
+import org.armman.sakhi.data.referral.ReferralType
 import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
 import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
 import org.armman.sakhi.data.schedule.VisitCodeType
@@ -69,6 +77,10 @@ class VisitFormSubmissionCoordinatorTest {
   private lateinit var deliverySessionDao: FakeDeliverySessionDao
   private lateinit var deliverySessionRepository: DeliverySessionRepository
   private lateinit var childFormDraftDao: FakeChildFormDraftDao
+  private lateinit var referralLinkDao: FakeReferralLinkDao
+  private lateinit var riskAssessmentDao: FakeRiskAssessmentDao
+  private lateinit var riskAssessmentApi: FakeRiskAssessmentApi
+  private lateinit var referralRepository: FakeReferralRepository
   private lateinit var coordinator: VisitFormSubmissionCoordinator
 
   private val session = UserSession(
@@ -101,6 +113,10 @@ class VisitFormSubmissionCoordinatorTest {
     deliverySessionDao = FakeDeliverySessionDao()
     deliverySessionRepository = RoomDeliverySessionRepository(deliverySessionDao)
     childFormDraftDao = FakeChildFormDraftDao()
+    riskAssessmentApi = FakeRiskAssessmentApi()
+    referralRepository = FakeReferralRepository()
+    referralLinkDao = FakeReferralLinkDao()
+    riskAssessmentDao = FakeRiskAssessmentDao()
     coordinator = VisitFormSubmissionCoordinator(
       visitApi = visitApi,
       formSubmissionApi = formSubmissionApi,
@@ -114,7 +130,10 @@ class VisitFormSubmissionCoordinatorTest {
       formAuditRepository = formAuditRepository,
       deliverySessionRepository = deliverySessionRepository,
       childFormDraftDao = childFormDraftDao,
-      riskAssessmentApi = FakeRiskAssessmentApi(),
+      riskAssessmentApi = riskAssessmentApi,
+      referralRepository = referralRepository,
+      referralLinkDao = referralLinkDao,
+      riskAssessmentDao = riskAssessmentDao,
     )
   }
 
@@ -321,6 +340,9 @@ class VisitFormSubmissionCoordinatorTest {
       deliverySessionRepository = deliverySessionRepository,
       childFormDraftDao = childFormDraftDao,
       riskAssessmentApi = FakeRiskAssessmentApi(),
+      referralRepository = FakeReferralRepository(),
+      referralLinkDao = referralLinkDao,
+      riskAssessmentDao = riskAssessmentDao,
     )
 
     val result = loggedOutCoordinator.submit(
@@ -746,5 +768,486 @@ class VisitFormSubmissionCoordinatorTest {
     )
 
     assertEquals("caller-minted-uuid-1", formSubmissionApi.lastRequest?.localSubmissionUuid)
+  }
+
+  // --- CR-Referral-01: trigger referral creation from the server's risk-assessment response ---
+
+  private fun capture() = ReferralCapture(
+    referralType = ReferralType.STANDARD,
+    facilityName = "Civil Hospital",
+    facilityType = FacilityType.PHC,
+    referralDate = LocalDate.of(2026, 8, 27),
+  )
+
+  private fun riskAssessmentResponse(vararg flags: RiskAssessmentFlagDto) = Response.success(
+    CreateRiskAssessmentResponseDto(
+      success = true,
+      message = null,
+      data = RiskAssessmentResponseData(
+        id = "assessment-1",
+        beneficiaryId = "server-beneficiary-1",
+        visitId = "server-visit-42",
+        submissionId = "server-sub-1",
+        ruleVersionId = "rule-version-1",
+        evaluatedAt = "2026-08-27T00:00:00Z",
+        overallRiskCategory = "HIGH",
+        overallHighRiskFlag = true,
+        hrDetectedFlag = true,
+        riskFlags = flags.toList(),
+      ),
+    ),
+  )
+
+  private fun referralFlag(conditionId: String, isReferralTrigger: Boolean) = RiskAssessmentFlagDto(
+    id = "flag-$conditionId",
+    riskConditionId = conditionId,
+    riskGradeLookupValueId = "grade-1",
+    isReferralTrigger = isReferralTrigger,
+  )
+
+  @Test
+  fun `a referral trigger with a filled-in Referral tab creates exactly one referral`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    riskAssessmentApi.responseToReturn = riskAssessmentResponse(referralFlag("cond-anemia", isReferralTrigger = true))
+    referralRepository.resultToReturn = Result.success(
+      CreateReferralOutcome.Created(
+        Referral(
+          referralId = "ref-1",
+          visitId = "server-visit-42",
+          sourceSubmissionId = "server-sub-1",
+          beneficiaryId = "server-beneficiary-1",
+          referralTypeLookupValueId = "lookup-standard-1",
+          status = ReferralStatus.PENDING_FOLLOWUP,
+          facilityName = "Civil Hospital",
+          facilityType = FacilityType.PHC,
+          triggeringConditionIds = listOf("cond-anemia"),
+          createdAt = null,
+          validTill = null,
+        ),
+      ),
+    )
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = capture(),
+    )
+
+    assertTrue(result.isSuccess)
+    assertEquals(1, referralRepository.requests.size)
+    val request = referralRepository.requests.single()
+    assertEquals("server-visit-42", request.visitId)
+    assertEquals("server-beneficiary-1", request.beneficiaryId)
+    assertEquals("server-sub-1", request.sourceSubmissionId)
+    assertEquals(listOf("cond-anemia"), request.triggeringConditionIds)
+    assertEquals(ReferralType.STANDARD, request.capture.referralType)
+  }
+
+  // CR-Referral-01
+  @Test
+  fun `a created referral is cached locally keyed by the visit's localScheduleUuid`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    riskAssessmentApi.responseToReturn = riskAssessmentResponse(referralFlag("cond-anemia", isReferralTrigger = true))
+    referralRepository.resultToReturn = Result.success(
+      CreateReferralOutcome.Created(
+        Referral(
+          referralId = "ref-1",
+          visitId = "server-visit-42",
+          sourceSubmissionId = "server-sub-1",
+          beneficiaryId = "server-beneficiary-1",
+          referralTypeLookupValueId = "lookup-standard-1",
+          status = ReferralStatus.PENDING_FOLLOWUP,
+          facilityName = "Civil Hospital",
+          facilityType = FacilityType.PHC,
+          triggeringConditionIds = listOf("cond-anemia"),
+          createdAt = null,
+          validTill = "2026-08-14T00:00:00Z",
+        ),
+      ),
+    )
+
+    coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = capture(),
+    )
+
+    val cached = referralLinkDao.getByLocalScheduleUuid("schedule-1")
+    assertEquals("ref-1", cached?.referralId)
+    assertEquals("server-visit-42", cached?.visitId)
+    assertEquals(ReferralStatus.PENDING_FOLLOWUP.name, cached?.status)
+    assertEquals("lookup-standard-1", cached?.referralTypeLookupValueId)
+    assertEquals("2026-08-14T00:00:00Z", cached?.validTill)
+  }
+
+  // CR-Referral-01
+  @Test
+  fun `an AlreadyExists outcome still caches the existing referral locally`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    riskAssessmentApi.responseToReturn = riskAssessmentResponse(referralFlag("cond-anemia", isReferralTrigger = true))
+    referralRepository.resultToReturn = Result.success(
+      CreateReferralOutcome.AlreadyExists(
+        Referral(
+          referralId = "ref-existing-1",
+          visitId = "server-visit-42",
+          sourceSubmissionId = "server-sub-1",
+          beneficiaryId = "server-beneficiary-1",
+          referralTypeLookupValueId = "lookup-standard-1",
+          status = ReferralStatus.PENDING_FOLLOWUP,
+          facilityName = "Civil Hospital",
+          facilityType = FacilityType.PHC,
+          triggeringConditionIds = listOf("cond-anemia"),
+          createdAt = null,
+          validTill = "2026-08-14T00:00:00Z",
+        ),
+      ),
+    )
+
+    coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = capture(),
+    )
+
+    assertEquals("ref-existing-1", referralLinkDao.getByLocalScheduleUuid("schedule-1")?.referralId)
+  }
+
+  @Test
+  fun `multiple triggering conditions on one visit still create exactly one referral`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    riskAssessmentApi.responseToReturn = riskAssessmentResponse(
+      referralFlag("cond-anemia", isReferralTrigger = true),
+      referralFlag("cond-low-bp", isReferralTrigger = true),
+      referralFlag("cond-normal", isReferralTrigger = false),
+    )
+    referralRepository.resultToReturn = Result.success(
+      CreateReferralOutcome.Created(
+        Referral(
+          referralId = "ref-1",
+          visitId = "server-visit-42",
+          sourceSubmissionId = "server-sub-1",
+          beneficiaryId = "server-beneficiary-1",
+          referralTypeLookupValueId = "lookup-standard-1",
+          status = ReferralStatus.PENDING_FOLLOWUP,
+          facilityName = "Civil Hospital",
+          facilityType = FacilityType.PHC,
+          triggeringConditionIds = listOf("cond-anemia", "cond-low-bp"),
+          createdAt = null,
+          validTill = null,
+        ),
+      ),
+    )
+
+    coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = capture(),
+    )
+
+    // Exactly one POST /referrals call, carrying both triggering condition ids — not one call
+    // per triggering condition.
+    assertEquals(1, referralRepository.requests.size)
+    assertEquals(listOf("cond-anemia", "cond-low-bp"), referralRepository.requests.single().triggeringConditionIds)
+  }
+
+  @Test
+  fun `a referral trigger with no Referral tab capture creates no referral`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    riskAssessmentApi.responseToReturn = riskAssessmentResponse(referralFlag("cond-anemia", isReferralTrigger = true))
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = null,
+    )
+
+    assertTrue(result.isSuccess)
+    assertEquals(0, referralRepository.requests.size)
+  }
+
+  @Test
+  fun `no referral-triggering condition creates no referral even with a filled-in tab`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    riskAssessmentApi.responseToReturn = riskAssessmentResponse(referralFlag("cond-normal", isReferralTrigger = false))
+
+    coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = capture(),
+    )
+
+    assertEquals(0, referralRepository.requests.size)
+  }
+
+  @Test
+  fun `referral already existing for this visit does not fail the submission`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    riskAssessmentApi.responseToReturn = riskAssessmentResponse(referralFlag("cond-anemia", isReferralTrigger = true))
+    referralRepository.resultToReturn = Result.success(
+      CreateReferralOutcome.AlreadyExists(
+        Referral(
+          referralId = "ref-existing-1",
+          visitId = "server-visit-42",
+          sourceSubmissionId = "server-sub-1",
+          beneficiaryId = "server-beneficiary-1",
+          referralTypeLookupValueId = "lookup-standard-1",
+          status = ReferralStatus.PENDING_FOLLOWUP,
+          facilityName = "Civil Hospital",
+          facilityType = FacilityType.PHC,
+          triggeringConditionIds = listOf("cond-anemia"),
+          createdAt = null,
+          validTill = null,
+        ),
+      ),
+    )
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = capture(),
+    )
+
+    assertTrue(result.isSuccess)
+    assertEquals(1, referralRepository.requests.size)
+  }
+
+  @Test
+  fun `a createReferral failure never fails the visit submission`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    riskAssessmentApi.responseToReturn = riskAssessmentResponse(referralFlag("cond-anemia", isReferralTrigger = true))
+    referralRepository.errorToThrow = java.io.IOException("offline")
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = capture(),
+    )
+
+    assertTrue(result.isSuccess)
+  }
+
+  // --- risk-assessment retry (2026-08-27, product decision Option A: silent) ---
+
+  @Test
+  fun `a transient risk-assessment failure is retried and succeeds on a later attempt`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    riskAssessmentApi.callBehavior = { callIndex ->
+      if (callIndex < 2) throw java.io.IOException("transient blip")
+      riskAssessmentResponse(referralFlag("cond-anemia", isReferralTrigger = true))
+    }
+    referralRepository.resultToReturn = Result.success(
+      CreateReferralOutcome.Created(
+        Referral(
+          referralId = "ref-1",
+          visitId = "server-visit-42",
+          sourceSubmissionId = "server-sub-1",
+          beneficiaryId = "server-beneficiary-1",
+          referralTypeLookupValueId = "lookup-standard-1",
+          status = ReferralStatus.PENDING_FOLLOWUP,
+          facilityName = "Civil Hospital",
+          facilityType = FacilityType.PHC,
+          triggeringConditionIds = listOf("cond-anemia"),
+          createdAt = null,
+          validTill = null,
+        ),
+      ),
+    )
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = capture(),
+    )
+
+    assertTrue(result.isSuccess)
+    // 2 failures + 1 success = 3 calls; the referral only appears because the 3rd attempt's
+    // riskFlags were actually used — proves the retry's result reaches maybeCreateReferral, not
+    // just that submit() didn't crash.
+    assertEquals(3, riskAssessmentApi.requests.size)
+    assertEquals(1, referralRepository.requests.size)
+  }
+
+  @Test
+  fun `risk-assessment failing on every attempt still leaves the visit submission successful`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    riskAssessmentApi.callBehavior = { throw java.io.IOException("still offline") }
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = capture(),
+    )
+
+    assertTrue(result.isSuccess)
+    // All 3 attempts made (short, capped retry — not given up after just one try, per the
+    // Option A / backend-confirmed retry policy), then gave up silently: no referral, no thrown
+    // exception, submission unaffected.
+    assertEquals(3, riskAssessmentApi.requests.size)
+    assertEquals(0, referralRepository.requests.size)
+  }
+
+  @Test
+  fun `a non-retryable 4xx from risk-assessment is not retried`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    riskAssessmentApi.callBehavior = {
+      Response.error(422, "bad payload".toResponseBody("application/json".toMediaType()))
+    }
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = capture(),
+    )
+
+    assertTrue(result.isSuccess)
+    // A validation error on the request itself will never succeed on retry — only 1 call should
+    // ever be made, not the full 3-attempt budget.
+    assertEquals(1, riskAssessmentApi.requests.size)
+    assertEquals(0, referralRepository.requests.size)
+  }
+
+  // --- risk-assessment local persistence (punch-list items 1/2, 2026-08-27) ---
+
+  @Test
+  fun `a successful risk-assessment is persisted locally, assessment and flags both`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    riskAssessmentApi.responseToReturn = riskAssessmentResponse(
+      referralFlag("cond-anemia", isReferralTrigger = true),
+      referralFlag("cond-hypertension", isReferralTrigger = false),
+    )
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = null,
+    )
+
+    assertTrue(result.isSuccess)
+    val cached = riskAssessmentDao.getAssessmentByLocalScheduleUuid("schedule-1")
+    assertEquals("assessment-1", cached?.serverAssessmentId)
+    assertEquals("server-sub-1", cached?.submissionId)
+    assertEquals("HIGH", cached?.overallRiskCategory)
+    assertTrue(cached?.overallHighRiskFlag == true)
+    assertTrue(cached?.hrDetectedFlag == true)
+
+    val cachedFlags = riskAssessmentDao.getFlagsByLocalScheduleUuid("schedule-1")
+    assertEquals(2, cachedFlags.size)
+    assertTrue(cachedFlags.any { it.riskConditionId == "cond-anemia" && it.isReferralTrigger })
+    assertTrue(cachedFlags.any { it.riskConditionId == "cond-hypertension" && !it.isReferralTrigger })
+  }
+
+  @Test
+  fun `nothing is persisted when risk-assessment fails on every attempt`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    riskAssessmentApi.callBehavior = { throw java.io.IOException("still offline") }
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = null,
+    )
+
+    assertTrue(result.isSuccess)
+    assertEquals(null, riskAssessmentDao.getAssessmentByLocalScheduleUuid("schedule-1"))
+    assertTrue(riskAssessmentDao.getFlagsByLocalScheduleUuid("schedule-1").isEmpty())
+  }
+
+  @Test
+  fun `a resubmission's persisted flags replace the prior set rather than accumulating`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    riskAssessmentApi.responseToReturn = riskAssessmentResponse(referralFlag("cond-anemia", isReferralTrigger = true))
+
+    coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = null,
+    )
+    assertEquals(1, riskAssessmentDao.getFlagsByLocalScheduleUuid("schedule-1").size)
+
+    // A retried submission attempt (e.g. resumed background sync) re-runs the same idempotent
+    // call; simulate the server now grading one different condition instead.
+    riskAssessmentApi.responseToReturn = riskAssessmentResponse(referralFlag("cond-hypertension", isReferralTrigger = false))
+    coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = null,
+    )
+
+    val cachedFlags = riskAssessmentDao.getFlagsByLocalScheduleUuid("schedule-1")
+    assertEquals(1, cachedFlags.size)
+    assertEquals("cond-hypertension", cachedFlags.single().riskConditionId)
   }
 }

@@ -11,6 +11,8 @@ import org.armman.sakhi.data.childregistration.ChildFormDraftDao
 import org.armman.sakhi.data.childregistration.ChildFormDraftEntity
 import org.armman.sakhi.data.enrollment.EnrollmentDraftDao
 import org.armman.sakhi.data.enrollment.EnrollmentDraftEntity
+import org.armman.sakhi.data.enrollment.EnrollmentRiskBaselineDao
+import org.armman.sakhi.data.enrollment.EnrollmentRiskBaselineEntity
 import org.armman.sakhi.data.forms.DynamicFormDraftDao
 import org.armman.sakhi.data.forms.DynamicFormDraftEntity
 import org.armman.sakhi.data.schedule.ScheduleTypeConverters
@@ -26,6 +28,11 @@ import org.armman.sakhi.data.delivery.DeliveryFormDraftDao
 import org.armman.sakhi.data.delivery.DeliveryFormDraftEntity
 import org.armman.sakhi.data.delivery.DeliverySessionDao
 import org.armman.sakhi.data.delivery.DeliverySessionEntity
+import org.armman.sakhi.data.referral.ReferralLinkDao
+import org.armman.sakhi.data.riskassessment.RiskAssessmentDao
+import org.armman.sakhi.data.riskassessment.RiskAssessmentEntity
+import org.armman.sakhi.data.riskassessment.RiskFlagEntity
+import org.armman.sakhi.data.referral.ReferralLinkEntity
 
 /**
  * App's single Room database. Holds enrollment, dynamic-form and Children Register sync-queue
@@ -99,6 +106,22 @@ import org.armman.sakhi.data.delivery.DeliverySessionEntity
  *    (SQLite's default), which is the correct "unknown, fall back to the old positional
  *    assumption" state for any in-flight session that predates this fix — same standing team
  *    decision as v4-v12, no automated migration test.
+ *  - v14: [ReferralLinkEntity] (CR-Referral-01 local referral-link cache — lets the
+ *    Beneficiary Profile's visit card show the right action/chip without a network call; see
+ *    the entity's own doc for why it is keyed by `localScheduleUuid`). Additive
+ *    [MIGRATION_13_14] — creates `referral_links` only, touches no existing table. Same
+ *    no-automated-migration-test convention as v4-v13.
+ *  - v15: [RiskAssessmentEntity]/[RiskFlagEntity] (punch-list items 1/2, 2026-08-27 — local
+ *    persistence of `POST /risk-assessments` responses per visit submission, mirroring the
+ *    server's `risk_assessments`/`risk_flags` tables). Additive [MIGRATION_14_15] — creates
+ *    `risk_assessments` and `risk_flags` (plus its one index) only, touches no existing table.
+ *    Same no-automated-migration-test convention as v4-v14.
+ *  - v16: [EnrollmentRiskBaselineEntity] (punch-list item 6, 2026-08-28 — a frozen, one-time
+ *    snapshot of [org.armman.sakhi.data.enrollment.EnrollmentRiskAssessment]'s result at
+ *    registration submission; does NOT change the live Beneficiaries-list badge, which still
+ *    recomputes on read — see that entity's own doc). Additive [MIGRATION_15_16] — creates
+ *    `enrollment_risk_baselines` only, touches no existing table. Same no-automated-migration-test
+ *    convention as v4-v15.
  */
 @Database(
   entities = [
@@ -112,8 +135,12 @@ import org.armman.sakhi.data.delivery.DeliverySessionEntity
     DeliverySessionEntity::class,
     DeliveryFormDraftEntity::class,
     DeliveryChildRegistrationDraftEntity::class,
+    ReferralLinkEntity::class,
+    RiskAssessmentEntity::class,
+    RiskFlagEntity::class,
+    EnrollmentRiskBaselineEntity::class,
   ],
-  version = 13,
+  version = 16,
   exportSchema = true,
 )
 @TypeConverters(ScheduleTypeConverters::class)
@@ -128,6 +155,9 @@ abstract class SakhiDatabase : RoomDatabase() {
   abstract fun deliverySessionDao(): DeliverySessionDao
   abstract fun deliveryFormDraftDao(): DeliveryFormDraftDao
   abstract fun deliveryChildRegistrationDraftDao(): DeliveryChildRegistrationDraftDao
+  abstract fun referralLinkDao(): ReferralLinkDao
+  abstract fun riskAssessmentDao(): RiskAssessmentDao
+  abstract fun enrollmentRiskBaselineDao(): EnrollmentRiskBaselineDao
 
   companion object {
     /**
@@ -417,6 +447,99 @@ abstract class SakhiDatabase : RoomDatabase() {
         db.execSQL("ALTER TABLE `delivery_sessions` ADD COLUMN `child1BirthOrder` INTEGER")
         db.execSQL("ALTER TABLE `delivery_sessions` ADD COLUMN `child2BirthOrder` INTEGER")
         db.execSQL("ALTER TABLE `delivery_sessions` ADD COLUMN `child3BirthOrder` INTEGER")
+      }
+    }
+
+    /**
+     * v13 → v14: adds the CR-Referral-01 `referral_links` table. Purely additive — no existing
+     * table is touched, so every other queue's rows survive the upgrade untouched.
+     *
+     * Column definitions must match [ReferralLinkEntity] exactly or Room's schema validation
+     * fails at open time. `status`/`referralType` are stored as TEXT by enum name, same
+     * convention as every other enum column in this database. No automated migration test for
+     * this one either (same explicit team decision as v4-v13).
+     */
+    val MIGRATION_13_14: Migration = object : Migration(13, 14) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `referral_links` (" +
+            "`localScheduleUuid` TEXT NOT NULL, " +
+            "`referralId` TEXT NOT NULL, " +
+            "`visitId` TEXT NOT NULL, " +
+            "`status` TEXT NOT NULL, " +
+            "`referralTypeLookupValueId` TEXT NOT NULL, " +
+            "`validTill` TEXT, " +
+            "`createdAtEpochMillis` INTEGER NOT NULL, " +
+            "PRIMARY KEY(`localScheduleUuid`))",
+        )
+      }
+    }
+
+    /**
+     * v14 → v15: adds the `risk_assessments` and `risk_flags` tables (punch-list items 1/2,
+     * 2026-08-27). Purely additive — no existing table is touched, so every other queue's/cache's
+     * rows survive the upgrade untouched.
+     *
+     * Column definitions must match [RiskAssessmentEntity]/[RiskFlagEntity] exactly or Room's
+     * schema validation fails at open time. No enum columns here (both `overallRiskCategory` and
+     * `riskGradeLookupValueId` are raw TEXT — see each entity's own doc for why). No automated
+     * migration test for this one either (same explicit team decision as v4-v14).
+     */
+    val MIGRATION_14_15: Migration = object : Migration(14, 15) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `risk_assessments` (" +
+            "`localScheduleUuid` TEXT NOT NULL, " +
+            "`serverAssessmentId` TEXT NOT NULL, " +
+            "`beneficiaryId` TEXT NOT NULL, " +
+            "`visitId` TEXT, " +
+            "`submissionId` TEXT NOT NULL, " +
+            "`ruleVersionId` TEXT NOT NULL, " +
+            "`evaluatedAt` TEXT NOT NULL, " +
+            "`overallRiskCategory` TEXT NOT NULL, " +
+            "`overallHighRiskFlag` INTEGER NOT NULL, " +
+            "`hrDetectedFlag` INTEGER NOT NULL, " +
+            "`createdAtEpochMillis` INTEGER NOT NULL, " +
+            "PRIMARY KEY(`localScheduleUuid`))",
+        )
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `risk_flags` (" +
+            "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+            "`localScheduleUuid` TEXT NOT NULL, " +
+            "`serverFlagId` TEXT NOT NULL, " +
+            "`riskConditionId` TEXT NOT NULL, " +
+            "`riskGradeLookupValueId` TEXT NOT NULL, " +
+            "`observedValueJson` TEXT, " +
+            "`isReferralTrigger` INTEGER NOT NULL, " +
+            "`isEducationTrigger` INTEGER NOT NULL, " +
+            "`isHrVisitTrigger` INTEGER NOT NULL)",
+        )
+        db.execSQL(
+          "CREATE INDEX IF NOT EXISTS `index_risk_flags_localScheduleUuid` " +
+            "ON `risk_flags` (`localScheduleUuid`)",
+        )
+      }
+    }
+
+    /**
+     * v15 → v16: adds the `enrollment_risk_baselines` table (punch-list item 6, 2026-08-28).
+     * Purely additive — no existing table is touched.
+     *
+     * Column definitions must match [EnrollmentRiskBaselineEntity] exactly or Room's schema
+     * validation fails at open time. `overallRiskLevel` is TEXT by enum name; `findingsJson` is a
+     * plain Gson-serialized TEXT blob, no `@TypeConverter` needed. No automated migration test for
+     * this one either (same explicit team decision as v4-v15).
+     */
+    val MIGRATION_15_16: Migration = object : Migration(15, 16) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `enrollment_risk_baselines` (" +
+            "`localBeneficiaryId` TEXT NOT NULL, " +
+            "`overallRiskLevel` TEXT NOT NULL, " +
+            "`findingsJson` TEXT NOT NULL, " +
+            "`computedAtEpochMillis` INTEGER NOT NULL, " +
+            "PRIMARY KEY(`localBeneficiaryId`))",
+        )
       }
     }
   }

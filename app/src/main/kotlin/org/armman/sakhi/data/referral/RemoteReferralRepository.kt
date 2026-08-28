@@ -7,12 +7,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
+import org.armman.sakhi.data.enrollment.ApiErrorParser
+import org.armman.sakhi.data.lookup.LookupRepository
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val KEY_REFERRAL_FOLLOWUP_CACHE = "referral_pending_followup_cache"
 private const val STATUS_PENDING_FOLLOWUP = "PENDING_FOLLOWUP"
+private const val HTTP_CREATED = 201
+private const val LOOKUP_CATEGORY_REFERRAL_TYPE = "REFERRAL_TYPE"
 
 /** Wire shape persisted to disk — [ReferralFollowUp.referralDate]/[ReferralFollowUp.followUpDueDate]
  * are `java.time.LocalDate`, so (same reasoning as [org.armman.sakhi.data.dashboard.RemoteDashboardRepository])
@@ -29,14 +34,19 @@ private data class CachedReferralFollowUp(
 )
 
 /**
- * Real [ReferralRepository] backed by `GET /sakhi/{sakhiId}/referrals/pending-followup`. Same
- * fetch-then-cache-then-fallback resilience shape as the dashboard and pada repositories.
+ * Real [ReferralRepository] backed by `GET /sakhi/{sakhiId}/referrals/pending-followup`,
+ * `POST /referrals`, `POST /referrals/{id}/follow-up`, and `PATCH /referrals/{id}/convert`. Same
+ * fetch-then-cache-then-fallback resilience shape as the dashboard and pada repositories for the
+ * follow-up list; the other three calls have no offline/cache story of their own — they're only
+ * ever invoked once a visit submission (or an explicit Sakhi action on an existing referral) has
+ * already reached the server, so they're inherently online-only.
  */
 @Singleton
 class RemoteReferralRepository @Inject constructor(
   private val referralApi: ReferralApi,
   private val sessionStore: SessionStore,
   private val store: SecureKeyValueStore,
+  private val lookupRepository: LookupRepository,
 ) : ReferralRepository {
 
   private val gson = Gson()
@@ -53,6 +63,123 @@ class RemoteReferralRepository @Inject constructor(
     readPersisted()?.map { it.toDomain() }
       ?: throw IllegalStateException("No referral follow-ups available online or cached")
   }
+
+  /** See [ReferralRepository.createReferral]'s doc. `201` → [CreateReferralOutcome.Created],
+   * `200` → [CreateReferralOutcome.AlreadyExists] (backend's confirmed idempotent-return for a
+   * duplicate `visitId`, issue #197) — both are normal [Result.success], never [Result.failure].
+   * Any other non-2xx surfaces as [Result.failure] with the backend's own message via
+   * [ApiErrorParser], same pattern every other write call in this app uses. */
+  override suspend fun createReferral(
+    visitId: String?,
+    beneficiaryId: String,
+    sourceSubmissionId: String?,
+    capture: ReferralCapture,
+    triggeringConditionIds: List<String>,
+  ): Result<CreateReferralOutcome> = runCatching {
+    val referralTypeLookupValueId = lookupRepository.findValue(LOOKUP_CATEGORY_REFERRAL_TYPE, capture.referralType.name)?.id
+      ?: throw IllegalStateException("No $LOOKUP_CATEGORY_REFERRAL_TYPE lookup value for ${capture.referralType.name}")
+
+    val request = CreateReferralRequestDto(
+      beneficiaryId = beneficiaryId,
+      visitId = visitId,
+      sourceSubmissionId = sourceSubmissionId,
+      referralTypeLookupValueId = referralTypeLookupValueId,
+      referralDate = capture.referralDate.format(DateTimeFormatter.ISO_LOCAL_DATE),
+      status = STATUS_PENDING_FOLLOWUP,
+      facilityType = capture.facilityType.name,
+      facilityName = capture.facilityName,
+      triggerConditionListJson = triggeringConditionIds,
+    )
+    val response = referralApi.createReferral(request)
+
+    if (!response.isSuccessful) {
+      val apiError = ApiErrorParser.parse(response.errorBody()?.string())
+      throw IllegalStateException(apiError.message ?: "POST /referrals failed: HTTP ${response.code()}")
+    }
+    val data = response.body()?.data
+      ?: throw IllegalStateException("POST /referrals succeeded but returned no referral data")
+    val referral = data.toDomain()
+    if (response.code() == HTTP_CREATED) {
+      CreateReferralOutcome.Created(referral)
+    } else {
+      CreateReferralOutcome.AlreadyExists(referral)
+    }
+  }
+
+  /** See [ReferralRepository.submitFollowUp]'s doc for the confirmed COMPLETED/INCOMPLETE
+   * behavior — this function just relays the backend's response, it doesn't compute status
+   * itself. */
+  override suspend fun submitFollowUp(
+    referralId: String,
+    visitedFacilityFlag: Boolean,
+    followupDate: LocalDate,
+    notVisitedReason: String?,
+    diagnosis: String?,
+    treatmentGiven: String?,
+    outcome: String?,
+  ): Result<ReferralFollowUpResult> = runCatching {
+    val request = SubmitReferralFollowUpRequestDto(
+      visitedFacilityFlag = visitedFacilityFlag,
+      followupDate = followupDate.format(DateTimeFormatter.ISO_LOCAL_DATE),
+      notVisitedReason = notVisitedReason,
+      diagnosis = diagnosis,
+      treatmentGiven = treatmentGiven,
+      outcome = outcome,
+    )
+    val response = referralApi.submitFollowUp(referralId, request)
+    if (!response.isSuccessful) {
+      val apiError = ApiErrorParser.parse(response.errorBody()?.string())
+      throw IllegalStateException(apiError.message ?: "POST /referrals/$referralId/follow-up failed: HTTP ${response.code()}")
+    }
+    val data = response.body()?.data
+      ?: throw IllegalStateException("Follow-up submission succeeded but returned no data")
+    val followUpDto = data.followup
+      ?: throw IllegalStateException("Follow-up submission succeeded but returned no followup record")
+    val referralDto = data.referral
+      ?: throw IllegalStateException("Follow-up submission succeeded but returned no referral record")
+
+    ReferralFollowUpResult(
+      followUp = ReferralFollowUpSubmission(
+        id = followUpDto.id.orEmpty(),
+        referralId = followUpDto.referralId ?: referralId,
+        visitedFacilityFlag = followUpDto.visitedFacilityFlag ?: visitedFacilityFlag,
+        notVisitedReason = followUpDto.notVisitedReason,
+        diagnosis = followUpDto.diagnosis,
+        treatmentGiven = followUpDto.treatmentGiven,
+        outcome = followUpDto.outcome,
+        followupStatus = followUpDto.followupStatus.toFollowUpOutcomeStatus(),
+      ),
+      referral = referralDto.toDomain(),
+    )
+  }
+
+  /** See [ReferralRepository.convertToAccompanied]'s doc — a `409` (already Accompanied) is a
+   * real, expected outcome (confirmed live), surfaced as [Result.failure] since there's no
+   * confirmed idempotent-return behavior for this endpoint the way create-referral has. */
+  override suspend fun convertToAccompanied(referralId: String): Result<Referral> = runCatching {
+    val response = referralApi.convertToAccompanied(referralId)
+    if (!response.isSuccessful) {
+      val apiError = ApiErrorParser.parse(response.errorBody()?.string())
+      throw IllegalStateException(apiError.message ?: "PATCH /referrals/$referralId/convert failed: HTTP ${response.code()}")
+    }
+    val data = response.body()?.data
+      ?: throw IllegalStateException("Convert succeeded but returned no referral data")
+    data.toDomain()
+  }
+
+  private fun ReferralDataDto.toDomain() = Referral(
+    referralId = id.orEmpty(),
+    visitId = visitId,
+    sourceSubmissionId = sourceSubmissionId,
+    beneficiaryId = beneficiaryId.orEmpty(),
+    referralTypeLookupValueId = referralTypeLookupValueId.orEmpty(),
+    status = status.toReferralStatus(),
+    facilityName = facilityName.orEmpty(),
+    facilityType = facilityType.toFacilityTypeOrDefault(FacilityType.OTHER),
+    triggeringConditionIds = triggerConditionListJson.orEmpty(),
+    createdAt = createdAt,
+    validTill = validTill,
+  )
 
   private suspend fun fetchFollowUps(): List<ReferralFollowUp>? {
     val sakhiId = sessionStore.readSession()?.subjectId ?: return null
@@ -122,6 +249,18 @@ private fun String?.toReferralFollowUpStatus(): ReferralFollowUpStatus =
   } else {
     ReferralFollowUpStatus.UNKNOWN
   }
+
+private fun String?.toReferralStatus(): ReferralStatus =
+  ReferralStatus.entries.firstOrNull { it != ReferralStatus.UNKNOWN && it.name.equals(this, ignoreCase = true) }
+    ?: ReferralStatus.UNKNOWN
+
+private fun String?.toFollowUpOutcomeStatus(): ReferralFollowUpOutcomeStatus =
+  ReferralFollowUpOutcomeStatus.entries.firstOrNull {
+    it != ReferralFollowUpOutcomeStatus.UNKNOWN && it.name.equals(this, ignoreCase = true)
+  } ?: ReferralFollowUpOutcomeStatus.UNKNOWN
+
+private fun String?.toFacilityTypeOrDefault(default: FacilityType): FacilityType =
+  FacilityType.entries.firstOrNull { it.name.equals(this, ignoreCase = true) } ?: default
 
 /** `"2026-08-10"` (date-only, per the confirmed sample) → [LocalDate], null for anything
  * unparseable rather than throwing. */

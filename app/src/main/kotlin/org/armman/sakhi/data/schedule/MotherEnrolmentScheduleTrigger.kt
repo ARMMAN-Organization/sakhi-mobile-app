@@ -1,5 +1,6 @@
 package org.armman.sakhi.data.schedule
 
+import android.util.Log
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.LMP_DATE_QUESTION_CODE
 import java.time.LocalDate
@@ -19,6 +20,8 @@ import javax.inject.Singleton
  * registration the Sakhi has already completed — she can always be given a schedule later, but a
  * lost enrolment means an untracked pregnancy. Returns the number of visits generated, or 0.
  */
+private const val TAG = "MotherEnrolScheduleTrigger"
+
 @Singleton
 class MotherEnrolmentScheduleTrigger @Inject constructor(
   private val coordinator: VisitScheduleCoordinator,
@@ -30,7 +33,14 @@ class MotherEnrolmentScheduleTrigger @Inject constructor(
     answers: FormAnswers,
     registrationDate: LocalDate,
   ): Int = runCatching {
-    val lmp = answers.lmpDate() ?: return 0
+    val lmp = answers.lmpDate()
+    if (lmp == null) {
+      // Distinct from a thrown exception below: this is the expected "no LMP captured" path, not
+      // a failure. Logged at WARN (not ERROR) so it doesn't look like a crash, but still shows up
+      // if a real enrolment is unexpectedly missing this answer.
+      Log.w(TAG, "generateFor($localBeneficiaryId): no LMP in answers, skipping schedule generation")
+      return 0
+    }
     // EDD is a computed field on the form, so it may not be present in `answers` at all. Deriving
     // it from the LMP here uses the same rule the form's own evaluator does.
     val edd = lmp.plusDays(ruleSource.eddOffsetDays().toLong())
@@ -43,6 +53,13 @@ class MotherEnrolmentScheduleTrigger @Inject constructor(
         edd = edd,
       ),
     )
+  }.onFailure { error ->
+    // Previously swallowed with no trace at all (getOrDefault alone) — this is exactly the blind
+    // spot that let the dashboard/motherlink/previsithealth release-only regressions (see
+    // proguard-rules.pro) go unnoticed for a while. Logging here doesn't change the "never block
+    // enrolment" behaviour below, it just makes a future instance of this bug diagnosable from
+    // logcat instead of invisible.
+    Log.e(TAG, "generateFor($localBeneficiaryId): schedule generation failed, enrolment still saved", error)
   }.getOrDefault(0)
 
   /** Answers store dates as ISO strings; a malformed one reads as absent rather than throwing. */

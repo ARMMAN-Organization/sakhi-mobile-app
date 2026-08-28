@@ -10,6 +10,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import java.time.LocalDate
@@ -17,8 +18,11 @@ import java.time.LocalDate
 /**
  * CR-022e cases TR-1 … TR-8 and SU-1 … SU-6.
  *
- * CR-032 (GoRules): [GoRulesScheduleFeatureFlag.ENABLED] is now `true` (flipped 2026-08-13 for
- * internal dev testing — see that flag's own doc). Every test above this file's "GoRules" section
+ * CR-032 (GoRules): [GoRulesScheduleFeatureFlag.ENABLED] is back to `false` (reverted 2026-08-27
+ * after the R8/JNI release-build failure — see that flag's own doc). The three tests in this
+ * file's "GoRules" section that depend on a wired adapter actually being consulted are therefore
+ * `assumeTrue`-skipped while the flag is off, and reactivate on their own when it goes back on.
+ * Every test above this file's "GoRules" section
  * still constructs [VisitScheduleCoordinator] without a [GoRulesScheduleAdapter] (`goRulesAdapter`
  * defaults to null), so those tests exercise the flag-on-but-no-adapter-wired path — which, per
  * [VisitScheduleCoordinator]'s own fallback design, behaves exactly like the old Hardcoded-only
@@ -410,7 +414,7 @@ class VisitScheduleCoordinatorTest {
    */
   @Test
   fun `HR follow-up falls back to the Kotlin generator when no adapter is wired`() = runTest {
-    assertTrue("this test exercises the flag-on path", GoRulesScheduleFeatureFlag.ENABLED)
+    assumeTrue(GoRulesScheduleFeatureFlag.ENABLED)
     val withNoAdapterWired = VisitScheduleCoordinator(
       repository = repository,
       ancGenerator = AncScheduleGenerator(HardcodedRuleSource()),
@@ -458,6 +462,11 @@ class VisitScheduleCoordinatorTest {
    * it must be trusted with no fallback, even though a fallback path exists now. */
   @Test
   fun `HR follow-up trusts a real 'no visit needed' answer with no fallback`() = runTest {
+    // GoRules reverted to OFF (2026-08-27, R8/JNI release-build failure — see
+    // GoRulesScheduleFeatureFlag's own doc). With the flag off the coordinator never
+    // consults the adapter at all, so this test's premise cannot hold; skipped rather than
+    // deleted so it reactivates automatically when the flag goes back on.
+    assumeTrue(GoRulesScheduleFeatureFlag.ENABLED)
     val withGoRulesSayingNo = VisitScheduleCoordinator(
       repository = repository,
       ancGenerator = AncScheduleGenerator(HardcodedRuleSource()),
@@ -482,6 +491,11 @@ class VisitScheduleCoordinatorTest {
    * doesn't ignore a real GoRules answer in favor of the Hardcoded fallback. */
   @Test
   fun `HR follow-up uses the wired adapter's Generated visit directly`() = runTest {
+    // GoRules reverted to OFF (2026-08-27, R8/JNI release-build failure — see
+    // GoRulesScheduleFeatureFlag's own doc). With the flag off the coordinator never
+    // consults the adapter at all, so this test's premise cannot hold; skipped rather than
+    // deleted so it reactivates automatically when the flag goes back on.
+    assumeTrue(GoRulesScheduleFeatureFlag.ENABLED)
     val goRulesDate = "2026-04-01" // deliberately different from Hardcoded's 2026-03-21
     val withGoRulesAnswer = VisitScheduleCoordinator(
       repository = repository,

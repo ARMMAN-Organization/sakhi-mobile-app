@@ -1,5 +1,7 @@
 package org.armman.sakhi.data.beneficiaryprofile
 
+import org.armman.sakhi.data.referral.ReferralLinkEntity
+import org.armman.sakhi.data.referral.ReferralStatus
 import org.armman.sakhi.data.schedule.VisitCodeType
 import org.armman.sakhi.data.schedule.VisitScheduleStatus
 import org.armman.sakhi.data.schedule.schedule
@@ -296,6 +298,124 @@ class ProfileVisitMapperTest {
 
     assertNull(visit.daysRemaining)
     assertFalse(visit.startable)
+  }
+
+  // CR-Referral-01
+  @Test
+  fun `a completed visit with a pending referral follow-up gets the Fill Form action and the incomplete flag`() {
+    val link = ReferralLinkEntity(
+      localScheduleUuid = "s1",
+      referralId = "referral-1",
+      visitId = "server-visit-1",
+      status = ReferralStatus.PENDING_FOLLOWUP.name,
+      referralTypeLookupValueId = "lookup-standard",
+      validTill = "2026-08-11T00:00:00Z",
+      createdAtEpochMillis = 0L,
+    )
+    val visits = listOf(
+      row("s1", "ANC1", 1, today.minusDays(5), status = VisitScheduleStatus.COMPLETED),
+    ).toProfileVisits(today, referralLinks = mapOf("s1" to link))
+
+    val visit = visits.single()
+    assertEquals(ProfileVisitAction.FILL_FORM, visit.action)
+    assertTrue(visit.referralIncomplete)
+    assertEquals(ReferralStatus.PENDING_FOLLOWUP, visit.referralStatus)
+    assertEquals("referral-1", visit.referralId)
+  }
+
+  /**
+   * CR-Referral-01 bug report (2026-08-27): a completed visit with a pending referral follow-up
+   * was sorted to the very bottom, beneath every upcoming visit — on a full ten-visit ANC series
+   * (nine open cards ahead of it) that buried it out of sight entirely. It must sort to the very
+   * top instead, above upcoming visits too, since it's the single most time-sensitive card on the
+   * screen.
+   */
+  @Test
+  fun `a completed visit with a pending referral follow-up sorts above every upcoming visit`() {
+    val link = ReferralLinkEntity(
+      localScheduleUuid = "s1",
+      referralId = "referral-1",
+      visitId = "server-visit-1",
+      status = ReferralStatus.PENDING_FOLLOWUP.name,
+      referralTypeLookupValueId = "lookup-standard",
+      validTill = "2026-08-11T00:00:00Z",
+      createdAtEpochMillis = 0L,
+    )
+    val visits = listOf(
+      row("s1", "ANC1", 1, today.minusDays(5), status = VisitScheduleStatus.COMPLETED),
+      row("s2", "ANC2", 2, today.plusDays(30)),
+      row("s3", "ANC3", 3, today.plusDays(60)),
+    ).toProfileVisits(today, referralLinks = mapOf("s1" to link))
+
+    assertEquals(listOf("ANC1", "ANC2", "ANC3"), visits.map { it.label })
+  }
+
+  /**
+   * Same bug report — a beneficiary can have more than one completed visit with a pending
+   * referral at once (e.g. two separate visits each flagged a different condition). Both must
+   * lead the list, newest first between themselves, same rule the completed-history group below
+   * them already uses.
+   */
+  @Test
+  fun `multiple pending-referral visits sort above upcoming, newest first among themselves`() {
+    fun pendingLink(scheduleUuid: String, referralId: String) = ReferralLinkEntity(
+      localScheduleUuid = scheduleUuid,
+      referralId = referralId,
+      visitId = "server-$scheduleUuid",
+      status = ReferralStatus.PENDING_FOLLOWUP.name,
+      referralTypeLookupValueId = "lookup-standard",
+      validTill = "2026-08-11T00:00:00Z",
+      createdAtEpochMillis = 0L,
+    )
+    val visits = listOf(
+      row("s1", "ANC1", 1, today.minusDays(30), status = VisitScheduleStatus.COMPLETED),
+      row("s2", "ANC2", 2, today.minusDays(5), status = VisitScheduleStatus.COMPLETED),
+      row("s3", "ANC3", 3, today.plusDays(30)),
+    ).toProfileVisits(
+      today,
+      referralLinks = mapOf(
+        "s1" to pendingLink("s1", "referral-1"),
+        "s2" to pendingLink("s2", "referral-2"),
+      ),
+    )
+
+    assertEquals(listOf("ANC2", "ANC1", "ANC3"), visits.map { it.label })
+  }
+
+  // CR-Referral-01
+  @Test
+  fun `a completed visit with a completed referral keeps See Data but stops flagging incomplete`() {
+    val link = ReferralLinkEntity(
+      localScheduleUuid = "s1",
+      referralId = "referral-1",
+      visitId = "server-visit-1",
+      status = ReferralStatus.COMPLETED.name,
+      referralTypeLookupValueId = "lookup-standard",
+      validTill = "2026-08-11T00:00:00Z",
+      createdAtEpochMillis = 0L,
+    )
+    val visits = listOf(
+      row("s1", "ANC1", 1, today.minusDays(5), status = VisitScheduleStatus.COMPLETED),
+    ).toProfileVisits(today, referralLinks = mapOf("s1" to link))
+
+    val visit = visits.single()
+    assertEquals(ProfileVisitAction.SEE_DATA, visit.action)
+    assertFalse(visit.referralIncomplete)
+    assertEquals(ReferralStatus.COMPLETED, visit.referralStatus)
+  }
+
+  // CR-Referral-01
+  @Test
+  fun `a completed visit with no referral link is unaffected`() {
+    val visits = listOf(
+      row("s1", "ANC1", 1, today.minusDays(5), status = VisitScheduleStatus.COMPLETED),
+    ).toProfileVisits(today)
+
+    val visit = visits.single()
+    assertEquals(ProfileVisitAction.SEE_DATA, visit.action)
+    assertFalse(visit.referralIncomplete)
+    assertNull(visit.referralStatus)
+    assertNull(visit.referralId)
   }
 
   @Test

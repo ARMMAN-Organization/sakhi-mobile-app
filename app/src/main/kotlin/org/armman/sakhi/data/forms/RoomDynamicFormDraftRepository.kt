@@ -7,6 +7,7 @@ import org.armman.sakhi.data.audit.FormAuditRepository
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import org.armman.sakhi.data.enrollment.DuplicateAcknowledgement
+import org.armman.sakhi.data.enrollment.EnrollmentRiskBaselineTrigger
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.schedule.MotherEnrolmentScheduleTrigger
 import org.armman.sakhi.data.schedule.VisitScheduleSyncExecutor
@@ -47,6 +48,7 @@ class RoomDynamicFormDraftRepository @Inject constructor(
   private val scheduleTrigger: MotherEnrolmentScheduleTrigger,
   private val visitScheduleSyncExecutor: VisitScheduleSyncExecutor,
   private val formAuditRepository: FormAuditRepository,
+  private val riskBaselineTrigger: EnrollmentRiskBaselineTrigger,
 ) : DynamicFormDraftRepository {
 
   override suspend fun saveDraft(
@@ -83,6 +85,10 @@ class RoomDynamicFormDraftRepository @Inject constructor(
     // re-registration or a future visit form routed through here would each mint one.
     if (formCode == MOTHER_REGISTRATION_FORM_CODE) {
       scheduleTrigger.generateFor(localBeneficiaryId, answers, registrationDate)
+      // Punch-list item 6: one-time frozen baseline snapshot, same gate/timing as the schedule
+      // trigger above — see EnrollmentRiskBaselineEntity's own doc for why this never touches the
+      // live Beneficiaries-list badge.
+      riskBaselineTrigger.generateFor(localBeneficiaryId, answers, registrationDate)
     }
 
     // Offline: the draft is safely persisted and waits in the queue for the Sakhi's Data Upload

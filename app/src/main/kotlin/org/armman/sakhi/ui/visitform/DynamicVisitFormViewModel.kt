@@ -55,6 +55,9 @@ import org.armman.sakhi.data.visitform.RiskConditionFieldMap
 import org.armman.sakhi.data.rules.GoRulesRiskAdapter
 import org.armman.sakhi.data.rules.RiskConditionIds
 import org.armman.sakhi.data.rules.RiskGrade
+import org.armman.sakhi.data.referral.FacilityType
+import org.armman.sakhi.data.referral.ReferralCapture
+import org.armman.sakhi.data.referral.ReferralType
 import org.armman.sakhi.data.rules.RiskGradingResult
 import java.time.LocalDate
 import javax.inject.Inject
@@ -126,13 +129,34 @@ data class DynamicVisitFormUiState(
    * POSTPARTUM_VISIT/NEONATAL_VISIT only — see that function's doc). Drives the Submit button's
    * loading state and guards against a double-tap firing two submissions. */
   val isSubmitting: Boolean = false,
-  /** Standalone hand-built fields for the Referral outer tab (bharath, 2026-08-08) - NOT part of
-   * the ANC_VISIT schema's own "Referrals" section (that's a different set of questions, already
-   * rendered as a Visit Data sub-tab). Fetch+render pass scope: captured locally only, Submit
-   * fires the same "coming soon" event the rest of the form uses - no backend call yet. */
+  /** CR-Referral-01 Pass 4 (2026-08-27, per PRD's "Visit completed — Risk assessment — Referral
+   * decision" tree): true once [onFinish] computes the final on-device [RiskGradingResult] and
+   * finds at least one condition with `isReferralTrigger == true` — [DynamicVisitFormScreen]
+   * swaps the whole screen to the referral capture step instead of the normal tab body when this
+   * is true. Deliberately driven by the ON-DEVICE result, not the server's own
+   * `POST /risk-assessments` response (which only exists after the visit has actually reached the
+   * server) — that's what lets this step appear identically whether she's online or offline at
+   * submit time, per SRS FR-S-4.1's offline-first mandate. Reset to false only by
+   * [cancelReferralCapture]; a second [onFinish] call while this is already true skips the trigger
+   * check and proceeds straight to the real submission. */
+  val showReferralCaptureStep: Boolean = false,
+  /** Standalone hand-built fields for the referral capture step (bharath, 2026-08-08; moved out of
+   * a persistent "Referral" tab into a conditional post-visit step in Pass 4, 2026-08-27 — see
+   * [showReferralCaptureStep]'s doc for why) - NOT part of the ANC_VISIT schema's own "Referrals"
+   * section (that's a different set of questions, already rendered as a Visit Data sub-tab).
+   * Bundled into a [org.armman.sakhi.data.referral.ReferralCapture] by [referralCaptureOrNull] and
+   * passed to [VisitFormDraftRepository.submitDraft] on the same real Submit as the rest of the
+   * form. Still only ever results in an actual referral once the server's risk-assessment response
+   * *also* confirms a trigger (the authoritative check — see
+   * [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator.maybeCreateReferral]'s doc for
+   * why the on-device result that gates this step isn't treated as good enough on its own). */
   val referralDate: LocalDate? = null,
-  val referralFacility: String? = null,
-  val referralType: String? = null,
+  /** Free-text facility name — CR-Referral-01 replaced the old hardcoded-placeholder-dropdown
+   * capture with this + [referralFacilityType] (the backend's actual `POST /referrals` shape has
+   * no facility directory to select from; confirmed 2026-08-27). */
+  val referralFacilityName: String? = null,
+  val referralFacilityType: FacilityType? = null,
+  val referralType: ReferralType? = null,
   /** Offline high-risk rule evaluation (CR — real-time field highlighting), evaluated live as
    * relevant fields are filled — see [DynamicVisitFormViewModel.recheckGoRulesRisk]'s doc. Null
    * until the first successful evaluation (no cached rule pack yet, or nothing relevant answered
@@ -160,10 +184,11 @@ sealed interface DynamicVisitFormEvent {
    * partial-save exists for this fetch+render pass, same as before. */
   data object ExitForm : DynamicVisitFormEvent
 
-  /** Still used by the standalone Referral tab's own submit stub (CR-028, out of scope for this
-   * pass) — its action button fires this instead of a real submission. All four visit form codes
-   * (ANC_VISIT/POSTPARTUM_VISIT/NEONATAL_VISIT/INFANT_VISIT) now have a real submission contract,
-   * see [DynamicVisitFormViewModel.onFinish]. */
+  /** Only reachable now for a form code outside [SUBMITTABLE_FORM_CODES] — see [onFinish]'s
+   * guard. All four visit form codes (ANC_VISIT/POSTPARTUM_VISIT/NEONATAL_VISIT/INFANT_VISIT)
+   * share the same real Submit button and submission contract as of CR-Referral-01. The referral
+   * capture step (Pass 4, 2026-08-27) is no longer a tab of its own — it's a conditional
+   * screen [onFinish] itself triggers, so it has no separate ComingSoon path either. */
   data object ComingSoon : DynamicVisitFormEvent
 
   /** The visit form submitted successfully — the screen shows a confirmation and exits. */
@@ -544,12 +569,62 @@ class DynamicVisitFormViewModel @Inject constructor(
     _uiState.update { it.copy(referralDate = date) }
   }
 
-  fun setReferralFacility(facility: String?) {
-    _uiState.update { it.copy(referralFacility = facility) }
+  fun setReferralFacilityName(name: String?) {
+    _uiState.update { it.copy(referralFacilityName = name) }
   }
 
-  fun setReferralType(type: String?) {
+  fun setReferralFacilityType(type: FacilityType?) {
+    _uiState.update { it.copy(referralFacilityType = type) }
+  }
+
+  fun setReferralType(type: ReferralType?) {
     _uiState.update { it.copy(referralType = type) }
+  }
+
+  /** CR-Referral-01 Pass 4: back out of the referral capture step to keep editing the visit form
+   * — does NOT clear whatever fields she'd already filled in, so returning to this step later
+   * (via another Submit tap) picks up where she left off. */
+  fun cancelReferralCapture() {
+    _uiState.update { it.copy(showReferralCaptureStep = false) }
+  }
+
+  /** CR-Referral-01 Pass 4: "no referral needed" — her judgement call per the PRD's decision
+   * tree ("Sakhi uses her best judgement"), even though the on-device evaluation flagged a
+   * trigger. Clears any partially-filled fields so [referralCaptureOrNull] returns null, then
+   * finishes the same real submit [onFinish] already performs (showReferralCaptureStep is already
+   * true at this point, so that second call skips straight past the trigger check). */
+  fun skipReferralCapture() {
+    _uiState.update {
+      it.copy(
+        referralDate = null,
+        referralFacilityName = null,
+        referralFacilityType = null,
+        referralType = null,
+      )
+    }
+    onFinish()
+  }
+
+  /** CR-Referral-01: bundles the Referral tab's captured fields for [onFinish] to pass down to
+   * [VisitFormDraftRepository.submitDraft] — null unless the Sakhi has selected both a referral
+   * type and a facility, since a create-referral call with a missing required field would just
+   * be rejected server-side; incomplete capture is treated as "she hasn't filled this in yet",
+   * not submitted partially. */
+  private fun referralCaptureOrNull(): ReferralCapture? {
+    val state = _uiState.value
+    val type = state.referralType ?: return null
+    val facilityName = state.referralFacilityName?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    val facilityType = state.referralFacilityType ?: return null
+    // referralDate is required by POST /referrals (backend-confirmed 2026-08-27) — an
+    // incompletely-filled Referral tab (this field still null) means no referral is captured at
+    // all, same as any other missing required field above.
+    val referralDate = state.referralDate ?: return null
+    return ReferralCapture(
+      referralType = type,
+      facilityName = facilityName,
+      facilityType = facilityType,
+      referralDate = referralDate,
+    )
   }
 
   /** Summary tab's Tests card rows - see [VisitFormRiskAssessment]'s scope note (BP/Hb/Weight
@@ -847,13 +922,28 @@ class DynamicVisitFormViewModel @Inject constructor(
     if (state.isSubmitting) return
     val version = state.version ?: return
 
-    _uiState.update { it.copy(isSubmitting = true) }
     viewModelScope.launch {
       val formCode = state.formCode.orEmpty()
       val finalAnswers = _uiState.value.answers
       // Phase 5: one last, authoritative grading against the complete final answers — see
       // evaluateGoRulesRisk's doc for why this isn't just state.goRulesRiskResult reused as-is.
+      // Recomputed on every onFinish() call, including the second one below (after the referral
+      // capture step) — cheap and deterministic against the same unchanged visit answers, so
+      // there's no need to stash the first call's result across the two taps.
       val finalRiskResult = evaluateGoRulesRisk(formCode, finalAnswers)
+
+      // CR-Referral-01 Pass 4: on-device trigger check, gating the referral capture step —
+      // see DynamicVisitFormUiState.showReferralCaptureStep's doc for why this must be on-device
+      // rather than waiting for the server's own risk-assessment call. Only fires once per visit
+      // (state.showReferralCaptureStep already true means she's already been through this step
+      // this submit attempt, whether she filled it in or skipped it).
+      val referralTriggered = finalRiskResult?.conditions.orEmpty().any { it.isReferralTrigger }
+      if (referralTriggered && !state.showReferralCaptureStep) {
+        _uiState.update { it.copy(showReferralCaptureStep = true) }
+        return@launch
+      }
+
+      _uiState.update { it.copy(isSubmitting = true) }
       val result = visitFormDraftRepository.submitDraft(
         localScheduleUuid = visitId,
         formCode = formCode,
@@ -861,6 +951,7 @@ class DynamicVisitFormViewModel @Inject constructor(
         answers = finalAnswers,
         visitDate = visitDate,
         riskResult = finalRiskResult,
+        referralCapture = referralCaptureOrNull(),
       )
       _uiState.update { it.copy(isSubmitting = false) }
       when (result) {

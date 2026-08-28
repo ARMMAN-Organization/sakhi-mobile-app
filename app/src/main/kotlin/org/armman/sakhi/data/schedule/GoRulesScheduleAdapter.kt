@@ -307,7 +307,9 @@ class GoRulesScheduleAdapter @Inject constructor(
     ruleSetId: String,
   ): JsonObject? = try {
     ruleEvaluator.evaluate(rulesJson, answers)
-  } catch (e: Exception) {
+  } catch (e: Throwable) {
+    // Throwable, not Exception — see ZenRuleEvaluator.evaluate's catch for why (native/JNI linkage
+    // failures surface as Error, not Exception).
     Log.w(TAG, "GoRulesScheduleAdapter: evaluate($ruleSetId) threw ${e::class.simpleName} — ${e.message}")
     null
   }

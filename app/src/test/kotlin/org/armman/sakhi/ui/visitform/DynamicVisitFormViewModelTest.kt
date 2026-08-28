@@ -181,10 +181,85 @@ class DynamicVisitFormViewModelTest {
       answers: FormAnswers,
       visitDate: java.time.LocalDate,
       riskResult: org.armman.sakhi.data.rules.RiskGradingResult?,
+      referralCapture: org.armman.sakhi.data.referral.ReferralCapture?,
     ): VisitFormSubmitResult = throw NotImplementedError("not exercised by these tests")
 
     override suspend fun getUploadRecords(): List<FormUploadRecord> = emptyList()
     override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = MutableStateFlow(emptyList())
+  }
+
+  /** CR-Referral-01 Pass 4: records every [submitDraft] call (in particular the [referralCapture]
+   * threaded through) so a test can assert what actually reached the repository, unlike
+   * [FakeVisitFormDraftRepository] above which is only for tests that never call [onFinish]. */
+  private class RecordingVisitFormDraftRepository : VisitFormDraftRepository {
+    data class Call(
+      val localScheduleUuid: String,
+      val formCode: String,
+      val riskResult: org.armman.sakhi.data.rules.RiskGradingResult?,
+      val referralCapture: org.armman.sakhi.data.referral.ReferralCapture?,
+    )
+
+    val calls = mutableListOf<Call>()
+    var result: VisitFormSubmitResult = VisitFormSubmitResult.Synced
+
+    override suspend fun submitDraft(
+      localScheduleUuid: String,
+      formCode: String,
+      formVersionId: String,
+      answers: FormAnswers,
+      visitDate: java.time.LocalDate,
+      riskResult: org.armman.sakhi.data.rules.RiskGradingResult?,
+      referralCapture: org.armman.sakhi.data.referral.ReferralCapture?,
+    ): VisitFormSubmitResult {
+      calls += Call(localScheduleUuid, formCode, riskResult, referralCapture)
+      return result
+    }
+
+    override suspend fun getUploadRecords(): List<FormUploadRecord> = emptyList()
+    override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = MutableStateFlow(emptyList())
+  }
+
+  /** Pairs with [ScriptedRuleEvaluator] below: a single cached pack for whichever [ruleSetId] is
+   * requested, so [org.armman.sakhi.data.rules.GoRulesRiskAdapter] always reaches evaluation
+   * instead of short-circuiting the way [NoRuleCachedRuleSetRepository] deliberately does. */
+  private class AlwaysCachedRuleSetRepository : org.armman.sakhi.data.rules.RuleSetRepository {
+    override suspend fun getPublishedRuleSet(
+      ruleSetId: String,
+    ): org.armman.sakhi.data.rules.CachedRuleSet? = org.armman.sakhi.data.rules.CachedRuleSet(
+      ruleSetId = ruleSetId,
+      ruleVersionId = "rule-version-1",
+      versionNo = "v1",
+      rulesJson = com.google.gson.JsonObject(),
+    )
+
+    override suspend fun prefetchRuleSets(ruleSetIds: List<String>) = Unit
+  }
+
+  /** Returns a fixed on-device grading result regardless of the real input — [onFinish]'s
+   * referral-trigger gating only cares about [org.armman.sakhi.data.rules.RiskConditionFinding
+   * .isReferralTrigger], so the rest of the response shape is minimal but valid. */
+  private class ScriptedRuleEvaluator(private val isReferralTrigger: Boolean) : org.armman.sakhi.data.rules.RuleEvaluator {
+    override suspend fun evaluate(
+      rulesJson: com.google.gson.JsonObject,
+      context: com.google.gson.JsonObject,
+    ): com.google.gson.JsonObject = com.google.gson.JsonObject().apply {
+      addProperty("overallRiskCategory", if (isReferralTrigger) "HIGH" else "NORMAL")
+      add(
+        "conditions",
+        com.google.gson.JsonArray().apply {
+          add(
+            com.google.gson.JsonObject().apply {
+              addProperty("riskConditionId", "condition-1")
+              addProperty("grade", if (isReferralTrigger) "SEVERE" else "NORMAL")
+              addProperty("gradeRank", if (isReferralTrigger) 3 else 0)
+              addProperty("isReferralTrigger", isReferralTrigger)
+              addProperty("isEducationTrigger", false)
+              addProperty("isHrVisitTrigger", false)
+            },
+          )
+        },
+      )
+    }
   }
 
   private val testDispatcher = StandardTestDispatcher()
@@ -263,25 +338,27 @@ class DynamicVisitFormViewModelTest {
     beneficiaryId: String = "beneficiary-1",
     visitId: String = "visit-1",
     visitFormRepository: VisitFormRepository = FakeVisitFormRepository(),
+    visitFormDraftRepository: VisitFormDraftRepository = FakeVisitFormDraftRepository(),
+    // Risk grading is not exercised by the load()-only tests: NoRuleCachedRepository returns no
+    // cached pack, so GoRulesRiskAdapter short-circuits before ever reaching the evaluator (which
+    // throws if called). onFinish()-focused tests override this with AlwaysCachedRuleSetRepository
+    // + ScriptedRuleEvaluator to control the referral-trigger outcome deterministically.
+    goRulesRiskAdapter: org.armman.sakhi.data.rules.GoRulesRiskAdapter = org.armman.sakhi.data.rules.GoRulesRiskAdapter(
+      NoRuleCachedRuleSetRepository(),
+      NeverCalledRuleEvaluator(),
+    ),
   ) =
     DynamicVisitFormViewModel(
       formsRepository = formsRepository,
       visitFormRepository = visitFormRepository,
       beneficiaryProfileRepository = beneficiaryProfileRepository,
-      visitFormDraftRepository = FakeVisitFormDraftRepository(),
+      visitFormDraftRepository = visitFormDraftRepository,
       visitScheduleRepository = visitScheduleRepository,
       visitCodeFormResolver = VisitCodeFormResolver(FakeFormsApi(), FakeSecureKeyValueStore()),
       formAuditRepository = formAuditRepository,
       deliverySessionRepository = deliverySessionRepository,
       deliveryFormDraftRepository = deliveryFormDraftRepository,
-      // Risk grading is not exercised by the load()-only tests here: NoRuleCachedRepository
-      // returns no cached pack, so GoRulesRiskAdapter short-circuits before ever reaching the
-      // evaluator (which throws if called). Same "never exercised, fail loudly if that changes"
-      // convention as FakeDeliveryFormDraftRepository above.
-      goRulesRiskAdapter = org.armman.sakhi.data.rules.GoRulesRiskAdapter(
-        NoRuleCachedRuleSetRepository(),
-        NeverCalledRuleEvaluator(),
-      ),
+      goRulesRiskAdapter = goRulesRiskAdapter,
       ancRiskRegistrationResolver = org.armman.sakhi.data.visitform.AncRiskRegistrationResolver(
         localEnrolmentBeneficiarySource(),
       ),
@@ -637,5 +714,133 @@ class DynamicVisitFormViewModelTest {
     testDispatcher.scheduler.advanceUntilIdle()
 
     assertTrue(viewModel.isReadyToSubmit())
+  }
+
+  // --- CR-Referral-01 Pass 4: onFinish() on-device referral-trigger gating ---
+
+  private fun fillReferralCaptureFields(viewModel: DynamicVisitFormViewModel) {
+    viewModel.setReferralDate(LocalDate.now())
+    viewModel.setReferralFacilityName("Test PHC")
+    viewModel.setReferralFacilityType(org.armman.sakhi.data.referral.FacilityType.PHC)
+    viewModel.setReferralType(org.armman.sakhi.data.referral.ReferralType.STANDARD)
+  }
+
+  private fun triggeringGoRulesAdapter() = org.armman.sakhi.data.rules.GoRulesRiskAdapter(
+    AlwaysCachedRuleSetRepository(),
+    ScriptedRuleEvaluator(isReferralTrigger = true),
+  )
+
+  private fun nonTriggeringGoRulesAdapter() = org.armman.sakhi.data.rules.GoRulesRiskAdapter(
+    AlwaysCachedRuleSetRepository(),
+    ScriptedRuleEvaluator(isReferralTrigger = false),
+  )
+
+  @Test
+  fun `onFinish shows the referral capture step and does not submit when the on-device result triggers a referral`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    val draftRepository = RecordingVisitFormDraftRepository()
+
+    val viewModel = buildViewModel(
+      visitFormDraftRepository = draftRepository,
+      goRulesRiskAdapter = triggeringGoRulesAdapter(),
+    )
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertTrue(viewModel.uiState.value.showReferralCaptureStep)
+    assertTrue("submitDraft must not be called on the first onFinish() that discovers a trigger", draftRepository.calls.isEmpty())
+  }
+
+  @Test
+  fun `onFinish does not show the referral capture step when the on-device result has no trigger`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    val draftRepository = RecordingVisitFormDraftRepository()
+
+    val viewModel = buildViewModel(
+      visitFormDraftRepository = draftRepository,
+      goRulesRiskAdapter = nonTriggeringGoRulesAdapter(),
+    )
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertFalse(viewModel.uiState.value.showReferralCaptureStep)
+    assertEquals(1, draftRepository.calls.size)
+    assertNull(draftRepository.calls.single().referralCapture)
+  }
+
+  @Test
+  fun `a second onFinish call after the referral capture step submits with the captured referral`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    val draftRepository = RecordingVisitFormDraftRepository()
+
+    val viewModel = buildViewModel(
+      visitFormDraftRepository = draftRepository,
+      goRulesRiskAdapter = triggeringGoRulesAdapter(),
+    )
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onFinish() // first call: discovers the trigger, shows the step
+    testDispatcher.scheduler.advanceUntilIdle()
+    fillReferralCaptureFields(viewModel)
+    viewModel.onFinish() // second call: already past the trigger check, submits for real
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(1, draftRepository.calls.size)
+    val capture = draftRepository.calls.single().referralCapture
+    assertEquals("Test PHC", capture?.facilityName)
+    assertEquals(org.armman.sakhi.data.referral.ReferralType.STANDARD, capture?.referralType)
+  }
+
+  @Test
+  fun `skipReferralCapture clears the captured fields and submits with no referral`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    val draftRepository = RecordingVisitFormDraftRepository()
+
+    val viewModel = buildViewModel(
+      visitFormDraftRepository = draftRepository,
+      goRulesRiskAdapter = triggeringGoRulesAdapter(),
+    )
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+    fillReferralCaptureFields(viewModel) // she started filling it in, then decides not to
+    viewModel.skipReferralCapture()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(1, draftRepository.calls.size)
+    assertNull(draftRepository.calls.single().referralCapture)
+    assertNull(viewModel.uiState.value.referralDate)
+    assertNull(viewModel.uiState.value.referralFacilityName)
+  }
+
+  @Test
+  fun `cancelReferralCapture hides the step and preserves whatever was already typed`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    val draftRepository = RecordingVisitFormDraftRepository()
+
+    val viewModel = buildViewModel(
+      visitFormDraftRepository = draftRepository,
+      goRulesRiskAdapter = triggeringGoRulesAdapter(),
+    )
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+    viewModel.setReferralFacilityName("Partly typed facility")
+    viewModel.cancelReferralCapture()
+
+    assertFalse(viewModel.uiState.value.showReferralCaptureStep)
+    assertEquals("Partly typed facility", viewModel.uiState.value.referralFacilityName)
+    assertTrue("cancelling must not submit anything", draftRepository.calls.isEmpty())
   }
 }

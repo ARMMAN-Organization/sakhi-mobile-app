@@ -67,6 +67,11 @@ fun BeneficiaryProfileScreen(
   onBack: () -> Unit,
   onProfile: () -> Unit = {},
   onStartVisit: (beneficiaryId: String, visit: ProfileVisit) -> Unit = { _, _ -> },
+  /** CR-Referral-01: opens the referral follow-up form for [visit]'s linked referral — only
+   * ever invoked when [ProfileVisit.referralIncomplete] is true (see [ProfileContent]'s
+   * routing). Default no-op keeps existing previews/tests that don't care about this working
+   * unchanged. */
+  onReferralFollowUp: (beneficiaryId: String, visit: ProfileVisit) -> Unit = { _, _ -> },
   /** Ad-hoc forms (Referral / Referral Follow-up / ANC Closure / Child Closure / Beneficiary
    * Reopen) opened directly from this profile - [formCode] is one of the five ad-hoc form codes.
    * [visitName] is only ever non-blank for Referral, once the Sakhi has picked "which visit is
@@ -146,6 +151,7 @@ fun BeneficiaryProfileScreen(
               hasPendingReopenRequest = state.hasPendingReopenRequest,
               deliveryButtonState = state.deliveryButtonState,
               onStartVisit = { visit -> onStartVisit(profile.id, visit) },
+              onReferralFollowUp = { visit -> onReferralFollowUp(profile.id, visit) },
               onStartAdHocForm = { formCode, visitName -> onStartAdHocForm(profile.id, formCode, visitName) },
               onReopen = viewModel::submitReopenRequest,
               onStartDelivery = { sessionUuid -> onStartDelivery(profile.id, sessionUuid) },
@@ -172,6 +178,7 @@ private fun ProfileContent(
   deliveryButtonState: DeliveryButtonState,
   onComingSoon: () -> Unit,
   onStartVisit: (ProfileVisit) -> Unit,
+  onReferralFollowUp: (ProfileVisit) -> Unit,
   onStartAdHocForm: (formCode: String, visitName: String?) -> Unit,
   onReopen: (ReopenRequestReason) -> Unit,
   onStartDelivery: (sessionUuid: String) -> Unit,
@@ -215,13 +222,20 @@ private fun ProfileContent(
             isTablet = isTablet,
             // CR-016: Start Visit / Fill Form now open the Visit Form flow;
             // See Data / Referral remain stubbed until their own CRs land.
+            // CR-Referral-01: a completed visit with a pending referral follow-up reuses the
+            // FILL_FORM action (see ProfileVisitMapper), but must route to the referral follow-up
+            // form instead — checked first, since referralIncomplete never coincides with an
+            // OPEN visit's own START_VISIT/FILL_FORM meaning.
             onAction = {
               val opensVisitForm = visit.action == ProfileVisitAction.START_VISIT ||
                 visit.action == ProfileVisitAction.FILL_FORM
-              // CR-022g: the Visit Form is still backed by seeded data that only recognises its own
-              // ids, so opening it for a Sakhi's own enrolment throws and lands her on an error
-              // screen. Until CR-026 gives it real data, say "coming soon" instead of breaking.
-              if (opensVisitForm && canStartVisit) {
+              if (visit.referralIncomplete) {
+                onReferralFollowUp(visit)
+              } else if (opensVisitForm && canStartVisit) {
+                // CR-022g: the Visit Form is still backed by seeded data that only recognises its
+                // own ids, so opening it for a Sakhi's own enrolment throws and lands her on an
+                // error screen. Until CR-026 gives it real data, say "coming soon" instead of
+                // breaking.
                 onStartVisit(visit)
               } else {
                 onComingSoon()

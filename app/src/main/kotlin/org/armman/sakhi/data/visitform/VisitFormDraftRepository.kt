@@ -3,6 +3,7 @@ package org.armman.sakhi.data.visitform
 import kotlinx.coroutines.flow.Flow
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormUploadRecord
+import org.armman.sakhi.data.referral.ReferralCapture
 import org.armman.sakhi.data.rules.RiskGradingResult
 import java.time.LocalDate
 
@@ -37,6 +38,10 @@ interface VisitFormDraftRepository {
      * evaluation itself returned null. Stored locally alongside the draft; not yet forwarded to
      * the backend (no confirmed submission-API field for it yet). */
     riskResult: RiskGradingResult? = null,
+    /** CR-Referral-01: whatever the Sakhi filled on the standalone Referral tab — see
+     * [VisitFormDraftPayload.referralCapture]'s doc for how/when this actually results in a
+     * created referral. Null when she left that tab untouched. */
+    referralCapture: ReferralCapture? = null,
   ): VisitFormSubmitResult
 
   /** All CR-026b visit-form drafts, newest first, for the Home screen's "Forms Uploaded"

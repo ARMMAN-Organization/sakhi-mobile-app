@@ -18,6 +18,7 @@ import org.armman.sakhi.ui.forms.DynamicMotherRegistrationScreen
 import org.armman.sakhi.ui.home.HomeScreen
 import org.armman.sakhi.ui.login.LoginScreen
 import org.armman.sakhi.ui.previsithealthhistory.PreVisitHealthHistoryScreen
+import org.armman.sakhi.ui.referral.ReferralFollowUpScreen
 import org.armman.sakhi.ui.profile.ProfileScreen
 import org.armman.sakhi.ui.visitform.DynamicVisitFormScreen
 import org.armman.sakhi.ui.visittracker.PadaSelectionScreen
@@ -40,6 +41,13 @@ object Routes {
   const val CHILD_REGISTRATION = "enrollment/child-registration"
   const val PRE_VISIT_HEALTH_HISTORY = "previsit-health-history/{beneficiaryId}/{visitId}/{label}"
   const val VISIT_FORM = "visit-form/{beneficiaryId}/{visitId}/{label}"
+  /** CR-Referral-01: the referral follow-up form for the referral linked to visit
+   * [localScheduleUuid] — opened from the Beneficiary Profile visit card whose action is "Fill
+   * Form" because that visit's [org.armman.sakhi.data.beneficiaryprofile.ProfileVisit
+   * .referralIncomplete] is true. [beneficiaryId] is unused by the screen itself (the referral
+   * id is enough to act on) but kept for route symmetry/back-stack readability with the other
+   * beneficiary-scoped routes here. */
+  const val REFERRAL_FOLLOW_UP = "referral-follow-up/{beneficiaryId}/{localScheduleUuid}/{referralId}"
   /** Ad-hoc forms (Referral / Referral Follow-up / ANC Closure / Child Closure / Beneficiary
    * Reopen) opened directly from a beneficiary's profile — not tied to a scheduled visit, so
    * (unlike [VISIT_FORM]) there is no `visitId` segment; [formCode] picks which of the five.
@@ -80,6 +88,10 @@ object Routes {
   /** Builds the route for a single visit's Visit Form. */
   fun visitForm(beneficiaryId: String, visitId: String, label: String) =
     "visit-form/${Uri.encode(beneficiaryId)}/${Uri.encode(visitId)}/${Uri.encode(label)}"
+
+  /** Builds the route for the CR-Referral-01 referral follow-up form. */
+  fun referralFollowUp(beneficiaryId: String, localScheduleUuid: String, referralId: String) =
+    "referral-follow-up/${Uri.encode(beneficiaryId)}/${Uri.encode(localScheduleUuid)}/${Uri.encode(referralId)}"
 
   /** Builds the route for one ad-hoc form. [visitName] is blank for every ad-hoc form except
    * Referral (see [AD_HOC_FORM]'s doc). */
@@ -248,6 +260,13 @@ fun AppNavHost() {
         onStartAdHocForm = { beneficiaryId, formCode, visitName ->
           navController.navigate(Routes.adHocForm(beneficiaryId, formCode, visitName.orEmpty()))
         },
+        // CR-Referral-01: visit.id IS the localScheduleUuid (see ProfileVisit's own doc);
+        // visit.referralId is non-null whenever referralIncomplete is true, which is the only
+        // time this callback fires — see BeneficiaryProfileScreen's onAction routing.
+        onReferralFollowUp = { beneficiaryId, visit ->
+          val referralId = visit.referralId ?: return@BeneficiaryProfileScreen
+          navController.navigate(Routes.referralFollowUp(beneficiaryId, visit.id, referralId))
+        },
         // CR-042: Delivery Event Session — see Routes.DELIVERY_SESSION's own doc for the
         // sessionUuid contract (minted fresh vs. re-passed on resume).
         onStartDelivery = { beneficiaryId, sessionUuid ->
@@ -264,6 +283,19 @@ fun AppNavHost() {
         onContinueChildRegistration = { beneficiaryId, sessionUuid ->
           navController.navigate(Routes.deliveryChildRegistration(beneficiaryId, sessionUuid))
         },
+      )
+    }
+    composable(
+      route = Routes.REFERRAL_FOLLOW_UP,
+      arguments = listOf(
+        navArgument("beneficiaryId") { type = NavType.StringType },
+        navArgument("localScheduleUuid") { type = NavType.StringType },
+        navArgument("referralId") { type = NavType.StringType },
+      ),
+    ) {
+      ReferralFollowUpScreen(
+        onBack = { navController.popBackStack() },
+        onSubmitted = { navController.popBackStack() },
       )
     }
     composable(

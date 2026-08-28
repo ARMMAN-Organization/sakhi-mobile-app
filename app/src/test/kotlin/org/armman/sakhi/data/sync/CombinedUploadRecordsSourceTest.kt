@@ -172,6 +172,7 @@ class CombinedUploadRecordsSourceTest {
       answers: FormAnswers,
       visitDate: LocalDate,
       riskResult: org.armman.sakhi.data.rules.RiskGradingResult?,
+      referralCapture: org.armman.sakhi.data.referral.ReferralCapture?,
     ): VisitFormSubmitResult = VisitFormSubmitResult.Synced
 
     override suspend fun getUploadRecords(): List<FormUploadRecord> = records.value

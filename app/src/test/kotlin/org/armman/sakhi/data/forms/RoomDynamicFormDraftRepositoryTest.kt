@@ -13,6 +13,8 @@ import org.armman.sakhi.data.connectivity.FakeConnectivityChecker
 import org.armman.sakhi.data.enrollment.CreateBeneficiaryResponseData
 import org.armman.sakhi.data.enrollment.CreateBeneficiaryResponseDto
 import org.armman.sakhi.data.enrollment.DuplicateOutcome
+import org.armman.sakhi.data.enrollment.EnrollmentRiskBaselineTrigger
+import org.armman.sakhi.data.enrollment.FakeEnrollmentRiskBaselineDao
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.armman.sakhi.data.schedule.AncScheduleGenerator
@@ -54,6 +56,7 @@ class RoomDynamicFormDraftRepositoryTest {
   private lateinit var repository: RoomDynamicFormDraftRepository
   private lateinit var lookupRepository: FakeLookupRepository
   private lateinit var formAuditRepository: FakeFormAuditRepository
+  private lateinit var riskBaselineDao: FakeEnrollmentRiskBaselineDao
 
   private val session = UserSession(
     username = "test.sakhi",
@@ -109,6 +112,7 @@ class RoomDynamicFormDraftRepositoryTest {
       ),
       ruleSource = rules,
     )
+    riskBaselineDao = FakeEnrollmentRiskBaselineDao()
     repository = RoomDynamicFormDraftRepository(
       dao,
       secureStore,
@@ -117,6 +121,7 @@ class RoomDynamicFormDraftRepositoryTest {
       scheduleTrigger,
       visitScheduleSyncExecutor,
       formAuditRepository,
+      EnrollmentRiskBaselineTrigger(riskBaselineDao),
     )
   }
 
@@ -504,6 +509,64 @@ class RoomDynamicFormDraftRepositoryTest {
     )
 
     assertTrue(scheduleDao.getForBeneficiary("local-1").isNotEmpty())
+  }
+
+  // --- enrollment risk baseline (punch-list item 6, 2026-08-28) ---
+
+  @Test
+  fun `submitDraft persists a frozen enrollment risk baseline`() = runTest {
+    repository.submitDraft(
+      localBeneficiaryId = "local-1",
+      formCode = "MOTHER_REGISTRATION",
+      formVersionId = "version-1",
+      localSubmissionUuid = "submission-1",
+      answers = answers,
+      registrationDate = LocalDate.of(2026, 5, 20),
+    )
+
+    val baseline = riskBaselineDao.getByLocalBeneficiaryId("local-1")
+    assertTrue("A submitted enrolment must produce a baseline snapshot", baseline != null)
+    assertTrue(baseline!!.findingsJson.isNotBlank())
+  }
+
+  @Test
+  fun `saveDraft does not persist an enrollment risk baseline`() = runTest {
+    repository.saveDraft(
+      localBeneficiaryId = "local-1",
+      formCode = "MOTHER_REGISTRATION",
+      formVersionId = "version-1",
+      localSubmissionUuid = "submission-1",
+      answers = answers,
+      registrationDate = LocalDate.of(2026, 5, 20),
+    )
+
+    assertEquals(null, riskBaselineDao.getByLocalBeneficiaryId("local-1"))
+  }
+
+  @Test
+  fun `resubmitting does not overwrite the frozen baseline`() = runTest {
+    repository.submitDraft(
+      localBeneficiaryId = "local-1",
+      formCode = "MOTHER_REGISTRATION",
+      formVersionId = "version-1",
+      localSubmissionUuid = "submission-1",
+      answers = answers,
+      registrationDate = LocalDate.of(2026, 5, 20),
+    )
+    val firstWrite = riskBaselineDao.getByLocalBeneficiaryId("local-1")
+
+    // A second submission attempt (e.g. a retried background sync) must not touch the baseline
+    // even though other fields on this same call regenerate/resync freely.
+    repository.submitDraft(
+      localBeneficiaryId = "local-1",
+      formCode = "MOTHER_REGISTRATION",
+      formVersionId = "version-1",
+      localSubmissionUuid = "submission-1",
+      answers = answers,
+      registrationDate = LocalDate.of(2026, 5, 20),
+    )
+
+    assertEquals(firstWrite, riskBaselineDao.getByLocalBeneficiaryId("local-1"))
   }
 
   /** A partial save is not an enrolment, so it must not produce a schedule. */

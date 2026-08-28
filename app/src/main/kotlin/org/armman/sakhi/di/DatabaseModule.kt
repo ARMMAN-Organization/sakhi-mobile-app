@@ -16,7 +16,10 @@ import org.armman.sakhi.data.delivery.DeliveryFormDraftDao
 import org.armman.sakhi.data.delivery.DeliverySessionDao
 import org.armman.sakhi.data.db.SakhiDatabase
 import org.armman.sakhi.data.enrollment.EnrollmentDraftDao
+import org.armman.sakhi.data.enrollment.EnrollmentRiskBaselineDao
 import org.armman.sakhi.data.forms.DynamicFormDraftDao
+import org.armman.sakhi.data.referral.ReferralLinkDao
+import org.armman.sakhi.data.riskassessment.RiskAssessmentDao
 import org.armman.sakhi.data.schedule.VisitScheduleDao
 import org.armman.sakhi.data.visitform.VisitFormDraftDao
 import javax.inject.Singleton
@@ -58,6 +61,9 @@ object DatabaseModule {
         SakhiDatabase.MIGRATION_10_11,
         SakhiDatabase.MIGRATION_11_12,
         SakhiDatabase.MIGRATION_12_13,
+        SakhiDatabase.MIGRATION_13_14,
+        SakhiDatabase.MIGRATION_14_15,
+        SakhiDatabase.MIGRATION_15_16,
       )
       .fallbackToDestructiveMigration()
       .build()
@@ -111,6 +117,21 @@ object DatabaseModule {
   @Singleton
   fun provideDeliveryChildRegistrationDraftDao(database: SakhiDatabase): DeliveryChildRegistrationDraftDao =
     database.deliveryChildRegistrationDraftDao()
+
+  @Provides
+  @Singleton
+  fun provideReferralLinkDao(database: SakhiDatabase): ReferralLinkDao =
+    database.referralLinkDao()
+
+  @Provides
+  @Singleton
+  fun provideRiskAssessmentDao(database: SakhiDatabase): RiskAssessmentDao =
+    database.riskAssessmentDao()
+
+  @Provides
+  @Singleton
+  fun provideEnrollmentRiskBaselineDao(database: SakhiDatabase): EnrollmentRiskBaselineDao =
+    database.enrollmentRiskBaselineDao()
 
   @Provides
   @Singleton

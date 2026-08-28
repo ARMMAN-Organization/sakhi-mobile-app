@@ -95,7 +95,10 @@ class GoRulesRiskAdapter @Inject constructor(
     }
     val response = try {
       ruleEvaluator.evaluate(cached.rulesJson, context)
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
+      // Throwable, not Exception — see ZenRuleEvaluator.evaluate's catch for why (native/JNI
+      // linkage failures surface as Error, not Exception, and this call site fires on every
+      // keystroke in the ANC visit form once "met beneficiary" is Yes).
       Log.w(TAG, "GoRulesRiskAdapter.$logContext: evaluate threw ${e::class.simpleName} — ${e.message}")
       null
     } ?: return null

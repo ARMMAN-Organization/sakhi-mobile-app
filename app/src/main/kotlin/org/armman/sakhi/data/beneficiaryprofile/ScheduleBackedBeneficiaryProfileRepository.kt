@@ -6,6 +6,7 @@ import org.armman.sakhi.data.beneficiary.LocalEnrolmentBeneficiarySource
 import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.GeographyQuestionCodes
+import org.armman.sakhi.data.referral.ReferralLinkDao
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -40,6 +41,7 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
   private val remoteProfiles: RemoteBeneficiaryProfileRepository,
   private val scheduleRepository: VisitScheduleRepository,
   private val localEnrolments: LocalEnrolmentBeneficiarySource,
+  private val referralLinkDao: ReferralLinkDao,
 ) : BeneficiaryProfileRepository {
 
   override suspend fun getBeneficiary(id: String): BeneficiaryProfile {
@@ -75,10 +77,16 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
 
     val schedules = scheduleRepository.getActiveForBeneficiary(id)
 
+    // CR-Referral-01: one bulk lookup for every visit's cached referral link, rather than one
+    // query per card — see ReferralLinkDao.getByLocalScheduleUuids' own doc.
+    val referralLinks = referralLinkDao
+      .getByLocalScheduleUuids(schedules.map { it.localScheduleUuid })
+      .associateBy { it.localScheduleUuid }
+
     // A beneficiary enrolled before this build has no schedule rows. Return an empty list rather
     // than falling back to the static sample: showing another woman's visits would be worse than
     // showing none, and the screen renders a distinct empty state for it.
-    return profile.copy(visits = schedules.toProfileVisits(LocalDate.now()))
+    return profile.copy(visits = schedules.toProfileVisits(LocalDate.now(), referralLinks))
   }
 
   /** Delegates to [LocalEnrolmentBeneficiarySource.answersFor] — null for a remote-only

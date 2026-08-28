@@ -19,6 +19,8 @@ import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.SubmissionResponseData
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.armman.sakhi.data.lookup.LookupValue
+import org.armman.sakhi.data.referral.FakeReferralLinkDao
+import org.armman.sakhi.data.riskassessment.FakeRiskAssessmentDao
 import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
 import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
 import org.armman.sakhi.data.schedule.VisitScheduleStatus
@@ -111,6 +113,9 @@ class RoomVisitFormDraftRepositoryTest {
       ),
       childFormDraftDao = org.armman.sakhi.data.childregistration.FakeChildFormDraftDao(),
       riskAssessmentApi = FakeRiskAssessmentApi(),
+      referralRepository = FakeReferralRepository(),
+      referralLinkDao = FakeReferralLinkDao(),
+      riskAssessmentDao = FakeRiskAssessmentDao(),
     )
     // Reuses the same dao/secureStore as the repository so runOne() sees the row submitDraft just
     // wrote — matching how the real Hilt graph wires a single instance of each.

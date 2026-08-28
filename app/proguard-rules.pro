@@ -132,3 +132,16 @@
 -dontwarn com.google.errorprone.annotations.CheckReturnValue
 -dontwarn com.google.errorprone.annotations.Immutable
 -dontwarn com.google.errorprone.annotations.RestrictedApi
+
+# GoRules zen-engine (io.gorules.zen_engine.kotlin_android.ZenEngine et al, see
+# data/rules/ZenRuleEvaluator.kt) — a Rust-core decision engine bound into Kotlin via JNI/native
+# bindings. R8 renaming these classes/methods breaks native linkage: the native library resolves
+# Java methods by their original (unobfuscated) class/method names, so a rename produces
+# UnsatisfiedLinkError/NoSuchMethodError at the call site instead of a compile error. This is what
+# caused the 2026-08-27 release-only "no visits generated for enrolled women" regression —
+# GoRulesScheduleFeatureFlag.ENABLED was reverted to false as the immediate fix; these rules are
+# required before it can be safely turned back on. Whole-package keep, matching the pattern used
+# for every other reflection/native-sensitive package above.
+-keep class io.gorules.** { *; }
+-keepclassmembers class io.gorules.** { *; }
+-dontwarn io.gorules.**

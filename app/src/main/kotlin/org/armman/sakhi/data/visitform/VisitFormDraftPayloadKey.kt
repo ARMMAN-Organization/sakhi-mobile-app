@@ -1,7 +1,12 @@
 package org.armman.sakhi.data.visitform
 
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
+import com.google.gson.JsonDeserializer
+import com.google.gson.JsonSerializer
+import java.time.LocalDate
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.referral.ReferralCapture
 import org.armman.sakhi.data.rules.RiskGradingResult
 
 private const val PAYLOAD_KEY_PREFIX = "visit_form_draft_payload_"
@@ -39,6 +44,35 @@ data class VisitFormDraftPayload(
    * arrives.
    */
   val riskResult: RiskGradingResult? = null,
+  /**
+   * CR-Referral-01: whatever the Sakhi filled on the visit form's standalone Referral tab
+   * (date/facility/type), captured at submit time alongside [answers]. Null when she left that
+   * tab untouched. Stored here so it survives fully offline and is available to
+   * [VisitFormSyncExecutor] on a resumed/background sync, exactly like [riskResult] — see
+   * [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator.maybeCreateReferral] for how
+   * it's actually used (only once the visit's server-side risk-assessment response confirms a
+   * referral trigger; filling this tab in alone never creates a referral by itself).
+   */
+  val referralCapture: ReferralCapture? = null,
 )
 
-internal val visitFormDraftGson = Gson()
+/** Plain [Gson] has no built-in support for [java.time.LocalDate] (no no-arg constructor, so
+ * its default reflective adapter silently corrupts it instead of failing loudly — round-tripping
+ * a real date through it can come back as year=0/month=0/day=0, which formats to the literal
+ * string "0000-00-00" and gets rejected server-side as an invalid date; this is exactly what
+ * happened to [org.armman.sakhi.data.referral.ReferralCapture.referralDate] before this adapter
+ * was added, since this Gson round-trips [VisitFormDraftPayload] on every online submit (saved
+ * to [org.armman.sakhi.data.auth.session.SecureKeyValueStore], then immediately read back by
+ * [VisitFormSyncExecutor.loadPayload]) as well as on a resumed background sync. Same fix/pattern
+ * already used by `enrollmentRecordGson`/`dynamicFormDraftGson` for the same reason — this
+ * instance had simply been missed. */
+internal val visitFormDraftGson: Gson = GsonBuilder()
+  .registerTypeAdapter(
+    LocalDate::class.java,
+    JsonSerializer<LocalDate> { src, _, _ -> com.google.gson.JsonPrimitive(src.toString()) },
+  )
+  .registerTypeAdapter(
+    LocalDate::class.java,
+    JsonDeserializer { json, _, _ -> LocalDate.parse(json.asString) },
+  )
+  .create()
