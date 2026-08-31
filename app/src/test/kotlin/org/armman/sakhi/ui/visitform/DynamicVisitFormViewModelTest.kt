@@ -219,6 +219,21 @@ class DynamicVisitFormViewModelTest {
     override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = MutableStateFlow(emptyList())
   }
 
+  /** CR-M3-06: minimal fake — none of the existing tests in this file exercise health-education
+   * content resolution (that's covered in [org.armman.sakhi.ui.healtheducation
+   * .HealthEducationViewModelTest] instead), so this only needs to satisfy the constructor and
+   * never actually be called by [DynamicVisitFormViewModel.load]/`onFinish`. */
+  private class NeverCalledHealthEducationRepository : org.armman.sakhi.data.healtheducation.HealthEducationRepository {
+    override suspend fun getEducationContentForBeneficiary(
+      beneficiaryId: String,
+      conditionCodes: Set<String>,
+    ): Map<String, org.armman.sakhi.data.healtheducation.HealthEducationTopic> =
+      throw UnsupportedOperationException("not used by DynamicVisitFormViewModelTest")
+
+    override suspend fun getPlaceholderTopic(): org.armman.sakhi.data.healtheducation.HealthEducationTopic =
+      throw UnsupportedOperationException("not used by DynamicVisitFormViewModelTest")
+  }
+
   /** Pairs with [ScriptedRuleEvaluator] below: a single cached pack for whichever [ruleSetId] is
    * requested, so [org.armman.sakhi.data.rules.GoRulesRiskAdapter] always reaches evaluation
    * instead of short-circuiting the way [NoRuleCachedRuleSetRepository] deliberately does. */
@@ -347,6 +362,7 @@ class DynamicVisitFormViewModelTest {
       NoRuleCachedRuleSetRepository(),
       NeverCalledRuleEvaluator(),
     ),
+    healthEducationRepository: org.armman.sakhi.data.healtheducation.HealthEducationRepository = NeverCalledHealthEducationRepository(),
   ) =
     DynamicVisitFormViewModel(
       formsRepository = formsRepository,
@@ -362,6 +378,7 @@ class DynamicVisitFormViewModelTest {
       ancRiskRegistrationResolver = org.armman.sakhi.data.visitform.AncRiskRegistrationResolver(
         localEnrolmentBeneficiarySource(),
       ),
+      healthEducationRepository = healthEducationRepository,
       savedStateHandle = SavedStateHandle(
         mapOf(
           "beneficiaryId" to beneficiaryId,

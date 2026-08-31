@@ -99,6 +99,10 @@ import java.util.Locale
 fun DynamicVisitFormScreen(
   onBack: () -> Unit,
   onProfile: () -> Unit = {},
+  /** CR-M3-06: called instead of [onBack] when the just-submitted visit graded at least one
+   * `isEducationTrigger` condition — (beneficiaryId, conditionCodes). Defaults to falling
+   * straight back to [onBack] for any caller that hasn't wired Health Education yet. */
+  onSubmittedNeedsEducation: (String, List<String>) -> Unit = { _, _ -> onBack() },
   viewModel: DynamicVisitFormViewModel = hiltViewModel(),
 ) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -120,11 +124,15 @@ fun DynamicVisitFormScreen(
         DynamicVisitFormEvent.ComingSoon -> Toast.makeText(context, comingSoon, Toast.LENGTH_SHORT).show()
         DynamicVisitFormEvent.Submitted -> {
           Toast.makeText(context, submitted, Toast.LENGTH_SHORT).show()
-          onBack()
+          // Read viewModel.uiState.value directly, NOT the composable-scoped `state` — this
+          // LaunchedEffect(viewModel) never restarts (its key never changes), so a captured
+          // `state` reference here would be pinned to whatever it was on first composition, not
+          // the goRulesRiskResult DynamicVisitFormViewModel.onFinish just wrote moments ago.
+          routeAfterSubmit(viewModel.uiState.value, viewModel.beneficiaryId, onSubmittedNeedsEducation, onBack)
         }
         DynamicVisitFormEvent.QueuedOffline -> {
           Toast.makeText(context, queuedOffline, Toast.LENGTH_LONG).show()
-          onBack()
+          routeAfterSubmit(viewModel.uiState.value, viewModel.beneficiaryId, onSubmittedNeedsEducation, onBack)
         }
         is DynamicVisitFormEvent.SubmitFailed ->
           Toast.makeText(context, event.message, Toast.LENGTH_LONG).show()
@@ -191,6 +199,14 @@ fun DynamicVisitFormScreen(
     CriticalConditionBanner(
       message = stringResource(condition.messageRes),
       onDismiss = viewModel::dismissCritical,
+    )
+  }
+
+  // CR-M3-06 requirement #4.
+  if (state.activeEducationHintField != null) {
+    LearnMoreHintDialog(
+      topic = state.activeEducationHintTopic,
+      onDismiss = viewModel::dismissEducationHint,
     )
   }
 }
@@ -888,7 +904,80 @@ private fun DynamicVisitFormFieldList(
         },
         formCode = state.formCode,
         riskGrade = state.highlightedFieldGrades[field.questionCode],
+        hasHealthEducationHint = field.questionCode in state.educationHintFieldConditions,
+        onLearnMoreClick = { viewModel.showEducationHint(field.questionCode) },
       )
+    }
+  }
+}
+
+/** CR-M3-06: decides whether a just-completed submit routes into the Health Education screen —
+ * true when [DynamicVisitFormUiState.goRulesRiskResult] (set to the final, authoritative grading
+ * by [DynamicVisitFormViewModel.onFinish] right before this event fires) has at least one
+ * `isEducationTrigger` condition. [state.formCode] decides MOTHER vs CHILD the same way
+ * [DynamicVisitFormViewModel.evaluateGoRulesRisk] branches. Falls back to [onBack] whenever there
+ * is nothing to show — no triggered condition, or no result at all (e.g. a form code with no risk
+ * pack, like POSTPARTUM_VISIT). */
+private fun routeAfterSubmit(
+  state: DynamicVisitFormUiState,
+  beneficiaryId: String,
+  onSubmittedNeedsEducation: (String, List<String>) -> Unit,
+  onBack: () -> Unit,
+) {
+  val formCode = state.formCode
+  val conditionMap = if (formCode == FORM_CODE_MOTHER) {
+    org.armman.sakhi.data.rules.RiskConditionIds.ANC
+  } else {
+    org.armman.sakhi.data.rules.RiskConditionIds.INFANT
+  }
+  // Real backend contract (GET /beneficiaries/{beneficiaryId}/risk, confirmed 2026-08-28) keys
+  // education content by conditionCode (e.g. "JAUNDICE"), NOT the UUID riskConditionId the
+  // on-device grading result carries — same idToCode reverse lookup
+  // DynamicVisitFormViewModel.recheckGoRulesRisk already builds for field highlighting.
+  val idToCode = conditionMap.entries.associate { (code, id) -> id to code }
+  val triggeredConditionCodes = state.goRulesRiskResult?.conditions.orEmpty()
+    .filter { it.isEducationTrigger }
+    .mapNotNull { idToCode[it.riskConditionId] }
+    .distinct()
+  if (triggeredConditionCodes.isEmpty()) {
+    onBack()
+    return
+  }
+  onSubmittedNeedsEducation(beneficiaryId, triggeredConditionCodes)
+}
+
+/** CR-M3-06 requirement #4: "Learn More" sheet for a field the real-time evaluator flagged as an
+ * education trigger (see [DynamicVisitFormUiState.educationHintFieldConditions]) — same dialog
+ * shape as [CriticalConditionBanner], reused here for a non-urgent, dismiss-only informational
+ * message rather than a warning. Renders the generic coming-soon copy while
+ * [DynamicVisitFormUiState.activeEducationHintMessages] is empty (still loading, or no
+ * content-service row for this condition yet) — never blocks on the network round trip, per
+ * requirement #6's "must not block submission" contract extended to this in-form entry point too. */
+@Composable
+private fun LearnMoreHintDialog(topic: org.armman.sakhi.data.healtheducation.HealthEducationTopic?, onDismiss: () -> Unit) {
+  Dialog(onDismissRequest = onDismiss) {
+    Surface(shape = RoundedCornerShape(Dimens.CardRadius), color = White) {
+      Column(modifier = Modifier.padding(Dimens.ScreenPadding)) {
+        if (topic != null) {
+          Text(text = topic.topicName, style = MaterialTheme.typography.titleMedium)
+        } else {
+          // Still loading (HealthEducationRepository.getPlaceholderTopic's round trip hasn't
+          // returned yet) — the button below stays enabled regardless, per requirement #6's
+          // "must not block" contract extended to this in-form entry point.
+          Text(text = "Learn More", style = MaterialTheme.typography.titleMedium)
+          Text(
+            text = "Loading…",
+            style = MaterialTheme.typography.bodyMedium,
+            color = NeutralG400,
+            modifier = Modifier.padding(top = Dimens.SmallSpacing),
+          )
+        }
+        PrimaryButton(
+          text = "Close",
+          onClick = onDismiss,
+          modifier = Modifier.padding(top = Dimens.ItemSpacing),
+        )
+      }
     }
   }
 }

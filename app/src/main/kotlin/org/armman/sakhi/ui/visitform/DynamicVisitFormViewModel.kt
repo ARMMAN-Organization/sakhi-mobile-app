@@ -52,6 +52,8 @@ import org.armman.sakhi.data.visitform.AncRiskAnswerMapper
 import org.armman.sakhi.data.visitform.AncRiskRegistrationResolver
 import org.armman.sakhi.data.visitform.InfantRiskAnswerMapper
 import org.armman.sakhi.data.visitform.RiskConditionFieldMap
+import org.armman.sakhi.data.healtheducation.HealthEducationRepository
+import org.armman.sakhi.data.healtheducation.HealthEducationTopic
 import org.armman.sakhi.data.rules.GoRulesRiskAdapter
 import org.armman.sakhi.data.rules.RiskConditionIds
 import org.armman.sakhi.data.rules.RiskGrade
@@ -175,6 +177,27 @@ data class DynamicVisitFormUiState(
    * highlight + [org.armman.sakhi.ui.components.RiskBadge] chip (Option B, 2026-08-24 design
    * decision — see the published mockup discussion; not yet reflected in the Figma source). */
   val highlightedFieldGrades: Map<String, RiskGrade> = emptyMap(),
+  /** CR-M3-06 requirement #4 (contextual display at the triggering field, in real time) —
+   * `question_code` -> the [org.armman.sakhi.data.rules.RiskConditionFinding.riskConditionId]
+   * that made it an education trigger, derived from [goRulesRiskResult] the same way
+   * [highlightedFieldGrades] derives its map, via [org.armman.sakhi.data.visitform
+   * .RiskConditionFieldMap]. A field mapped from more than one education-triggering condition
+   * keeps whichever condition was encountered first — unlike [highlightedFieldGrades] there is no
+   * "worse" ordering between two education triggers, so first-found is as good as any other
+   * choice. Presence as a key (regardless of value) drives whether [org.armman.sakhi.ui.forms
+   * .DynamicFormField] shows the "Learn More" affordance for that field. */
+  val educationHintFieldConditions: Map<String, String> = emptyMap(),
+  /** Non-null while the "Learn More" bottom sheet is open for a field the Sakhi tapped —
+   * see [DynamicVisitFormViewModel.showEducationHint]. */
+  val activeEducationHintField: String? = null,
+  /** The current "Learn More" placeholder topic, fetched fresh each time
+   * [DynamicVisitFormViewModel.showEducationHint] opens the sheet — null while it's still loading.
+   * REWRITTEN 2026-08-28: this is always [org.armman.sakhi.data.healtheducation
+   * .HealthEducationDefaults.COMING_SOON_TOPIC] today (backend confirmed there is no
+   * per-condition content or mapping table yet, only one seeded topic) — kept as a repository
+   * round trip rather than a hardcoded constant so this picks up real per-condition content the
+   * moment backend ships it, with no app-side change needed. */
+  val activeEducationHintTopic: HealthEducationTopic? = null,
 )
 
 /** One-shot events the screen reacts to (navigation/toast), mirroring the retired hand-coded
@@ -246,6 +269,7 @@ class DynamicVisitFormViewModel @Inject constructor(
   private val deliveryFormDraftRepository: DeliveryFormDraftRepository,
   private val goRulesRiskAdapter: GoRulesRiskAdapter,
   private val ancRiskRegistrationResolver: AncRiskRegistrationResolver,
+  private val healthEducationRepository: HealthEducationRepository,
   savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -878,8 +902,48 @@ class DynamicVisitFormViewModel @Inject constructor(
           }
         }
 
-      _uiState.update { it.copy(goRulesRiskResult = result, highlightedFieldGrades = highlighted) }
+      // CR-M3-06 requirement #4: same reverse-lookup pass, but keyed off isEducationTrigger
+      // rather than grade severity — an education hint can fire even for a NORMAL/UNKNOWN grade
+      // in principle (the two triggers are independent flags on the same finding), so this is not
+      // simply "reuse `highlighted`'s keys".
+      val educationHints = mutableMapOf<String, String>()
+      result.conditions
+        .filter { it.isEducationTrigger }
+        .forEach { finding ->
+          val code = idToCode[finding.riskConditionId] ?: return@forEach
+          fieldMap[code].orEmpty().forEach { questionCode ->
+            educationHints.putIfAbsent(questionCode, finding.riskConditionId)
+          }
+        }
+
+      _uiState.update {
+        it.copy(
+          goRulesRiskResult = result,
+          highlightedFieldGrades = highlighted,
+          educationHintFieldConditions = educationHints,
+        )
+      }
     }
+  }
+
+  /** Opens the "Learn More" sheet for [questionCode] (CR-M3-06 requirement #4) — looks up the
+   * education-triggering condition [DynamicVisitFormUiState.educationHintFieldConditions] mapped
+   * to it and resolves messages for the current form's entity type. A no-op if [questionCode]
+   * isn't currently flagged (defensive; the UI only ever calls this for a flagged field). */
+  fun showEducationHint(questionCode: String) {
+    if (questionCode !in _uiState.value.educationHintFieldConditions) return
+    _uiState.update { it.copy(activeEducationHintField = questionCode, activeEducationHintTopic = null) }
+    viewModelScope.launch {
+      val topic = healthEducationRepository.getPlaceholderTopic()
+      // Guard against a stale response landing after the Sakhi already closed/switched the sheet.
+      if (_uiState.value.activeEducationHintField == questionCode) {
+        _uiState.update { it.copy(activeEducationHintTopic = topic) }
+      }
+    }
+  }
+
+  fun dismissEducationHint() {
+    _uiState.update { it.copy(activeEducationHintField = null, activeEducationHintTopic = null) }
   }
 
   /** FR-S-4.4 Option B: closing the banner discards the in-memory draft and exits — no partial
@@ -931,6 +995,11 @@ class DynamicVisitFormViewModel @Inject constructor(
       // capture step) — cheap and deterministic against the same unchanged visit answers, so
       // there's no need to stash the first call's result across the two taps.
       val finalRiskResult = evaluateGoRulesRisk(formCode, finalAnswers)
+      // CR-M3-06: the screen's Submitted/QueuedOffline handling reads this authoritative,
+      // final-answers result (not the last live per-field recompute) to decide whether to route
+      // into the Health Education screen — see evaluateGoRulesRisk's doc for why this call is
+      // deliberately re-run here rather than trusting state.goRulesRiskResult as it already stood.
+      _uiState.update { it.copy(goRulesRiskResult = finalRiskResult) }
 
       // CR-Referral-01 Pass 4: on-device trigger check, gating the referral capture step —
       // see DynamicVisitFormUiState.showReferralCaptureStep's doc for why this must be on-device

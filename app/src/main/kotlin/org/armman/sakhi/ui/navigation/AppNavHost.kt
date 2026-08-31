@@ -19,6 +19,7 @@ import org.armman.sakhi.ui.home.HomeScreen
 import org.armman.sakhi.ui.login.LoginScreen
 import org.armman.sakhi.ui.previsithealthhistory.PreVisitHealthHistoryScreen
 import org.armman.sakhi.ui.referral.ReferralFollowUpScreen
+import org.armman.sakhi.ui.healtheducation.HealthEducationScreen
 import org.armman.sakhi.ui.profile.ProfileScreen
 import org.armman.sakhi.ui.visitform.DynamicVisitFormScreen
 import org.armman.sakhi.ui.visittracker.PadaSelectionScreen
@@ -70,6 +71,16 @@ object Routes {
    * session, not once per child. */
   const val DELIVERY_CHILD_REGISTRATION = "delivery-child-registration/{beneficiaryId}/{sessionUuid}"
 
+  /** CR-M3-06: post-submission Health Education screen — opened right after a visit-form submit
+   * when at least one graded condition's `isEducationTrigger` fired (see
+   * [org.armman.sakhi.ui.visitform.DynamicVisitFormScreen]'s `routeAfterSubmit`). [conditionCodes]
+   * (e.g. `"JAUNDICE,ANEMIA"`) is a comma-separated, individually URI-encoded list (same
+   * convention as [RuleSetApi]'s `setIds` batch param) rather than repeated segments, since nav
+   * routes don't support a variable-length argument list — these are
+   * [org.armman.sakhi.data.rules.RiskConditionIds] map KEYS, NOT the UUID `riskConditionId`
+   * values, per backend's confirmed `GET /beneficiaries/{beneficiaryId}/risk` contract. */
+  const val HEALTH_EDUCATION = "health-education/{beneficiaryId}/{conditionCodes}"
+
   /** Builds a login route, optionally showing the post-logout success banner. */
   fun login(loggedOut: Boolean = false) = "login?loggedOut=$loggedOut"
 
@@ -88,6 +99,12 @@ object Routes {
   /** Builds the route for a single visit's Visit Form. */
   fun visitForm(beneficiaryId: String, visitId: String, label: String) =
     "visit-form/${Uri.encode(beneficiaryId)}/${Uri.encode(visitId)}/${Uri.encode(label)}"
+
+  /** Builds the route for [HEALTH_EDUCATION]. [conditionCodes] are joined with a comma after
+   * individually URI-encoding each one (matches [RuleSetApi]'s batch-param convention). */
+  fun healthEducation(beneficiaryId: String, conditionCodes: List<String>) =
+    "health-education/${Uri.encode(beneficiaryId)}/" +
+      conditionCodes.joinToString(",") { Uri.encode(it) }
 
   /** Builds the route for the CR-Referral-01 referral follow-up form. */
   fun referralFollowUp(beneficiaryId: String, localScheduleUuid: String, referralId: String) =
@@ -334,6 +351,25 @@ fun AppNavHost() {
       DynamicVisitFormScreen(
         onBack = { navController.popBackStack() },
         onProfile = { navController.navigate(Routes.PROFILE) },
+        // CR-M3-06: replaces VISIT_FORM in the back stack (not a plain navigate) so system back
+        // from Health Education returns to wherever VISIT_FORM itself would have returned to
+        // (Beneficiary Profile / Delivery Session / etc.), not back into the just-submitted form.
+        onSubmittedNeedsEducation = { beneficiaryId, conditionCodes ->
+          navController.navigate(Routes.healthEducation(beneficiaryId, conditionCodes)) {
+            popUpTo(Routes.VISIT_FORM) { inclusive = true }
+          }
+        },
+      )
+    }
+    composable(
+      route = Routes.HEALTH_EDUCATION,
+      arguments = listOf(
+        navArgument("beneficiaryId") { type = NavType.StringType },
+        navArgument("conditionCodes") { type = NavType.StringType },
+      ),
+    ) {
+      HealthEducationScreen(
+        onDone = { navController.popBackStack() },
       )
     }
     composable(

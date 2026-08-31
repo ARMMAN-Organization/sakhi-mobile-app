@@ -244,6 +244,16 @@ fun DynamicFormField(
    * can coexist below the same field. NORMAL/UNKNOWN grades never reach this param — the ViewModel
    * only ever surfaces MILD/MODERATE/SEVERE here. Null for every caller except the Visit Form. */
   riskGrade: RiskGrade? = null,
+  /** CR-M3-06 requirement #4: true when
+   * [org.armman.sakhi.ui.visitform.DynamicVisitFormUiState.educationHintFieldConditions] flags
+   * this field right now. Renders a small "Learn More" text affordance below the field,
+   * independent of [riskGrade]/[RiskBadge] — a field can be an education trigger without being
+   * graded MILD-or-worse (the two flags are independent on the same
+   * [org.armman.sakhi.data.rules.RiskConditionFinding]). Null for every caller except the Visit
+   * Form, same as [riskGrade]. */
+  hasHealthEducationHint: Boolean = false,
+  /** Invoked when the "Learn More" affordance is tapped; null (never shown) if [hasHealthEducationHint] is false. */
+  onLearnMoreClick: (() -> Unit)? = null,
 ) {
   val singleValue = answers.valueOf(field.questionCode).orEmpty()
   val multiValue = answers.multiValueOf(field.questionCode)
@@ -324,6 +334,14 @@ fun DynamicFormField(
     }
     if (riskStyle != null) {
       RiskBadge(riskLevel = riskStyle.badgeLevel, compact = false)
+    }
+    if (hasHealthEducationHint && onLearnMoreClick != null) {
+      androidx.compose.material3.TextButton(onClick = onLearnMoreClick, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+        androidx.compose.material3.Text(
+          text = "Learn More",
+          style = MaterialTheme.typography.labelMedium,
+        )
+      }
     }
   }
 }
