@@ -18,6 +18,17 @@ val localProperties = Properties().apply {
 val apiBaseUrl: String = localProperties.getProperty("API_BASE_URL")
   ?: "https://api.arogyasakhi.armman.org/api/v1/"
 
+// Per-environment RISK_ANC/RISK_INFANT rule-set ids. These are NOT reusable across environments —
+// GoRules server-generates a fresh UUID per rule set on each database, so dev, a teammate's ngrok
+// tunnel, SIT, UAT, and prod can each have a DIFFERENT id for what is conceptually "the ANC risk
+// pack." Set RISK_ANC_RULE_SET_ID / RISK_INFANT_RULE_SET_ID in local.properties (gitignored) to
+// match whichever backend API_BASE_URL above points at; falls back to the original dev-seeded ids
+// (2026-08-24) so existing setups keep working unless overridden.
+val riskAncRuleSetId: String = localProperties.getProperty("RISK_ANC_RULE_SET_ID")
+  ?: "55555555-5555-4555-8555-555555555551"
+val riskInfantRuleSetId: String = localProperties.getProperty("RISK_INFANT_RULE_SET_ID")
+  ?: "55555555-5555-4555-8555-555555555561"
+
 android {
   namespace = "org.armman.sakhi"
   compileSdk = 34
@@ -29,6 +40,8 @@ android {
     versionCode = 1
     versionName = "0.0.1"
     buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
+    buildConfigField("String", "RISK_ANC_RULE_SET_ID", "\"$riskAncRuleSetId\"")
+    buildConfigField("String", "RISK_INFANT_RULE_SET_ID", "\"$riskInfantRuleSetId\"")
   }
 
   signingConfigs {

@@ -1,5 +1,6 @@
 package org.armman.sakhi.data.rules
 
+import org.armman.sakhi.BuildConfig
 import org.armman.sakhi.data.schedule.VisitCodeType
 
 /**
@@ -60,26 +61,31 @@ object RuleSetIds {
   const val ESCALATION = "44444444-4444-4444-8444-444444444441"
 
   /**
-   * Mother/ANC clinical risk grading (offline high-risk rule evaluation CR). Rule set
-   * `55555555-...551`. Confirmed live and wired server-side to `ANC_VISIT` on dev 2026-08-24.
+   * Mother/ANC clinical risk grading (offline high-risk rule evaluation CR).
    *
-   * Fetched the same way as [ANC]/[PP]/etc. above via [RuleSetRepository.getPublishedRuleSet] —
-   * as of 2026-08-24 this resolves "whatever's newly published" automatically, the same as every
-   * SCHEDULE id. (Previously this app fetched RISK by a fixed version-id constant instead, because
-   * the only non-admin endpoint available at the time couldn't resolve "latest for a set" — that
-   * endpoint never actually returned `rulesJson` either, so on-device RISK grading was silently
-   * broken the whole time. Both limitations are resolved; see [RuleSetApi]'s class doc.)
+   * ⚠ **Environment-configurable, NOT a fixed constant (changed 2026-08-31).** Rule-set UUIDs are
+   * always server-generated per database — GoRules never lets you force a specific id — so this
+   * value is genuinely different per environment (e.g. `55555555-...551` on the environment this
+   * was originally seeded against, vs. `df574ee3-c6cb-43eb-901e-7624d1be4f3e` on the current
+   * `develop`/dev database as of 2026-08-31). Backend confirmed a single hardcoded id can never be
+   * correct across environments simultaneously. Sourced from [BuildConfig.RISK_ANC_RULE_SET_ID],
+   * which reads `RISK_ANC_RULE_SET_ID` from `local.properties` (falling back to the original
+   * `...551` id) — see `app/build.gradle.kts`'s comment for the same pattern used by
+   * `API_BASE_URL`. Set this in `local.properties` to match whichever backend `API_BASE_URL`
+   * points at.
+   *
+   * Fetched the same way as [ANC]/[PP]/etc. above via [RuleSetRepository.getPublishedRuleSet].
    */
-  const val RISK_ANC = "55555555-5555-4555-8555-555555555551"
+  val RISK_ANC: String = BuildConfig.RISK_ANC_RULE_SET_ID
 
   /**
-   * Infant/neonatal clinical risk grading (offline high-risk rule evaluation CR). Rule set
-   * `55555555-...561`. Confirmed live and wired server-side to
-   * `INFANT_VISIT`/`INC_VISIT`/`CCV_VISIT`/`NEONATAL_VISIT` on dev 2026-08-24.
+   * Infant/neonatal clinical risk grading (offline high-risk rule evaluation CR).
    *
-   * Same fetch path and history as [RISK_ANC] — see that constant's doc.
+   * Same environment-configurable story as [RISK_ANC] — see that property's doc. Sourced from
+   * [BuildConfig.RISK_INFANT_RULE_SET_ID] (`local.properties`' `RISK_INFANT_RULE_SET_ID`,
+   * falling back to the original `...561` id).
    */
-  const val RISK_INFANT = "55555555-5555-4555-8555-555555555561"
+  val RISK_INFANT: String = BuildConfig.RISK_INFANT_RULE_SET_ID
 
   /**
    * Maps a [VisitCodeType] family to the rule set that schedules it. HR variants
