@@ -145,3 +145,19 @@
 -keep class io.gorules.** { *; }
 -keepclassmembers class io.gorules.** { *; }
 -dontwarn io.gorules.**
+
+# JNA (com.sun.jna) — the native-binding library GoRules' zen-engine-kotlin-android artifact uses
+# under the hood to call into its Rust core. Missed by the io.gorules keep rule above because JNA
+# is a separate transitive dependency, not part of the io.gorules.** package tree. JNA resolves
+# native struct field offsets via reflection on ITS OWN class/field names at runtime (see
+# com.sun.jna.Native/com.sun.jna.Pointer) — R8 renaming/stripping those in release builds breaks
+# that resolution immediately on the first native call. Confirmed via a real release-build device
+# log (2026-08-31): "ZenRuleEvaluator.evaluate: threw NoClassDefFoundError — com.sun.jna.Native"
+# and "... threw UnsatisfiedLinkError — Can't obtain peer field ID for class com.sun.jna.Pointer",
+# both caught by GoRulesRiskAdapter's/ZenRuleEvaluator's Throwable-catch (so no crash — every
+# on-device risk-grading evaluate() call just silently returns null, and HR field highlighting
+# never appears). Debug builds unaffected (isMinifyEnabled = false there) — same failure shape as
+# the 2026-08-27 io.gorules regression above, one dependency layer deeper.
+-keep class com.sun.jna.** { *; }
+-keepclassmembers class * extends com.sun.jna.** { *; }
+-dontwarn com.sun.jna.**
