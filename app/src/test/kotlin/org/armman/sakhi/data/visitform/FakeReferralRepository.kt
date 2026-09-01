@@ -31,6 +31,15 @@ class FakeReferralRepository : ReferralRepository {
 
   var errorToThrow: Throwable? = null
 
+  /** Configurable — [org.armman.sakhi.ui.adhocform.AdHocFormViewModelTest] sets this to cover
+   * `prefillReferralVisitNameFromParent`. Defaults to null (not a throwing failure): unlike
+   * [createReferral]/[submitFollowUp], a local-cache miss is this method's own normal, documented
+   * outcome (see [ReferralRepository.getCachedReferralVisitName]'s doc), not something a test
+   * forgetting to configure it should be caught doing. */
+  var cachedReferralVisitName: String? = null
+
+  override suspend fun getCachedReferralVisitName(referralId: String): String? = cachedReferralVisitName
+
   override suspend fun getPendingFollowUps(): List<ReferralFollowUp> =
     throw UnsupportedOperationException("not used by these tests")
 

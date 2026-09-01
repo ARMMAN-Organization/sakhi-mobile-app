@@ -29,6 +29,7 @@ import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.FormVisibilityEvaluator
 import org.armman.sakhi.data.forms.FormsRepository
 import org.armman.sakhi.data.lookup.LookupRepository
+import org.armman.sakhi.data.referral.ReferralRepository
 import java.time.LocalDate
 import java.util.UUID
 import javax.inject.Inject
@@ -90,6 +91,10 @@ class AdHocFormViewModel @Inject constructor(
   private val adHocFormDraftRepository: AdHocFormDraftRepository,
   private val formAuditRepository: FormAuditRepository,
   private val beneficiaryProfileRepository: BeneficiaryProfileRepository,
+  /** CR-Referral-01 (2026-09-02) — [prefillReferralVisitNameFromParent]'s only use: reads the
+   * parent referral's cached `referral_visit_name` for the Follow-up form. Not used by any other
+   * ad-hoc form. */
+  private val referralRepository: ReferralRepository,
   savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -158,6 +163,7 @@ class AdHocFormViewModel @Inject constructor(
       loadBeneficiaryRegistrationDate()
       prefillTodayDateFields()
       prefillVisitName()
+      prefillReferralVisitNameFromParent()
       prefillAutoNumberedVisitName()
     }
   }
@@ -215,25 +221,50 @@ class AdHocFormViewModel @Inject constructor(
     }
   }
 
+  /** Autopopulates the Referral Follow-up form's OWN `referral_visit_name` question ("which
+   * referral is this a follow-up for") from the parent referral's cached name — CR-Referral-01
+   * (2026-09-02). `REFERRAL_FOLLOWUP_VISIT` only: every other ad-hoc form either has no
+   * `referral_visit_name` question at all, or (on `REFERRAL_VISIT` itself) auto-numbers it fresh
+   * via [prefillAutoNumberedVisitName] instead — this is a READ of an already-decided name, not a
+   * new one being minted. No-op when [referralId] is blank (this form wasn't opened from an
+   * existing referral), the loaded schema doesn't carry the field, it already has an answer (a
+   * restored draft is never relabeled), or nothing was ever cached for that referral (see
+   * [ReferralRepository.getCachedReferralVisitName]'s doc — blank is a normal outcome, not an
+   * error, for a referral created before this cache column existed). */
+  private suspend fun prefillReferralVisitNameFromParent() {
+    if (formCode != "REFERRAL_FOLLOWUP_VISIT") return
+    val referralId = referralId ?: return
+    val hasField = _uiState.value.version?.schemaJson.orEmpty()
+      .any { it.questionCode == REFERRAL_VISIT_NAME_QUESTION_CODE }
+    if (!hasField || !_uiState.value.answers.valueOf(REFERRAL_VISIT_NAME_QUESTION_CODE).isNullOrBlank()) return
+    val cachedName = referralRepository.getCachedReferralVisitName(referralId) ?: return
+    _uiState.update { state ->
+      state.copy(answers = state.answers.withSingleValue(REFERRAL_VISIT_NAME_QUESTION_CODE, cachedName))
+    }
+  }
+
   /** Which question code gets auto-numbered for each ad-hoc form, and the prefix to number it
    * with: Referral's "Referral visit name" (spec row 3: "RV1, RV2 etc, Autocalculated") and
    * Referral Follow-up's "Referral followup visit name" (spec row 3: "RFU1, RFU2 etc,
-   * Autocalculate"). Only one entry can ever match a given loaded schema — each [formCode] carries
-   * at most one of these two question codes — so iterating the whole map is safe. */
+   * Autocalculate"). Keyed by [formCode] itself, NOT just question code (CR-Referral-01,
+   * 2026-09-02 fix) — `REFERRAL_FOLLOWUP_VISIT`'s own schema carries `referral_visit_name` too
+   * (its row 2, autopopulated by [prefillReferralVisitNameFromParent] instead, never auto-
+   * numbered), so a question-code-only lookup would have wrongly RV-numbered it here as if it
+   * were `REFERRAL_VISIT`'s own row 3. */
   private val AUTO_NUMBERED_VISIT_NAME_PREFIXES = mapOf(
-    REFERRAL_VISIT_NAME_QUESTION_CODE to "RV",
-    REFERRAL_FOLLOWUP_VISIT_NAME_QUESTION_CODE to "RFU",
+    "REFERRAL_VISIT" to (REFERRAL_VISIT_NAME_QUESTION_CODE to "RV"),
+    "REFERRAL_FOLLOWUP_VISIT" to (REFERRAL_FOLLOWUP_VISIT_NAME_QUESTION_CODE to "RFU"),
   )
 
   /** Counts this beneficiary's past [formCode] ad-hoc-form submissions on this device (via
-   * [AdHocFormDraftRepository.countByFormCode]) and labels this one one past that, using whichever
-   * of [AUTO_NUMBERED_VISIT_NAME_PREFIXES] the loaded schema actually carries. No-op when the
-   * schema carries neither code, or the one it does carry already has an answer (a restored draft
-   * is never relabeled). */
+   * [AdHocFormDraftRepository.countByFormCode]) and labels this one one past that, using
+   * [AUTO_NUMBERED_VISIT_NAME_PREFIXES]'s entry for THIS [formCode]. No-op when [formCode] has no
+   * entry, the loaded schema doesn't carry that code, or it already has an answer (a restored
+   * draft is never relabeled). */
   private suspend fun prefillAutoNumberedVisitName() {
+    val (code, prefix) = AUTO_NUMBERED_VISIT_NAME_PREFIXES[formCode] ?: return
     val fieldsPresent = _uiState.value.version?.schemaJson.orEmpty().map { it.questionCode }.toSet()
-    val (code, prefix) = AUTO_NUMBERED_VISIT_NAME_PREFIXES.entries
-      .firstOrNull { (code, _) -> code in fieldsPresent } ?: return
+    if (code !in fieldsPresent) return
     if (!_uiState.value.answers.valueOf(code).isNullOrBlank()) return
     val count = adHocFormDraftRepository.countByFormCode(beneficiaryId, formCode)
     _uiState.update { state ->

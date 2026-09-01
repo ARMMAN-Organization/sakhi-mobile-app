@@ -860,12 +860,14 @@ private fun MediaPlayButton(label: String, completed: Boolean, onPlay: () -> Uni
   )
 }
 
-/** `image` field as an outlined lavender pill (design: "Take photo of consent form 📷"). Trailing
- * icon flips to a success check once a photo is captured. Same [onCapture] camera flow as before —
- * only the visual changed from a bordered box to a pill. Once captured, a thumbnail preview of the
- * photo renders below the pill (bharath, 2026-08-07 — Sakhis had no way to confirm what was
- * captured; tapping the pill silently reopened the camera instead of showing anything). Preview
- * only, no clear/retake action on the thumbnail itself — retake still happens via the pill. */
+/** `image` field as an outlined lavender pill (design: "📷 Take photo of consent form"). Leading
+ * icon (camera-then-label, matching the Figma "📷 Take Photo" layout for Referral Follow-up's
+ * Data Upload tab — bharath, 2026-09-02, was a trailing icon before this) flips to a success check
+ * once a photo is captured. Same [onCapture] camera flow as before — only the visual changed from
+ * a bordered box to a pill. Once captured, a thumbnail preview of the photo renders below the pill
+ * (bharath, 2026-08-07 — Sakhis had no way to confirm what was captured; tapping the pill silently
+ * reopened the camera instead of showing anything). Preview only, no clear/retake action on the
+ * thumbnail itself — retake still happens via the pill. */
 @Composable
 private fun ConsentPhotoButton(
   label: String,
@@ -878,7 +880,7 @@ private fun ConsentPhotoButton(
     SecondaryButton(
       text = label,
       onClick = onCapture,
-      trailingIcon = painterResource(
+      leadingIcon = painterResource(
         if (captured) R.drawable.ic_check_circle_small else R.drawable.ic_camera,
       ),
     )

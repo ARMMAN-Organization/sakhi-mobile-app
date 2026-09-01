@@ -119,7 +119,7 @@ class RemoteReferralRepositoryTest {
   ): RemoteReferralRepository {
     val sessionStore = SessionStore(FakeSecureKeyValueStore())
     sessionStore.saveSession(session())
-    return RemoteReferralRepository(api, sessionStore, store, lookupRepository, OkHttpClient())
+    return RemoteReferralRepository(api, sessionStore, store, lookupRepository, OkHttpClient(), FakeReferralLinkDao())
   }
 
   private fun capture(

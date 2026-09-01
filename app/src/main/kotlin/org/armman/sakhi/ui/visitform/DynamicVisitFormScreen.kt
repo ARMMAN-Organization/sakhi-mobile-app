@@ -9,6 +9,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -479,6 +481,7 @@ private fun SummaryTabContent(
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SummaryRiskBanner(riskLevel: RiskLevel, comorbidities: List<String>) {
   Column(
@@ -495,7 +498,7 @@ private fun SummaryRiskBanner(riskLevel: RiskLevel, comorbidities: List<String>)
         color = NeutralG400,
         modifier = Modifier.weight(1f),
       )
-      RiskBadge(riskLevel = riskLevel)
+      RiskBadge(riskLevel = riskLevel, modifier = Modifier.padding(top = 2.dp))
     }
     if (comorbidities.isEmpty()) {
       Text(
@@ -505,8 +508,9 @@ private fun SummaryRiskBanner(riskLevel: RiskLevel, comorbidities: List<String>)
         modifier = Modifier.padding(top = Dimens.SmallSpacing),
       )
     } else {
-      Row(
+      FlowRow(
         horizontalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing),
+        verticalArrangement = Arrangement.spacedBy(Dimens.SmallSpacing),
         modifier = Modifier.padding(top = Dimens.SmallSpacing),
       ) {
         comorbidities.forEach { condition -> ConditionChip(condition) }

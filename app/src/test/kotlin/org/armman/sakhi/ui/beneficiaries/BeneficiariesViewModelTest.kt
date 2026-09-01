@@ -71,7 +71,7 @@ class BeneficiariesViewModelTest {
     val viewModel = createViewModel()
 
     viewModel.onTabSelected(BeneficiaryStatus.JOURNEY_COMPLETE)
-    assertEquals(listOf("j1", "j2"), viewModel.uiState.value.beneficiaries.map { it.id })
+    assertEquals(listOf("j2", "j1"), viewModel.uiState.value.beneficiaries.map { it.id }) // sorted high-to-low risk: j2=MILD before j1=LOW
 
     viewModel.onTabSelected(BeneficiaryStatus.CLOSED)
     assertEquals(listOf("c1"), viewModel.uiState.value.beneficiaries.map { it.id })
@@ -284,7 +284,7 @@ class BeneficiariesViewModelTest {
     val lists = viewModel.uiState.value.listsByTab
 
     assertEquals(listOf("a1", "a2", "a3"), lists[BeneficiaryStatus.ACTIVE]?.map { it.id })
-    assertEquals(listOf("j1", "j2"), lists[BeneficiaryStatus.JOURNEY_COMPLETE]?.map { it.id })
+    assertEquals(listOf("j2", "j1"), lists[BeneficiaryStatus.JOURNEY_COMPLETE]?.map { it.id }) // sorted high-to-low risk: j2=MILD before j1=LOW
     assertEquals(listOf("c1"), lists[BeneficiaryStatus.CLOSED]?.map { it.id })
   }
 

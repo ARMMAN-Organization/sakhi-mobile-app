@@ -20,6 +20,7 @@ import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.FormDateRuleset
 import java.time.LocalDate
 import org.armman.sakhi.data.lookup.FakeLookupRepository
+import org.armman.sakhi.data.visitform.FakeReferralRepository
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -114,11 +115,14 @@ class AdHocFormViewModelTest {
     geography = null,
   )
 
+  private val referralRepository = FakeReferralRepository()
+
   private fun buildViewModel(
     beneficiaryId: String = "beneficiary-1",
     formCode: String = "REFERRAL_VISIT",
     visitName: String = "",
     forced: Boolean = false,
+    referralId: String = "",
   ) =
     AdHocFormViewModel(
       formsRepository = formsRepository,
@@ -126,12 +130,14 @@ class AdHocFormViewModelTest {
       adHocFormDraftRepository = draftRepository,
       formAuditRepository = formAuditRepository,
       beneficiaryProfileRepository = beneficiaryProfileRepository,
+      referralRepository = referralRepository,
       savedStateHandle = SavedStateHandle(
         mapOf(
           "beneficiaryId" to beneficiaryId,
           "formCode" to formCode,
           "visitName" to visitName,
           "forced" to forced,
+          "referralId" to referralId,
         ),
       ),
     )
@@ -306,6 +312,44 @@ class AdHocFormViewModelTest {
     testDispatcher.scheduler.advanceUntilIdle()
 
     assertEquals("RFU2", viewModel.uiState.value.answers.valueOf("referral_followup_visit_name"))
+  }
+
+  @Test
+  fun `referral_visit_name on REFERRAL_FOLLOWUP_VISIT is autopopulated from the parent referral, not RV-numbered`() {
+    // Regression: REFERRAL_FOLLOWUP_VISIT's own schema carries referral_visit_name too (its row 2,
+    // "Autopopulate the referral form linked to this visit") -- before this fix it collided with
+    // REFERRAL_VISIT's row-3 auto-numbering and got wrongly assigned "RV<count>" instead.
+    val referralVisitNameField = FormFieldSchema(
+      label = "Referral visit name",
+      required = true,
+      inputTypeRaw = "text",
+      questionCode = "referral_visit_name",
+    )
+    formsRepository.version = versionWith(fields = listOf(referralVisitNameField))
+    draftRepository.referralCount = 5 // would produce "RV6" if the old bug were still present
+    referralRepository.cachedReferralVisitName = "RV1"
+
+    val viewModel = buildViewModel(formCode = "REFERRAL_FOLLOWUP_VISIT", referralId = "referral-1")
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals("RV1", viewModel.uiState.value.answers.valueOf("referral_visit_name"))
+  }
+
+  @Test
+  fun `referral_visit_name on REFERRAL_FOLLOWUP_VISIT stays blank when nothing was cached for the referral`() {
+    val referralVisitNameField = FormFieldSchema(
+      label = "Referral visit name",
+      required = true,
+      inputTypeRaw = "text",
+      questionCode = "referral_visit_name",
+    )
+    formsRepository.version = versionWith(fields = listOf(referralVisitNameField))
+    referralRepository.cachedReferralVisitName = null
+
+    val viewModel = buildViewModel(formCode = "REFERRAL_FOLLOWUP_VISIT", referralId = "referral-1")
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(null, viewModel.uiState.value.answers.valueOf("referral_visit_name"))
   }
 
   @Test

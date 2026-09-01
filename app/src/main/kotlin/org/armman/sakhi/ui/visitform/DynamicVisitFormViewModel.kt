@@ -797,11 +797,16 @@ class DynamicVisitFormViewModel @Inject constructor(
     // as any other missing required field above.
     val referralDate = answers.valueOf(FormDateRuleset.DECIDED_VISIT_DATE_QUESTION_CODE)
       ?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return null
+    // Optional, unlike everything above — see ReferralCapture.referralVisitName's doc. Blank/never
+    // answered just means the Follow-up form's own autopopulation has nothing to show later, not
+    // that this referral fails to capture.
+    val referralVisitName = answers.valueOf(QUESTION_CODE_REFERRAL_VISIT_NAME)?.trim()?.takeIf { it.isNotBlank() }
     return ReferralCapture(
       referralType = type,
       facilityName = facilityName,
       facilityType = facilityType,
       referralDate = referralDate,
+      referralVisitName = referralVisitName,
     )
   }
 
@@ -1330,6 +1335,9 @@ class DynamicVisitFormViewModel @Inject constructor(
     const val QUESTION_CODE_IS_ACCOMPANIED_REFERRAL = "is_accompanied_referral"
     const val QUESTION_CODE_PLACE_OF_REFERRAL = "place_of_referral"
     const val QUESTION_CODE_HEALTH_FACILITY_NAME = "health_facility_name"
+    // referral_visit_name is read (not just rendered) since Pass 6.2 unhid it — see
+    // referralCaptureOrNull's doc for why it's optional, unlike the constants above.
+    const val QUESTION_CODE_REFERRAL_VISIT_NAME = "referral_visit_name"
     // visit_name/referral_visit_name are rendered like any other schema field now (see
     // visibleReferralFields' doc) but still aren't read by referralCaptureOrNull() — no constants
     // needed for them since nothing in this file references their question codes directly.

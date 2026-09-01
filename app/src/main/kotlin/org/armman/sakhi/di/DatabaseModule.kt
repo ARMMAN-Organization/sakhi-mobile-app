@@ -69,6 +69,7 @@ object DatabaseModule {
         SakhiDatabase.MIGRATION_17_18,
         SakhiDatabase.MIGRATION_18_19,
         SakhiDatabase.MIGRATION_19_20,
+        SakhiDatabase.MIGRATION_20_21,
       )
       .fallbackToDestructiveMigration()
       .build()

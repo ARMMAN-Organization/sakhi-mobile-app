@@ -154,6 +154,14 @@ import org.armman.sakhi.data.referral.ReferralEvidenceMediaEntity
  *    already-queued rows from the retired bespoke screen. Additive [MIGRATION_19_20] — two
  *    `ALTER TABLE`s, both nullable TEXT columns. No automated migration test (same convention as
  *    v4-v19).
+ *  - v21: adds `referralVisitName` to the existing `referral_links` table (CR-Referral-01,
+ *    2026-09-02) — so the Referral Follow-up form can autopopulate its own "Referral visit name"
+ *    question from the parent referral's own captured name (see [ReferralLinkEntity
+ *    .referralVisitName]'s doc), the same "cache it at create time, read it back with no network
+ *    call" pattern `facilityName`/`facilityType` already established in v18. Additive
+ *    [MIGRATION_20_21] — one `ALTER TABLE`, one NOT NULL TEXT column defaulting to `''` (same
+ *    blank-not-null convention as v18's two columns). No automated migration test (same
+ *    convention as v4-v20).
  */
 @Database(
   entities = [
@@ -173,7 +181,7 @@ import org.armman.sakhi.data.referral.ReferralEvidenceMediaEntity
     EnrollmentRiskBaselineEntity::class,
     ReferralEvidenceMediaEntity::class,
   ],
-  version = 20,
+  version = 21,
   exportSchema = true,
 )
 @TypeConverters(ScheduleTypeConverters::class)
@@ -644,6 +652,19 @@ abstract class SakhiDatabase : RoomDatabase() {
       override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE `ad_hoc_form_drafts` ADD COLUMN `referralId` TEXT")
         db.execSQL("ALTER TABLE `referral_evidence_media` ADD COLUMN `submissionId` TEXT")
+      }
+    }
+
+    /**
+     * v20 → v21: adds `referralVisitName` to the existing `referral_links` table (CR-Referral-01,
+     * 2026-09-02). Every existing row upgrades with `''` — same acceptable-blank convention as
+     * v18's `facilityName`/`facilityType` columns (no real users on the app yet); a referral
+     * cached before this migration just shows a blank "Referral visit name" on its Follow-up
+     * form instead of crashing.
+     */
+    val MIGRATION_20_21: Migration = object : Migration(20, 21) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `referral_links` ADD COLUMN `referralVisitName` TEXT NOT NULL DEFAULT ''")
       }
     }
 

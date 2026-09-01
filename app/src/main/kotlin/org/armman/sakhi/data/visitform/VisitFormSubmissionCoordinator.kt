@@ -543,7 +543,7 @@ class VisitFormSubmissionCoordinator @Inject constructor(
       when (outcome) {
         is CreateReferralOutcome.Created -> {
           Log.i(TAG, "maybeCreateReferral(visitId=$visitId): created referral ${outcome.referral.referralId}")
-          cacheReferralLink(localScheduleUuid, outcome.referral)
+          cacheReferralLink(localScheduleUuid, outcome.referral, referralCapture.referralVisitName)
         }
         is CreateReferralOutcome.AlreadyExists -> {
           // Idempotent per backend's #197 fix: this visit already had a referral (e.g. a resumed
@@ -551,7 +551,7 @@ class VisitFormSubmissionCoordinator @Inject constructor(
           // attempt) — the existing one is returned untouched, not a new one, so this is the
           // one-referral-per-visit rule working correctly, not a warning-worthy condition.
           Log.i(TAG, "maybeCreateReferral(visitId=$visitId): referral already existed (${outcome.referral.referralId}), one-per-visit held")
-          cacheReferralLink(localScheduleUuid, outcome.referral)
+          cacheReferralLink(localScheduleUuid, outcome.referral, referralCapture.referralVisitName)
         }
       }
     }
@@ -563,8 +563,13 @@ class VisitFormSubmissionCoordinator @Inject constructor(
    * effort like everything else in this chain: a local-cache write failure must not flip an
    * otherwise-successful visit submission to Failed/retryable, so it is swallowed the same way
    * [maybeCreateReferral]'s own network call is.
+   *
+   * [referralVisitName] comes from the just-submitted [ReferralCapture], NOT [referral] itself —
+   * `POST /referrals`'s response has no such field (it's a request-only, backend-unaware concept,
+   * same as [ReferralCapture.referralVisitName]'s doc explains) — see [ReferralLinkEntity
+   * .referralVisitName]'s own doc for who reads it back.
    */
-  private suspend fun cacheReferralLink(localScheduleUuid: String, referral: Referral) {
+  private suspend fun cacheReferralLink(localScheduleUuid: String, referral: Referral, referralVisitName: String?) {
     runCatching {
       referralLinkDao.upsert(
         ReferralLinkEntity(
@@ -577,6 +582,7 @@ class VisitFormSubmissionCoordinator @Inject constructor(
           createdAtEpochMillis = System.currentTimeMillis(),
           facilityName = referral.facilityName,
           facilityType = referral.facilityType.name,
+          referralVisitName = referralVisitName.orEmpty(),
         ),
       )
     }.onFailure { error ->

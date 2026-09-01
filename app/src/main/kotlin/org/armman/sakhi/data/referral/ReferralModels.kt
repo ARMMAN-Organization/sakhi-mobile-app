@@ -94,12 +94,23 @@ enum class ReferralFollowUpOutcomeStatus { PENDING, COMPLETED, INCOMPLETE, LAPSE
  * [referralDate] is required by `POST /referrals` (backend-confirmed 2026-08-27) — the visit
  * form's referral step already requires the Sakhi to pick this (`decided_visit_date` in the real
  * schema) before the step is considered filled.
+ *
+ * [referralVisitName] (CR-Referral-01, 2026-09-02) is the schema's own `referral_visit_name`
+ * answer (e.g. "RV1") — optional, unlike every other field here: it has no field on `POST
+ * /referrals` itself (same open backend-ask as `visit_name`/`referral_form_filled_date`, see
+ * CR-Referral-01's backend-ask doc) and never gates whether a referral is captured at all. It
+ * exists purely so [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator.maybeCreateReferral]
+ * can cache it onto [org.armman.sakhi.data.referral.ReferralLinkEntity.referralVisitName] — the
+ * Referral Follow-up form (`REFERRAL_FOLLOWUP_VISIT`) reads it back from there to autopopulate its
+ * own "Referral visit name" question ("which referral is this follow-up for"), instead of it
+ * being left for the Sakhi to remember or re-type.
  */
 data class ReferralCapture(
   val referralType: ReferralType,
   val facilityName: String,
   val facilityType: String,
   val referralDate: LocalDate,
+  val referralVisitName: String? = null,
 )
 
 /** One referral as returned by `POST /referrals` (backend-confirmed live 2026-08-27). Field names
@@ -176,6 +187,17 @@ sealed interface CreateReferralOutcome {
  */
 interface ReferralRepository {
   suspend fun getPendingFollowUps(): List<ReferralFollowUp>
+
+  /**
+   * CR-Referral-01 (2026-09-02): the `referral_visit_name` answer cached on [ReferralLinkEntity]
+   * at the moment this [referralId] was created (see [ReferralCapture.referralVisitName]'s doc) —
+   * null if none was ever captured (a referral created before this cache column existed, or one
+   * whose Sakhi left the field blank). Used only by [org.armman.sakhi.ui.adhocform
+   * .AdHocFormViewModel] to autopopulate the Referral Follow-up form's own "Referral visit name"
+   * question — a local cache read, no network call, same "no `GET /referrals/{id}` endpoint
+   * exists" reasoning [ReferralLinkEntity.facilityName]'s doc already establishes for that field.
+   */
+  suspend fun getCachedReferralVisitName(referralId: String): String?
 
   /**
    * `POST /referrals` (backend-confirmed live 2026-08-27). One referral per [visitId] is

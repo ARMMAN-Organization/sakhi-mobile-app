@@ -47,4 +47,10 @@ data class ReferralLinkEntity(
    * constraint. */
   val facilityName: String = "",
   val facilityType: String = "",
+  /** CR-Referral-01 (2026-09-02) — the `referral_visit_name` answer captured on the referral
+   * itself (e.g. "RV1"), so the Referral Follow-up form can autopopulate its own "Referral visit
+   * name" question with which referral it's following up on, without a network call. Same
+   * blank-default-on-migration convention as [facilityName]/[facilityType] — a row cached before
+   * this column existed just reads back empty rather than crashing Room's NOT NULL constraint. */
+  val referralVisitName: String = "",
 )

@@ -178,6 +178,9 @@ class BeneficiariesViewModel @Inject constructor(
               b.journeyCompletedIn == s.selectedMonth
             )
       }
+        // High risk first (RiskLevel is declared HIGH..LOW, so ordinal order is already
+        // high-to-low); within the same risk level, soonest visit (fewest days remaining) first.
+        .sortedWith(compareBy({ it.riskLevel.ordinal }, { it.daysRemaining }))
     }
     _uiState.update { it.copy(listsByTab = lists) }
   }

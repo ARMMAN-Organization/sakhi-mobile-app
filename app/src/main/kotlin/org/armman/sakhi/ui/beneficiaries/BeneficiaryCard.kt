@@ -44,6 +44,7 @@ import org.armman.sakhi.ui.theme.RiskMild
 import org.armman.sakhi.ui.theme.RiskModerate
 import org.armman.sakhi.ui.theme.White
 import org.armman.sakhi.ui.theme.softShadow
+import org.armman.sakhi.util.toTitleCase
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -111,7 +112,9 @@ fun BeneficiaryCard(
           )
         }
         Text(
-          text = beneficiary.name,
+          // Display-only: normalizes casing (e.g. server/form data typed lowercase)
+          // without altering the stored beneficiary.name.
+          text = beneficiary.name.toTitleCase(),
           // headlineSmall (24sp Bold) is the style guide's "Prominent names" token — using it
           // here (not titleLarge/18sp) keeps the name proportionate against the 14sp bodyMedium
           // meta row (pada / ANC / Sch Date) below it.

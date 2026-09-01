@@ -60,10 +60,16 @@ class RemoteReferralRepository @Inject constructor(
   /** Unauthenticated client for the S3 PUT hop — see [org.armman.sakhi.di.NetworkModule
    * .provideRawOkHttp]'s doc for why this must not carry this app's Bearer token. */
   @Named("rawHttpClient") private val rawHttpClient: OkHttpClient,
+  /** Backs [getCachedReferralVisitName] — a pure local-cache read, no network call, no online/
+   * offline distinction to make (unlike every other method here). */
+  private val referralLinkDao: ReferralLinkDao,
 ) : ReferralRepository {
 
   private val gson = Gson()
   private val mutex = Mutex()
+
+  override suspend fun getCachedReferralVisitName(referralId: String): String? =
+    referralLinkDao.getByReferralId(referralId)?.referralVisitName?.takeIf { it.isNotBlank() }
 
   override suspend fun getPendingFollowUps(): List<ReferralFollowUp> = mutex.withLock {
     val fetched = fetchFollowUps()
