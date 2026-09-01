@@ -62,9 +62,9 @@ enum class ReferralStatus { INITIATED, PENDING_FOLLOWUP, COMPLETED, LAPSED, SKIP
 enum class ReferralFollowUpOutcomeStatus { PENDING, COMPLETED, INCOMPLETE, LAPSED, UNKNOWN }
 
 /**
- * Everything the Sakhi fills in on the visit form's standalone Referral tab (date/facility/type),
- * captured as a typed bundle rather than loose ViewModel fields so it can be persisted verbatim
- * alongside [org.armman.sakhi.data.rules.RiskGradingResult] in the offline draft payload (see
+ * Everything the Sakhi fills in on the visit form's referral capture step, captured as a typed
+ * bundle rather than loose ViewModel fields so it can be persisted verbatim alongside
+ * [org.armman.sakhi.data.rules.RiskGradingResult] in the offline draft payload (see
  * [org.armman.sakhi.data.visitform.VisitFormDraftPayload.referralCapture]) and passed unchanged
  * all the way down to [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator], which is
  * the only place the server visit id / form-submission id needed to actually create the referral
@@ -74,13 +74,31 @@ enum class ReferralFollowUpOutcomeStatus { PENDING, COMPLETED, INCOMPLETE, LAPSE
  * confirms at least one condition has `isReferralTrigger == true` (server-authoritative, not the
  * on-device evaluation — see [VisitFormSubmissionCoordinator.maybeCreateReferral]'s doc for why).
  *
+ * CR-Referral-01 (2026-08-31): fields renamed to match the real `GET /forms/REFERRAL_VISIT/
+ * active-version` schema's "Yes → Yes" branch (accompanied/willing referral, facility decided) —
+ * that's the only branch that ever produces a [ReferralCapture] at all; the other branches
+ * ("not a new condition", "beneficiary declined") end the step with no referral, same as the old
+ * Skip button always did — see [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel
+ * .referralCaptureOrNull]'s doc.
+ *
+ * [facilityType] is a raw `String`, NOT the app's old [FacilityType] enum — the schema's real
+ * `place_of_referral` field has 11 options that don't map onto that enum's 6 values. This class
+ * itself just carries whatever string its caller puts here; the actual value is decided by the
+ * caller (as of CR-Referral-01 Pass 6.1, [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel
+ * .referralCaptureOrNull] maps the schema's raw value_code through
+ * [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel.PLACE_OF_REFERRAL_TO_FACILITY_TYPE]
+ * into one of the 6 values `POST /referrals` is backend-confirmed to actually accept — a real
+ * mapping/lookup decision is still pending backend, see CR-Referral-01's backend-ask doc; this is
+ * a stopgap that keeps referral creation working in the meantime).
+ *
  * [referralDate] is required by `POST /referrals` (backend-confirmed 2026-08-27) — the visit
- * form's Referral tab already requires the Sakhi to pick this before the tab is considered filled.
+ * form's referral step already requires the Sakhi to pick this (`decided_visit_date` in the real
+ * schema) before the step is considered filled.
  */
 data class ReferralCapture(
   val referralType: ReferralType,
   val facilityName: String,
-  val facilityType: FacilityType,
+  val facilityType: String,
   val referralDate: LocalDate,
 )
 
@@ -197,4 +215,29 @@ interface ReferralRepository {
    * there is no established idempotent-return-existing behavior confirmed for this endpoint.
    */
   suspend fun convertToAccompanied(referralId: String): Result<Referral>
+
+  /**
+   * CR-Referral-02: uploads one captured evidence file, backend-confirmed real contract
+   * (2026-08-31) — a 3-step presigned-URL flow (`POST /media/upload-url` → raw `PUT` to S3 →
+   * `POST /media` to finalize), not the app's earlier assumed single multipart call. See
+   * [org.armman.sakhi.data.referral.RemoteReferralRepository.uploadEvidence] for the
+   * implementation.
+   *
+   * [followupId] is required in practice, not just accepted: backend confirmed there is no route
+   * to attach media to an already-created follow-up, so finalize must always carry the real
+   * follow-up id from the moment this is called — [ReferralEvidenceDao.getPendingSync] only ever
+   * hands this function rows where that id is already known (see
+   * [ReferralEvidenceMediaEntity.followupId]'s doc).
+   *
+   * Returns the server's assigned media id (`media.id`) on success. [ReferralEvidenceSyncExecutor]
+   * is the only caller — never invoked directly from UI, so a network failure here is never shown
+   * to the Sakhi as a submission error (see that class's doc for why).
+   */
+  suspend fun uploadEvidence(
+    referralId: String,
+    followupId: String? = null,
+    evidenceType: ReferralEvidenceType,
+    file: java.io.File,
+    submissionId: String? = null,
+  ): Result<String>
 }

@@ -44,6 +44,35 @@ data class SubmissionResponseData(
   val id: String,
   val submittedByUserId: String? = null,
   val childBeneficiaryIds: List<String>? = null,
+  /**
+   * CR-Closure-01 items #5/#6, backend contract confirmed 2026-08-31: present ONLY on the
+   * response to the LAST `CCV_VISIT` submission for a child (visit date >= DOB + 730 days) —
+   * absent (Gson-deserialized `null`) on every earlier CCV visit and on every non-CCV form code's
+   * response, same "key absent on every form but one" shape [childBeneficiaryIds] already has
+   * above. `true` = HR was detected at this visit; the app should defer closure into the CCV-HR
+   * extension described by [extensionVisit] instead of prompting for child closure. `false` = no
+   * HR; the app should route straight into the child closure prompt, same session — do not read
+   * `null` as `false` here, since `null` means "not the boundary visit at all", not "no HR".
+   */
+  val closureDeferredForExtension: Boolean? = null,
+  /** Non-null only alongside [closureDeferredForExtension] == `true`. Not yet backed by a real
+   * persisted schedule row server-side (backend-confirmed follow-up, not built as of 2026-08-31)
+   * — see [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator]'s own doc for how this
+   * is surfaced without fabricating a local `visit_schedules` row against an unfinished contract. */
+  val extensionVisit: ExtensionVisitWindowDto? = null,
+)
+
+/**
+ * The CCV-HR extension visit's window, exactly as `POST /forms/submit` returns it for the last
+ * CCV visit when [SubmissionResponseData.closureDeferredForExtension] is `true`. Dates are the raw
+ * ISO-8601 strings the backend sends — not parsed to [java.time.LocalDate] here, since nothing in
+ * this app currently persists this window as a real schedule row (see that field's own doc); it
+ * is only ever displayed as-is.
+ */
+data class ExtensionVisitWindowDto(
+  val scheduledDate: String? = null,
+  val windowStartDate: String? = null,
+  val windowEndDate: String? = null,
 )
 
 data class CreateSubmissionResponseDto(

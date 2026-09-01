@@ -27,6 +27,11 @@ interface AdHocFormDraftRepository {
     formCode: String,
     formVersionId: String,
     answers: FormAnswers,
+    /** REFERRAL_FOLLOWUP_VISIT only — see [org.armman.sakhi.data.adhocform.AdHocFormDraftEntity.referralId]'s doc. */
+    referralId: String? = null,
+    /** REFERRAL_FOLLOWUP_VISIT only — see [AdHocFormSubmissionCoordinator.submit]'s
+     * `capturedImagePaths` doc. */
+    capturedImagePaths: Map<String, String> = emptyMap(),
   ): AdHocFormSubmitResult
 
   /**

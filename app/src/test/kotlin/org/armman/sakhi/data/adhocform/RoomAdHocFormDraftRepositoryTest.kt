@@ -13,6 +13,10 @@ import org.armman.sakhi.data.closure.FakeClosureRepository
 import org.armman.sakhi.data.connectivity.FakeConnectivityChecker
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
+import org.armman.sakhi.data.referral.FakeReferralEvidenceDao
+import org.armman.sakhi.data.referral.FakeReferralLinkDao
+import org.armman.sakhi.data.referral.FakeReferralEvidenceSyncScheduler
+import org.armman.sakhi.data.visitform.FakeReferralRepository
 import org.armman.sakhi.data.forms.CreateSubmissionResponseDto
 import org.armman.sakhi.data.forms.FakeFormSubmissionApi
 import org.armman.sakhi.data.forms.FormAnswers
@@ -75,6 +79,10 @@ class RoomAdHocFormDraftRepositoryTest {
       closureRepository = FakeClosureRepository(),
       lookupRepository = FakeLookupRepository(),
       statusOverrideStore = LocalBeneficiaryStatusOverrideStore(FakeSecureKeyValueStore()),
+      referralRepository = FakeReferralRepository(),
+      referralEvidenceDao = FakeReferralEvidenceDao(),
+      referralEvidenceSyncScheduler = FakeReferralEvidenceSyncScheduler(),
+      referralLinkDao = FakeReferralLinkDao(),
     )
     // Reuses the same dao/secureStore as the repository so runOne() sees the row submitDraft just
     // wrote — matching how the real Hilt graph wires a single instance of each.
@@ -112,6 +120,8 @@ class RoomAdHocFormDraftRepositoryTest {
     formCode = formCode,
     formVersionId = "version-1",
     answers = answers,
+    referralId = null,
+    capturedImagePaths = emptyMap(),
   )
 
   @Test

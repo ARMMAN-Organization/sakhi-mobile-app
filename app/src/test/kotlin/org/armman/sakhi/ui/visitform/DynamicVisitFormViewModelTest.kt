@@ -27,6 +27,7 @@ import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormCrossFieldRule
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
+import org.armman.sakhi.data.forms.FormVisibleWhen
 import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.VisitCodeFormResolver
@@ -108,6 +109,7 @@ class DynamicVisitFormViewModelTest {
       reasonCode: String?,
     ) {}
     override suspend fun lapseOpenAncVisits(localBeneficiaryId: String): Int = 0
+    override suspend fun lapseAllOpenVisits(localBeneficiaryId: String): Int = 0
     override suspend fun supersedeOpenVisits(localBeneficiaryId: String): Int = 0
   }
 
@@ -200,7 +202,7 @@ class DynamicVisitFormViewModelTest {
     )
 
     val calls = mutableListOf<Call>()
-    var result: VisitFormSubmitResult = VisitFormSubmitResult.Synced
+    var result: VisitFormSubmitResult = VisitFormSubmitResult.Synced()
 
     override suspend fun submitDraft(
       localScheduleUuid: String,
@@ -349,6 +351,76 @@ class DynamicVisitFormViewModelTest {
     questionCode = questionCode,
   )
 
+  private fun radioField(
+    questionCode: String,
+    label: String = questionCode,
+    visibleWhen: FormVisibleWhen? = null,
+  ) = FormFieldSchema(
+    label = label,
+    required = true,
+    inputTypeRaw = "radio",
+    questionCode = questionCode,
+    options = listOf(
+      FormFieldOption(label = "Yes", sortOrder = 0, valueCode = "yes"),
+      FormFieldOption(label = "No", sortOrder = 1, valueCode = "no"),
+    ),
+    visibleWhen = visibleWhen,
+  )
+
+  private fun dropdownField(
+    questionCode: String,
+    vararg valueCodes: String,
+    visibleWhen: FormVisibleWhen? = null,
+  ) = FormFieldSchema(
+    label = questionCode,
+    required = true,
+    inputTypeRaw = "dropdown",
+    questionCode = questionCode,
+    options = valueCodes.mapIndexed { index, code -> FormFieldOption(label = code, sortOrder = index, valueCode = code) },
+    visibleWhen = visibleWhen,
+  )
+
+  private fun textField(questionCode: String, visibleWhen: FormVisibleWhen? = null) = FormFieldSchema(
+    label = questionCode,
+    required = true,
+    inputTypeRaw = "text",
+    questionCode = questionCode,
+    visibleWhen = visibleWhen,
+  )
+
+  /** A reduced but structurally real REFERRAL_VISIT schema — same question codes/branching as the
+   * live `GET /forms/REFERRAL_VISIT/active-version` payload (CR-Referral-01 Pass 6), just without
+   * the 3 metadata fields [DynamicVisitFormViewModel.visibleReferralFields] hides anyway (no need
+   * to fixture what the ViewModel never shows). */
+  private fun referralVersion() = infantVersion().copy(
+    schemaJson = listOf(
+      radioField("referral_needed_new_condition"),
+      radioField(
+        "beneficiary_willing_for_referral",
+        visibleWhen = FormVisibleWhen(field = "referral_needed_new_condition", value = "yes", operator = "eq"),
+      ),
+      dropdownField(
+        "referral_declined_reason", "condition_not_serious_enough", "family_opposition",
+        visibleWhen = FormVisibleWhen(field = "beneficiary_willing_for_referral", value = "no", operator = "eq"),
+      ),
+      radioField(
+        "is_accompanied_referral",
+        visibleWhen = FormVisibleWhen(field = "beneficiary_willing_for_referral", value = "yes", operator = "eq"),
+      ),
+      dateField("decided_visit_date").copy(
+        visibleWhen = FormVisibleWhen(field = "beneficiary_willing_for_referral", value = "yes", operator = "eq"),
+      ),
+      dropdownField(
+        "place_of_referral", "sc", "phc", "rh", "sdh", "dh", "private_clinic",
+        visibleWhen = FormVisibleWhen(field = "beneficiary_willing_for_referral", value = "yes", operator = "eq"),
+      ),
+      textField(
+        "health_facility_name",
+        visibleWhen = FormVisibleWhen(field = "beneficiary_willing_for_referral", value = "yes", operator = "eq"),
+      ),
+    ),
+  )
+
   private fun buildViewModel(
     beneficiaryId: String = "beneficiary-1",
     visitId: String = "visit-1",
@@ -363,6 +435,12 @@ class DynamicVisitFormViewModelTest {
       NeverCalledRuleEvaluator(),
     ),
     healthEducationRepository: org.armman.sakhi.data.healtheducation.HealthEducationRepository = NeverCalledHealthEducationRepository(),
+    // CR-Closure-03: a real HardcodedRuleSource-backed generator is fine as the default for every
+    // existing test here -- none of them exercise PP5-triggers-closure directly (that's covered by
+    // PpScheduleGeneratorTest's own unit tests of isClosurePromptTrigger itself), so this only
+    // needs to be constructible, not scripted.
+    ppScheduleGenerator: org.armman.sakhi.data.schedule.PpScheduleGenerator =
+      org.armman.sakhi.data.schedule.PpScheduleGenerator(org.armman.sakhi.data.schedule.HardcodedRuleSource()),
   ) =
     DynamicVisitFormViewModel(
       formsRepository = formsRepository,
@@ -379,6 +457,7 @@ class DynamicVisitFormViewModelTest {
         localEnrolmentBeneficiarySource(),
       ),
       healthEducationRepository = healthEducationRepository,
+      ppScheduleGenerator = ppScheduleGenerator,
       savedStateHandle = SavedStateHandle(
         mapOf(
           "beneficiaryId" to beneficiaryId,
@@ -561,6 +640,83 @@ class DynamicVisitFormViewModelTest {
     )
   }
 
+  // CR-Closure-03: PP5 is the SRS's mother-closure trigger point ("PP5 completion triggers the
+  // mother closure prompt"). These two tests pin down the boundary using the real
+  // HardcodedRuleSource (PP has 5 scheduled visits, so sequenceNo 5 is the last one) rather than a
+  // literal "5" here, so a change to the PP schedule length can't silently desync this from
+  // PpScheduleGenerator's own already-unit-tested isClosurePromptTrigger check.
+  @Test
+  fun `load() sets triggersClosurePrompt for PP5, the last scheduled postpartum visit`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "PP5",
+      visitType = VisitCodeType.PP,
+      sequenceNo = 5,
+    )
+    formsRepository.version = versionWithFields(listOf(dateField(VisitFormQuestionCodes.ACTUAL_VISIT_DATE)))
+
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertTrue(viewModel.uiState.value.triggersClosurePrompt)
+  }
+
+  @Test
+  fun `load() does not set triggersClosurePrompt for an earlier postpartum visit`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "PP1",
+      visitType = VisitCodeType.PP,
+      sequenceNo = 1,
+    )
+    formsRepository.version = versionWithFields(listOf(dateField(VisitFormQuestionCodes.ACTUAL_VISIT_DATE)))
+
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertFalse(viewModel.uiState.value.triggersClosurePrompt)
+  }
+
+  @Test
+  fun `load() does not set triggersClosurePrompt for a non-PP visit`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "ANC5",
+      visitType = VisitCodeType.ANC,
+      sequenceNo = 5,
+    )
+    // A version must resolve non-null or load() short-circuits into the hasError branch before
+    // ever reaching the triggersClosurePrompt computation -- which would make this test pass
+    // trivially (default false) without exercising the check at all.
+    formsRepository.version = versionWithFields(listOf(dateField(VisitFormQuestionCodes.DATE_OF_VISIT)))
+
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals("ANC_VISIT", viewModel.uiState.value.formCode)
+    assertFalse(viewModel.uiState.value.triggersClosurePrompt)
+  }
+
+  @Test
+  fun `load() does not set triggersClosurePrompt when no schedule row is found`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    // visitScheduleRepository.scheduleByUuid left null -- load() falls back to the
+    // beneficiary-type-only form resolution, and there is no schedule row to check at all.
+    // See the sibling test's comment for why a resolvable version is required here too.
+    formsRepository.version = versionWithFields(listOf(dateField(VisitFormQuestionCodes.DATE_OF_VISIT)))
+
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertFalse(viewModel.uiState.value.triggersClosurePrompt)
+  }
+
   @Test
   fun `load() auto-fills actual_visit_date with today for NEONATAL_VISIT`() {
     beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
@@ -736,10 +892,16 @@ class DynamicVisitFormViewModelTest {
   // --- CR-Referral-01 Pass 4: onFinish() on-device referral-trigger gating ---
 
   private fun fillReferralCaptureFields(viewModel: DynamicVisitFormViewModel) {
-    viewModel.setReferralDate(LocalDate.now())
-    viewModel.setReferralFacilityName("Test PHC")
-    viewModel.setReferralFacilityType(org.armman.sakhi.data.referral.FacilityType.PHC)
-    viewModel.setReferralType(org.armman.sakhi.data.referral.ReferralType.STANDARD)
+    // CR-Referral-01 Pass 6 (2026-08-31): walks the schema's "Yes -> Yes" branch (new condition,
+    // willing to go) via the generic setReferralAnswer -- the only branch that ever produces a
+    // ReferralCapture, see referralCaptureOrNull's doc. is_accompanied_referral = "no" maps to
+    // ReferralType.STANDARD.
+    viewModel.setReferralAnswer("referral_needed_new_condition", "yes")
+    viewModel.setReferralAnswer("beneficiary_willing_for_referral", "yes")
+    viewModel.setReferralAnswer("is_accompanied_referral", "no")
+    viewModel.setReferralAnswer("decided_visit_date", LocalDate.now().toString())
+    viewModel.setReferralAnswer("place_of_referral", "phc")
+    viewModel.setReferralAnswer("health_facility_name", "Test PHC")
   }
 
   private fun triggeringGoRulesAdapter() = org.armman.sakhi.data.rules.GoRulesRiskAdapter(
@@ -753,9 +915,73 @@ class DynamicVisitFormViewModelTest {
   )
 
   @Test
+  fun `onFinish sets triggersChildClosurePrompt when the submission reports no HR at the last CCV visit`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    val draftRepository = RecordingVisitFormDraftRepository()
+    draftRepository.result = VisitFormSubmitResult.Synced(
+      org.armman.sakhi.data.visitform.VisitSubmitOutcome(closureDeferredForExtension = false),
+    )
+
+    val viewModel = buildViewModel(visitFormDraftRepository = draftRepository)
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertTrue(viewModel.uiState.value.triggersChildClosurePrompt)
+    assertNull(viewModel.uiState.value.ccvHrExtensionWindow)
+  }
+
+  @Test
+  fun `onFinish sets ccvHrExtensionWindow when the submission reports HR detected at the last CCV visit`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    val draftRepository = RecordingVisitFormDraftRepository()
+    val window = org.armman.sakhi.data.forms.ExtensionVisitWindowDto(
+      scheduledDate = "2026-09-15",
+      windowStartDate = "2026-09-10",
+      windowEndDate = "2026-09-20",
+    )
+    draftRepository.result = VisitFormSubmitResult.Synced(
+      org.armman.sakhi.data.visitform.VisitSubmitOutcome(
+        closureDeferredForExtension = true,
+        extensionVisit = window,
+      ),
+    )
+
+    val viewModel = buildViewModel(visitFormDraftRepository = draftRepository)
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertFalse(viewModel.uiState.value.triggersChildClosurePrompt)
+    assertEquals(window, viewModel.uiState.value.ccvHrExtensionWindow)
+  }
+
+  @Test
+  fun `onFinish leaves both CCV routing fields unset for a non-boundary visit submission`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    val draftRepository = RecordingVisitFormDraftRepository()
+    draftRepository.result = VisitFormSubmitResult.Synced()
+
+    val viewModel = buildViewModel(visitFormDraftRepository = draftRepository)
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertFalse(viewModel.uiState.value.triggersChildClosurePrompt)
+    assertNull(viewModel.uiState.value.ccvHrExtensionWindow)
+  }
+
+  @Test
   fun `onFinish shows the referral capture step and does not submit when the on-device result triggers a referral`() {
     beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
     formsRepository.version = infantVersion()
+    formsRepository.versionByFormCode["REFERRAL_VISIT"] = referralVersion()
     val draftRepository = RecordingVisitFormDraftRepository()
 
     val viewModel = buildViewModel(
@@ -769,6 +995,47 @@ class DynamicVisitFormViewModelTest {
 
     assertTrue(viewModel.uiState.value.showReferralCaptureStep)
     assertTrue("submitDraft must not be called on the first onFinish() that discovers a trigger", draftRepository.calls.isEmpty())
+  }
+
+  @Test
+  fun `onFinish fetches the real REFERRAL_VISIT schema before showing the step`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    val referral = referralVersion()
+    formsRepository.versionByFormCode["REFERRAL_VISIT"] = referral
+    val draftRepository = RecordingVisitFormDraftRepository()
+
+    val viewModel = buildViewModel(
+      visitFormDraftRepository = draftRepository,
+      goRulesRiskAdapter = triggeringGoRulesAdapter(),
+    )
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    // The exact regression this pass fixes: the step's fields must come from the live schema, not
+    // a hand-copied lookalike -- confirmed here by checking the ViewModel actually holds the
+    // fetched version and renders that version's fields, not some baked-in field list.
+    assertEquals(referral, viewModel.uiState.value.referralFormVersion)
+    // Only the ungated first question shows initially: every other field in the real REFERRAL_VISIT
+    // schema is `visibleWhen`-gated behind referral_needed_new_condition /
+    // beneficiary_willing_for_referral (see referralVersion()), and visibleReferralFields() honours
+    // that the same way the main form's visibleFields() does. Asserting the whole schema list here
+    // would be asserting that gating is BROKEN.
+    assertEquals(
+      listOf("referral_needed_new_condition"),
+      viewModel.visibleReferralFields().map { it.questionCode },
+    )
+
+    // ...and the rest genuinely come from the fetched version once their branch opens, which is
+    // what "from the live schema, not a baked-in list" actually means here.
+    viewModel.setReferralAnswer("referral_needed_new_condition", "yes")
+    viewModel.setReferralAnswer("beneficiary_willing_for_referral", "yes")
+    assertEquals(
+      referral.schemaJson.map { it.questionCode } - "referral_declined_reason",
+      viewModel.visibleReferralFields().map { it.questionCode },
+    )
   }
 
   @Test
@@ -795,6 +1062,7 @@ class DynamicVisitFormViewModelTest {
   fun `a second onFinish call after the referral capture step submits with the captured referral`() {
     beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
     formsRepository.version = infantVersion()
+    formsRepository.versionByFormCode["REFERRAL_VISIT"] = referralVersion()
     val draftRepository = RecordingVisitFormDraftRepository()
 
     val viewModel = buildViewModel(
@@ -803,7 +1071,7 @@ class DynamicVisitFormViewModelTest {
     )
     testDispatcher.scheduler.advanceUntilIdle()
 
-    viewModel.onFinish() // first call: discovers the trigger, shows the step
+    viewModel.onFinish() // first call: discovers the trigger, fetches the schema, shows the step
     testDispatcher.scheduler.advanceUntilIdle()
     fillReferralCaptureFields(viewModel)
     viewModel.onFinish() // second call: already past the trigger check, submits for real
@@ -813,12 +1081,17 @@ class DynamicVisitFormViewModelTest {
     val capture = draftRepository.calls.single().referralCapture
     assertEquals("Test PHC", capture?.facilityName)
     assertEquals(org.armman.sakhi.data.referral.ReferralType.STANDARD, capture?.referralType)
+    // place_of_referral's raw value_code is mapped into the 6 values POST /referrals actually
+    // accepts (backend-confirmed live 2026-08-31 it rejects anything else) -- "phc" already IS one
+    // of the 6, so it maps to itself uppercased. See referralCaptureOrNull's doc.
+    assertEquals("PHC", capture?.facilityType)
   }
 
   @Test
-  fun `skipReferralCapture clears the captured fields and submits with no referral`() {
+  fun `skipReferralCapture clears the captured answers and submits with no referral`() {
     beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
     formsRepository.version = infantVersion()
+    formsRepository.versionByFormCode["REFERRAL_VISIT"] = referralVersion()
     val draftRepository = RecordingVisitFormDraftRepository()
 
     val viewModel = buildViewModel(
@@ -835,14 +1108,15 @@ class DynamicVisitFormViewModelTest {
 
     assertEquals(1, draftRepository.calls.size)
     assertNull(draftRepository.calls.single().referralCapture)
-    assertNull(viewModel.uiState.value.referralDate)
-    assertNull(viewModel.uiState.value.referralFacilityName)
+    assertNull(viewModel.uiState.value.referralAnswers.valueOf("referral_needed_new_condition"))
+    assertNull(viewModel.uiState.value.referralAnswers.valueOf("health_facility_name"))
   }
 
   @Test
   fun `cancelReferralCapture hides the step and preserves whatever was already typed`() {
     beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
     formsRepository.version = infantVersion()
+    formsRepository.versionByFormCode["REFERRAL_VISIT"] = referralVersion()
     val draftRepository = RecordingVisitFormDraftRepository()
 
     val viewModel = buildViewModel(
@@ -853,11 +1127,88 @@ class DynamicVisitFormViewModelTest {
 
     viewModel.onFinish()
     testDispatcher.scheduler.advanceUntilIdle()
-    viewModel.setReferralFacilityName("Partly typed facility")
+    viewModel.setReferralAnswer("health_facility_name", "Partly typed facility")
     viewModel.cancelReferralCapture()
 
     assertFalse(viewModel.uiState.value.showReferralCaptureStep)
-    assertEquals("Partly typed facility", viewModel.uiState.value.referralFacilityName)
+    assertEquals("Partly typed facility", viewModel.uiState.value.referralAnswers.valueOf("health_facility_name"))
     assertTrue("cancelling must not submit anything", draftRepository.calls.isEmpty())
+  }
+
+  @Test
+  fun `referral capture step ends with no referral when it is not a new condition`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    formsRepository.versionByFormCode["REFERRAL_VISIT"] = referralVersion()
+    val draftRepository = RecordingVisitFormDraftRepository()
+
+    val viewModel = buildViewModel(
+      visitFormDraftRepository = draftRepository,
+      goRulesRiskAdapter = triggeringGoRulesAdapter(),
+    )
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+    viewModel.setReferralAnswer("referral_needed_new_condition", "no")
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(1, draftRepository.calls.size)
+    assertNull(draftRepository.calls.single().referralCapture)
+  }
+
+  @Test
+  fun `referral capture step ends with no referral when the beneficiary declines`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    formsRepository.versionByFormCode["REFERRAL_VISIT"] = referralVersion()
+    val draftRepository = RecordingVisitFormDraftRepository()
+
+    val viewModel = buildViewModel(
+      visitFormDraftRepository = draftRepository,
+      goRulesRiskAdapter = triggeringGoRulesAdapter(),
+    )
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+    viewModel.setReferralAnswer("referral_needed_new_condition", "yes")
+    viewModel.setReferralAnswer("beneficiary_willing_for_referral", "no")
+    viewModel.setReferralAnswer("referral_declined_reason", "family_opposition")
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(1, draftRepository.calls.size)
+    assertNull(draftRepository.calls.single().referralCapture)
+    // The declined reason has no field on POST /referrals today (see ReferralCapture's doc) --
+    // it's captured in UI state for her to see, but was never expected to be submitted anywhere.
+    assertEquals("family_opposition", viewModel.uiState.value.referralAnswers.valueOf("referral_declined_reason"))
+  }
+
+  @Test
+  fun `answering an earlier branch again resets whatever was filled in further down`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    formsRepository.versionByFormCode["REFERRAL_VISIT"] = referralVersion()
+    val draftRepository = RecordingVisitFormDraftRepository()
+
+    val viewModel = buildViewModel(
+      visitFormDraftRepository = draftRepository,
+      goRulesRiskAdapter = triggeringGoRulesAdapter(),
+    )
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+    fillReferralCaptureFields(viewModel)
+    viewModel.setReferralAnswer("referral_needed_new_condition", "no")
+
+    val answers = viewModel.uiState.value.referralAnswers
+    assertNull(answers.valueOf("beneficiary_willing_for_referral"))
+    assertNull(answers.valueOf("is_accompanied_referral"))
+    assertNull(answers.valueOf("decided_visit_date"))
+    assertNull(answers.valueOf("place_of_referral"))
+    assertNull(answers.valueOf("health_facility_name"))
   }
 }

@@ -72,7 +72,7 @@ class RoomVisitFormDraftRepository @Inject constructor(
   )
 
   private fun VisitFormSyncItemResult?.toSubmitResult(): VisitFormSubmitResult = when (this) {
-    is VisitFormSyncItemResult.Synced -> VisitFormSubmitResult.Synced
+    is VisitFormSyncItemResult.Synced -> VisitFormSubmitResult.Synced(outcome)
     is VisitFormSyncItemResult.Failed -> VisitFormSubmitResult.Failed(message)
     is VisitFormSyncItemResult.Retryable -> {
       // Same immediate-feedback contract as before CR-026b: the Sakhi sees this as a failure

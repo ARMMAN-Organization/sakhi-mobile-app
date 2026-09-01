@@ -12,6 +12,10 @@ import org.armman.sakhi.data.closure.FakeClosureRepository
 import org.armman.sakhi.data.enrollment.EnrollmentSyncOutcome
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
+import org.armman.sakhi.data.referral.FakeReferralEvidenceDao
+import org.armman.sakhi.data.referral.FakeReferralLinkDao
+import org.armman.sakhi.data.referral.FakeReferralEvidenceSyncScheduler
+import org.armman.sakhi.data.visitform.FakeReferralRepository
 import org.armman.sakhi.data.forms.CreateSubmissionResponseDto
 import org.armman.sakhi.data.forms.FakeFormSubmissionApi
 import org.armman.sakhi.data.forms.FormAnswers
@@ -71,6 +75,10 @@ class AdHocFormSyncExecutorTest {
       closureRepository = FakeClosureRepository(),
       lookupRepository = FakeLookupRepository(),
       statusOverrideStore = LocalBeneficiaryStatusOverrideStore(FakeSecureKeyValueStore()),
+      referralRepository = FakeReferralRepository(),
+      referralEvidenceDao = FakeReferralEvidenceDao(),
+      referralEvidenceSyncScheduler = FakeReferralEvidenceSyncScheduler(),
+      referralLinkDao = FakeReferralLinkDao(),
     )
     executor = AdHocFormSyncExecutor(dao, secureStore, coordinator)
   }
@@ -239,6 +247,10 @@ class AdHocFormSyncExecutorTest {
       closureRepository = FakeClosureRepository(),
       lookupRepository = FakeLookupRepository(),
       statusOverrideStore = LocalBeneficiaryStatusOverrideStore(FakeSecureKeyValueStore()),
+      referralRepository = FakeReferralRepository(),
+      referralEvidenceDao = FakeReferralEvidenceDao(),
+      referralEvidenceSyncScheduler = FakeReferralEvidenceSyncScheduler(),
+      referralLinkDao = FakeReferralLinkDao(),
     )
     val faultyExecutor = AdHocFormSyncExecutor(dao, secureStore, faultyCoordinator)
 

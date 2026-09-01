@@ -137,6 +137,31 @@ interface VisitScheduleDao {
   suspend fun lapseOpenAncVisits(localBeneficiaryId: String): Int
 
   /**
+   * CR-Closure-01 items #3/#7 — on a mother/child closure submission, every remaining open visit
+   * (any [VisitCodeType], not just the ANC family — unlike [lapseOpenAncVisits]) stops being
+   * actionable.
+   *
+   * Client-side sweep, deliberately, not a wait for a server-side cascade to sync down: this DAO's
+   * own interface doc ([VisitScheduleRepository]) says nothing pulls a schedule down from the
+   * server and overwrites local state — [VisitScheduleApi] only ever uploads. The backend team
+   * reported (2026-08-31) building a server-side `POST /visit-schedules/:beneficiaryId/lapse-open`
+   * cascade for this, but with no download/sync path in this app to ever observe it, that
+   * server-side state — however it works — would never reach a device on its own. This mirrors
+   * the original backend-ask's "option (a)" (a client-side sweep, same shape as
+   * [lapseOpenAncVisits]) instead.
+   *
+   * Same CANCELLED-not-LAPSED tradeoff as [lapseOpenAncVisits] (the server enum this row
+   * ultimately targets on upload has no LAPSED member either) — a distinct [REASON_LAPSED_ON_CLOSURE]
+   * reason code is what actually distinguishes this from a delivery-triggered lapse, same pattern.
+   */
+  @Query(
+    "UPDATE visit_schedules SET status = 'CANCELLED', reasonCode = 'LAPSED_ON_CLOSURE' " +
+      "WHERE localBeneficiaryId = :localBeneficiaryId " +
+      "AND status IN ('GENERATED', 'OPEN')",
+  )
+  suspend fun lapseAllOpenVisits(localBeneficiaryId: String): Int
+
+  /**
    * Retires a cohort after an approved LMP/EDD change. GENERATED and OPEN only — COMPLETED rows are
    * never touched, and nothing is deleted.
    */

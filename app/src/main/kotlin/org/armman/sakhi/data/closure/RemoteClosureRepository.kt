@@ -23,9 +23,6 @@ class RemoteClosureRepository @Inject constructor(
     eventDate: String?,
     closureDate: String,
     submittedByUserId: String,
-    supervisorStatus: String?,
-    supervisorId: String?,
-    supervisorNotes: String?,
   ): String {
     val request = ClosureRequestDto(
       localClosureUuid = localClosureUuid,
@@ -35,9 +32,6 @@ class RemoteClosureRepository @Inject constructor(
       eventDate = eventDate,
       closureDate = closureDate,
       submittedByUserId = submittedByUserId,
-      supervisorStatus = supervisorStatus,
-      supervisorId = supervisorId,
-      supervisorNotes = supervisorNotes,
     )
     val response = closureApi.createClosure(request)
     if (!response.isSuccessful) {

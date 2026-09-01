@@ -9,8 +9,11 @@ sealed interface VisitFormSubmitResult {
   /** Offline: saved locally, queued for background sync — safe to navigate. */
   data object QueuedOffline : VisitFormSubmitResult
 
-  /** Online: the backend confirmed both the visit instance and the form submission were created. */
-  data object Synced : VisitFormSubmitResult
+  /** Online: the backend confirmed both the visit instance and the form submission were created.
+   * [outcome] carries the CCV per-visit HR re-evaluation signal (CR-Closure-01 items #5/#6) — see
+   * [VisitSubmitOutcome]'s own doc; defaults to "no signal" for every visit but the boundary case
+   * it exists for. */
+  data class Synced(val outcome: VisitSubmitOutcome = VisitSubmitOutcome()) : VisitFormSubmitResult
 
   /**
    * Online: the immediate attempt failed. [message] is [VisitFormSubmissionException.userMessage]

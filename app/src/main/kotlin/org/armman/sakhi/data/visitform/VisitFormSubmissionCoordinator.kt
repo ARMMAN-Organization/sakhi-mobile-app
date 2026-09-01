@@ -135,6 +135,23 @@ sealed class VisitFormSubmissionException(message: String) : Exception(message) 
 }
 
 /**
+ * Domain-level result of [VisitFormSubmissionCoordinator.submit] beyond plain success/failure —
+ * carries the CCV per-visit HR re-evaluation signal (CR-Closure-01 items #5/#6, backend contract
+ * confirmed 2026-08-31) up through every layer between the coordinator and
+ * [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel], which is the only current reader.
+ *
+ * Both fields default to "no signal" — every visit form code except the LAST `CCV_VISIT` for a
+ * child gets defaults here, since [org.armman.sakhi.data.forms.SubmissionResponseData]'s own two
+ * backing fields are absent (`null`) on every response but that one boundary case. See that DTO's
+ * doc for the full contract; this type exists only so the domain layers between here and the
+ * ViewModel don't have to depend on the wire DTO directly.
+ */
+data class VisitSubmitOutcome(
+  val closureDeferredForExtension: Boolean? = null,
+  val extensionVisit: org.armman.sakhi.data.forms.ExtensionVisitWindowDto? = null,
+)
+
+/**
  * Orchestrates the online-only visit-submit slice: `POST /visits` (create the visit instance from
  * the beneficiary's local schedule row) → `POST /forms/:formCode/submissions` (formCode resolved
  * from the schedule row's VisitCodeType via [VisitCodeFormResolver] — CR-033/CR-034) using the
@@ -224,7 +241,7 @@ class VisitFormSubmissionCoordinator @Inject constructor(
      * right away, not retried later), so it passes nothing and gets the default no-op.
      */
     onVisitCreated: suspend (String) -> Unit = {},
-  ): Result<Unit> = runCatching {
+  ): Result<VisitSubmitOutcome> = runCatching {
     val sakhiId = sessionStore.readSession()?.subjectId
       ?: throw VisitFormSubmissionException.NoActiveSession
 
@@ -303,7 +320,8 @@ class VisitFormSubmissionCoordinator @Inject constructor(
         formCode = formCode,
       )
     }
-    val serverSubmissionId = submissionResponse.body()?.data?.id
+    val submissionData = submissionResponse.body()?.data
+    val serverSubmissionId = submissionData?.id
 
     // CR-035: logged only on success, immediately after the submission call succeeds.
     formAuditRepository.recordSubmitted(localScheduleUuid, formCode)
@@ -324,6 +342,15 @@ class VisitFormSubmissionCoordinator @Inject constructor(
       serverSubmissionId = serverSubmissionId,
       answers = answers,
       referralCapture = referralCapture,
+    )
+
+    // CR-Closure-01 items #5/#6: carries the CCV per-visit HR re-evaluation signal back to the
+    // caller — see VisitSubmitOutcome's own doc. Both fields default to "no signal" for every
+    // form code/visit but the one boundary case, so every existing call site of submit() (which
+    // used to just get Unit back) keeps behaving exactly as before unless it explicitly reads this.
+    VisitSubmitOutcome(
+      closureDeferredForExtension = submissionData?.closureDeferredForExtension,
+      extensionVisit = submissionData?.extensionVisit,
     )
   }
 
@@ -548,6 +575,8 @@ class VisitFormSubmissionCoordinator @Inject constructor(
           referralTypeLookupValueId = referral.referralTypeLookupValueId,
           validTill = referral.validTill,
           createdAtEpochMillis = System.currentTimeMillis(),
+          facilityName = referral.facilityName,
+          facilityType = referral.facilityType.name,
         ),
       )
     }.onFailure { error ->

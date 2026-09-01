@@ -10,10 +10,17 @@ import retrofit2.http.Query
  * `POST /api/v1/reopen-requests` body — role `SAKHI` only, `.strict()` (rejects unknown fields).
  * No date/user-id field: both are stamped server-side, unlike [org.armman.sakhi.data.closure
  * .ClosureRequestDto] which takes an explicit `submittedByUserId`.
+ *
+ * [localReopenRequestUuid] — 2026-08-31: discovered required on-device ("localReopenRequestUuid:
+ * Required"), not previously documented in the confirmed contract. Same idempotency-key shape as
+ * [org.armman.sakhi.data.closure.ClosureRequestDto.localClosureUuid] — a client-minted string,
+ * freshly generated per submit call since Reopen has no offline draft/retry queue of its own to
+ * persist one against (see [ReopenRepository.submitReopenRequest]'s doc).
  */
 data class ReopenRequestDto(
   val beneficiaryId: String,
   val requestReason: String,
+  val localReopenRequestUuid: String,
 )
 
 /** One row as `POST`/`GET /reopen-requests` returns it. Modelled loosely (every property nullable)

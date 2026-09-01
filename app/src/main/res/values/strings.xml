@@ -415,31 +415,43 @@
   <string name="visit_form_submit">Submit</string>
   <string name="visit_form_submitted">Visit submitted successfully</string>
   <string name="visit_form_queued_offline">Visit saved. It will upload automatically on your next Data Upload.</string>
+  <!-- CR-Closure-01 items #5/#6: %1$s/%2$s are the CCV-HR extension visit's window start/end
+       dates, exactly as the backend returned them (raw ISO strings, see ExtensionVisitWindowDto's
+       doc for why they're shown as-is rather than reformatted). -->
+  <string name="visit_form_ccv_hr_extension_deferred">High risk detected. An extension visit will be due between %1$s and %2$s — closure is deferred until then.</string>
   <string name="visit_form_referral_details_title">Please fill referral details</string>
   <string name="visit_form_referral_step_explainer">This visit was flagged high-risk. Fill in the referral details below, or skip if no referral is needed.</string>
   <string name="visit_form_referral_skip">Skip</string>
-  <string name="visit_form_referral_date">Date</string>
-  <string name="visit_form_referral_facility">Referred Health Facility</string>
-  <string name="visit_form_referral_facility_name">Facility name</string>
-  <string name="visit_form_referral_facility_type">Facility type</string>
-  <string name="visit_form_referral_facility_type_public">Public</string>
-  <string name="visit_form_referral_facility_type_private">Private</string>
-  <string name="visit_form_referral_facility_type_phc">PHC</string>
-  <string name="visit_form_referral_facility_type_rh">RH</string>
-  <string name="visit_form_referral_facility_type_dh">DH</string>
-  <string name="visit_form_referral_facility_type_other">Other</string>
-  <string name="visit_form_referral_type">Type of Referral</string>
-  <string name="visit_form_referral_type_accompanied">Accompanied</string>
-  <string name="visit_form_referral_type_standard">Standard</string>
-  <string-array name="visit_form_referral_facility_options">
-    <item>Civil Hospital</item>
-    <item>Sub-district Hospital</item>
-    <item>Rural Hospital</item>
-    <item>Primary Health Centre</item>
-    <item>Subcentre</item>
-    <item>Pvt. Hospital</item>
-    <item>Other</item>
-  </string-array>
+  <!-- CR-Referral-01 (2026-08-31): question set rebuilt verbatim from GET /forms/REFERRAL_VISIT/
+       active-version's schemaJson, so labels below match the backend's `label` field exactly. -->
+  <string name="visit_form_referral_needed_new_condition">Referral needed as this is a new condition</string>
+  <string name="visit_form_referral_willing">Is beneficiary willing to go for the referral?</string>
+  <string name="visit_form_referral_declined_reason">If No, state reasons</string>
+  <string name="visit_form_referral_declined_reason_condition_not_serious_enough">Belief that the condition is not serious enough to require referral</string>
+  <string name="visit_form_referral_declined_reason_family_opposition">Family opposition to visit health facility</string>
+  <string name="visit_form_referral_declined_reason_woman_migrating">Woman migrating</string>
+  <string name="visit_form_referral_declined_reason_cost_of_transportation">Cost of transportation to the facility</string>
+  <string name="visit_form_referral_declined_reason_fear_of_procedures_and_cost">Fear of unnecessary procedures and cost of treatment</string>
+  <string name="visit_form_referral_declined_reason_preference_for_home_remedies">Preference for home remedies or traditional healers</string>
+  <string name="visit_form_referral_declined_reason_cultural_norms_restricting_mobility">Cultural norms restricting women\'s mobility</string>
+  <string name="visit_form_referral_declined_reason_other">Other</string>
+  <string name="visit_form_referral_accompanied">Is this an accompanied referral?</string>
+  <string name="visit_form_referral_yes">Yes</string>
+  <string name="visit_form_referral_no">No</string>
+  <string name="visit_form_referral_decided_visit_date">Decided date for visit to health facility</string>
+  <string name="visit_form_referral_place">Place of referral</string>
+  <string name="visit_form_referral_place_sc">SC</string>
+  <string name="visit_form_referral_place_phc">PHC</string>
+  <string name="visit_form_referral_place_rh">RH</string>
+  <string name="visit_form_referral_place_sdh">SDH</string>
+  <string name="visit_form_referral_place_dh">DH</string>
+  <string name="visit_form_referral_place_private_clinic">Private clinic</string>
+  <string name="visit_form_referral_place_ngo">NGO</string>
+  <string name="visit_form_referral_place_anganwadi_center">Anganwadi Center</string>
+  <string name="visit_form_referral_place_private_laboratory">Private laboratory</string>
+  <string name="visit_form_referral_place_private_hospital">Private hospital</string>
+  <string name="visit_form_referral_place_other">Other</string>
+  <string name="visit_form_referral_health_facility_name">Name of the health facility</string>
   <string name="visit_form_exit_title">Leave visit form?</string>
   <string name="visit_form_exit_message">This visit has no partial-save — all entries will be lost if you leave now.</string>
   <string name="visit_form_exit_cancel">Stay</string>

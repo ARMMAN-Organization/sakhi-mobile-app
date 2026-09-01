@@ -18,4 +18,15 @@ interface ReferralLinkDao {
    * per profile load instead of one per visit card. */
   @Query("SELECT * FROM referral_links WHERE localScheduleUuid IN (:localScheduleUuids)")
   suspend fun getByLocalScheduleUuids(localScheduleUuids: List<String>): List<ReferralLinkEntity>
+
+  /**
+   * CR-Referral-01/02: [org.armman.sakhi.data.adhocform.AdHocFormSubmissionCoordinator]'s
+   * `submitReferralFollowUp` only ever has the referral's own id (the ad-hoc form route carries
+   * `referralId`, not `localScheduleUuid` — unlike the retired bespoke screen's route), so it
+   * mirrors the referral's new status into this cache keyed by [ReferralLinkEntity.referralId]
+   * rather than [getByLocalScheduleUuid]. [ReferralLinkEntity.referralId] is unique per row in
+   * practice (one referral per visit — see [ReferralLinkEntity]'s own doc), so this is equivalent.
+   */
+  @Query("SELECT * FROM referral_links WHERE referralId = :referralId")
+  suspend fun getByReferralId(referralId: String): ReferralLinkEntity?
 }

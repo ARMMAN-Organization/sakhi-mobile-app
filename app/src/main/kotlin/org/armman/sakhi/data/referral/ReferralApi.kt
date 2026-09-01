@@ -84,6 +84,12 @@ data class SubmitReferralFollowUpRequestDto(
   val diagnosis: String?,
   val treatmentGiven: String?,
   val outcome: String?,
+  /** Backend-confirmed 2026-08-31: accepted only at follow-up creation time (max 10, default
+   * `[]`) — there is no route to attach media afterwards. This app always sends `[]` here since
+   * its evidence queue uploads AFTER the follow-up succeeds (the real `followupId` is required to
+   * finalize a media asset, and doesn't exist until this call returns) — see
+   * [RemoteReferralRepository.uploadEvidence]'s doc. */
+  val mediaAssetIds: List<String> = emptyList(),
 )
 
 data class ReferralFollowUpDataDto(
@@ -106,6 +112,76 @@ data class SubmitReferralFollowUpResponseDto(
   val success: Boolean,
   val message: String?,
   val data: SubmitReferralFollowUpDataDto?,
+)
+
+/** `POST /media/upload-url` request body — backend-confirmed live 2026-08-31. [assetType] is
+ * one of [ReferralEvidenceType]'s names (a subset of the service's 12-value `assetType` enum).
+ * [mimeType] must be one of `image/jpeg`, `image/png`, `image/webp`, `application/pdf` — this app
+ * only ever sends `image/jpeg` (live-camera-only capture). [sizeBytes] is capped server-side at
+ * 25 MB (26214400 bytes). */
+data class RequestMediaUploadUrlDto(
+  val assetType: String,
+  val mimeType: String,
+  val sizeBytes: Long,
+)
+
+data class MediaUploadUrlDataDto(
+  val uploadUrl: String?,
+  val s3Key: String?,
+  val expiresInSeconds: Int?,
+  val maxSizeBytes: Long?,
+)
+
+data class MediaUploadUrlResponseDto(
+  val success: Boolean,
+  val message: String?,
+  val data: MediaUploadUrlDataDto?,
+)
+
+/** `POST /media` (finalize) request body — backend-confirmed live 2026-08-31. [s3Key] must be
+ * exactly what `POST /media/upload-url` returned. Do NOT send `mimeType`, `storageUri`,
+ * `checksum`, or `uploadedAt` — those are server-derived (confirmed). [followupId] is required in
+ * practice for this app's flow (finalize only ever runs after the parent follow-up's real id is
+ * known — see [ReferralEvidenceMediaEntity.followupId]'s doc) even though the backend contract
+ * marks it optional. */
+data class FinalizeMediaRequestDto(
+  val assetType: String,
+  val s3Key: String,
+  val expectedSizeBytes: Long,
+  val referralId: String? = null,
+  val followupId: String? = null,
+  val beneficiaryId: String? = null,
+  /** Links a media asset to an ad-hoc-form generic submission (`data.id` from
+   * `POST /forms/{formCode}/submissions`) — backend-confirmed 2026-08-31 as one of the finalize
+   * call's accepted optional link fields, alongside [referralId]/[followupId]/[beneficiaryId].
+   * Used by Referral Follow-up's `case_paper_photo`/`further_investigation_photo` evidence,
+   * captured via the ad-hoc form pipeline (see
+   * [org.armman.sakhi.data.adhocform.AdHocFormSubmissionCoordinator]) rather than the retired
+   * bespoke screen's [followupId]-keyed flow. */
+  val submissionId: String? = null,
+)
+
+/** `POST /media`'s response `data` object — backend-confirmed live 2026-08-31 as the real,
+ * narrower shape actually returned (an earlier doc example on the backend's side showed extra
+ * fields that aren't actually sent; this is authoritative). [sizeBytes] comes back as a STRING,
+ * not a number — confirmed, not a typo. [id] is the `mediaAssetId` this app keeps locally as
+ * [ReferralEvidenceMediaEntity.remoteMediaId]. */
+data class MediaAssetDataDto(
+  val id: String?,
+  val assetType: String?,
+  val storageUri: String?,
+  val mimeType: String?,
+  val sizeBytes: String?,
+  val uploadedByUserId: String?,
+  val uploadedAt: String?,
+  val encryptedFlag: Boolean?,
+  val createdAt: String?,
+)
+
+data class FinalizeMediaResponseDto(
+  val success: Boolean,
+  val message: String?,
+  val data: MediaAssetDataDto?,
 )
 
 /** Retrofit contract for referrals, behind the same API gateway/base URL and Bearer token as
@@ -131,4 +207,20 @@ interface ReferralApi {
    * Accompanied. */
   @PATCH("referrals/{referralId}/convert")
   suspend fun convertToAccompanied(@Path("referralId") referralId: String): Response<CreateReferralResponseDto>
+
+  /**
+   * CR-Referral-02 — Step 1 of the real, backend-confirmed presigned-URL upload flow
+   * (2026-08-31). Returns a short-lived (900s) S3 `uploadUrl` + `s3Key`; the raw file bytes are
+   * PUT directly to `uploadUrl` (not through this Retrofit interface — see
+   * [RemoteReferralRepository.uploadEvidence], which uses an unauthenticated OkHttp client for
+   * that hop so this app's Bearer token is never sent to S3), then [finalizeMedia] registers it.
+   */
+  @POST("media/upload-url")
+  suspend fun requestMediaUploadUrl(@Body request: RequestMediaUploadUrlDto): Response<MediaUploadUrlResponseDto>
+
+  /** CR-Referral-02 — Step 3 of the real upload flow: registers the file already PUT to S3 as a
+   * real media asset, optionally linked to a referral/follow-up. See [requestMediaUploadUrl]'s
+   * doc for the full 3-step sequence. */
+  @POST("media")
+  suspend fun finalizeMedia(@Body request: FinalizeMediaRequestDto): Response<FinalizeMediaResponseDto>
 }

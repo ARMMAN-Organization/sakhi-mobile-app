@@ -19,6 +19,7 @@ import org.armman.sakhi.data.enrollment.EnrollmentDraftDao
 import org.armman.sakhi.data.enrollment.EnrollmentRiskBaselineDao
 import org.armman.sakhi.data.forms.DynamicFormDraftDao
 import org.armman.sakhi.data.referral.ReferralLinkDao
+import org.armman.sakhi.data.referral.ReferralEvidenceDao
 import org.armman.sakhi.data.riskassessment.RiskAssessmentDao
 import org.armman.sakhi.data.schedule.VisitScheduleDao
 import org.armman.sakhi.data.visitform.VisitFormDraftDao
@@ -64,6 +65,10 @@ object DatabaseModule {
         SakhiDatabase.MIGRATION_13_14,
         SakhiDatabase.MIGRATION_14_15,
         SakhiDatabase.MIGRATION_15_16,
+        SakhiDatabase.MIGRATION_16_17,
+        SakhiDatabase.MIGRATION_17_18,
+        SakhiDatabase.MIGRATION_18_19,
+        SakhiDatabase.MIGRATION_19_20,
       )
       .fallbackToDestructiveMigration()
       .build()
@@ -122,6 +127,11 @@ object DatabaseModule {
   @Singleton
   fun provideReferralLinkDao(database: SakhiDatabase): ReferralLinkDao =
     database.referralLinkDao()
+
+  @Provides
+  @Singleton
+  fun provideReferralEvidenceDao(database: SakhiDatabase): ReferralEvidenceDao =
+    database.referralEvidenceDao()
 
   @Provides
   @Singleton

@@ -36,8 +36,5 @@ interface ClosureRepository {
     eventDate: String?,
     closureDate: String,
     submittedByUserId: String,
-    supervisorStatus: String?,
-    supervisorId: String?,
-    supervisorNotes: String?,
   ): String
 }

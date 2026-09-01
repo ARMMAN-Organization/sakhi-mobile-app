@@ -62,6 +62,18 @@ enum class VisitScheduleStatus {
 const val REASON_LAPSED_ON_DELIVERY = "LAPSED_ON_DELIVERY"
 
 /**
+ * Reason code written alongside [VisitScheduleStatus.CANCELLED] when a mother/child closure
+ * lapses her remaining open visits (CR-Closure-01 items #3/#7). Client-side sweep, not a server
+ * cascade: [VisitScheduleRepository]'s own doc says nothing pulls a schedule down from the server
+ * and overwrites local state, so a backend-side lapse (whatever the backend build actually did)
+ * would never reach this device — see [org.armman.sakhi.data.schedule.VisitScheduleDao
+ * .lapseAllOpenVisits]'s doc for the full reasoning. Mirrors [REASON_LAPSED_ON_DELIVERY]'s own
+ * shape/rationale, just for a different trigger and across every visit type rather than only the
+ * ANC family.
+ */
+const val REASON_LAPSED_ON_CLOSURE = "LAPSED_ON_CLOSURE"
+
+/**
  * The date range a visit may actually be performed in, inclusive at both ends.
  *
  * Deliberately holds resolved [LocalDate]s rather than offsets: the SRS mixes two window shapes —

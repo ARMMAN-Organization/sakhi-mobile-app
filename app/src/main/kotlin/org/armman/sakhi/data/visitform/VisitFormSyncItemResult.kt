@@ -7,7 +7,9 @@ package org.armman.sakhi.data.visitform
  * [org.armman.sakhi.data.forms.DynamicFormSyncItemResult]'s rationale exactly.
  */
 sealed interface VisitFormSyncItemResult {
-  data object Synced : VisitFormSyncItemResult
+  /** CR-Closure-01 items #5/#6: [outcome] defaults to "no signal" — see [VisitSubmitOutcome]'s own
+   * doc — so every existing caller that never reads it keeps working unchanged. */
+  data class Synced(val outcome: VisitSubmitOutcome = VisitSubmitOutcome()) : VisitFormSyncItemResult
 
   data class Failed(val message: String) : VisitFormSyncItemResult
 

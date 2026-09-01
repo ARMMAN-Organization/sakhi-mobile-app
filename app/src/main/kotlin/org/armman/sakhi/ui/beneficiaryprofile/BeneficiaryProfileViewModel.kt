@@ -1,5 +1,6 @@
 package org.armman.sakhi.ui.beneficiaryprofile
 
+import java.util.UUID
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.armman.sakhi.data.beneficiary.BeneficiaryStatus
 import org.armman.sakhi.data.beneficiary.BeneficiaryType
+import org.armman.sakhi.data.beneficiary.LocalBeneficiaryStatusOverrideStore
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfile
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfileRepository
 import org.armman.sakhi.data.delivery.DeliverySessionEntity
@@ -99,6 +101,19 @@ data class BeneficiaryProfileUiState(
    * tappable Reopen button in that case. Best-effort, same as [canStartVisit]: a fetch failure
    * just leaves this false rather than failing the whole profile load. */
   val hasPendingReopenRequest: Boolean = false,
+  /**
+   * CR-Closure-02: true when [profile] is CLOSED and its [BeneficiaryProfile.closureReasonCode]
+   * is not one of the death/miscarriage/abortion reasons the SRS Beneficiary Reopen form excludes
+   * (per the design-discussion transcript: "it is not happening in case of death... miscarriage...
+   * abortion... it is only happening in case of migration and if they have closed it by
+   * mistake"). Defaults to eligible (true) when the reason is unknown -- e.g. closed on another
+   * device, or before this field existed -- rather than hiding Reopen outright for those cases;
+   * see [org.armman.sakhi.data.beneficiary.Beneficiary.closureReasonCode]'s doc for why the reason
+   * can be genuinely unknown even for a real CLOSED beneficiary. A Supervisor still has final say
+   * on the request itself, so over-offering the button here is the lower-risk direction until
+   * CR-Closure-01's backend ask #1 (`GET /closures` readback) removes the ambiguity entirely.
+   */
+  val isReopenEligible: Boolean = false,
   val isSubmittingReopen: Boolean = false,
   /**
    * True once this MOTHER's delivery has already been recorded — CR-042 (Delivery Event
@@ -133,6 +148,7 @@ class BeneficiaryProfileViewModel @Inject constructor(
   private val reopenRepository: ReopenRepository,
   private val visitScheduleRepository: VisitScheduleRepository,
   private val deliverySessionRepository: DeliverySessionRepository,
+  private val statusOverrideStore: LocalBeneficiaryStatusOverrideStore,
   savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -163,7 +179,30 @@ class BeneficiaryProfileViewModel @Inject constructor(
       try {
         // A blank id means the screen was opened without its nav argument.
         require(beneficiaryId.isNotBlank()) { "Missing beneficiary id" }
-        val profile = repository.getBeneficiary(beneficiaryId)
+        var profile = repository.getBeneficiary(beneficiaryId)
+        // CR-Closure-04 (CR-Closure-01 item #10): the backend has no webhook for a reopen
+        // decision (confirmed 2026-08-31) — this poll is what stands in for one. Only worth
+        // asking when CLOSED; an ACTIVE/JOURNEY_COMPLETE beneficiary can't have an approved
+        // request waiting to be noticed. Best-effort, same rationale as hasPendingReopenRequest
+        // below: a check failure just leaves her CLOSED for now, retried on the next profile load
+        // (this function also runs on every screen re-entry, not just init — see this function's
+        // own doc above).
+        if (profile.status == BeneficiaryStatus.CLOSED) {
+          val approved = runCatching { reopenRepository.hasApprovedReopenRequest(beneficiaryId) }
+            .getOrDefault(false)
+          if (approved) {
+            // The backend contract says APPROVED already reactivated the beneficiary and resumed
+            // her visit schedules server-side — but for a locally enrolled beneficiary, THIS
+            // app's own status read comes from statusOverrideStore, not a server round trip (see
+            // LocalEnrolmentBeneficiarySource.buildBeneficiary), so that local CLOSED override has
+            // to be cleared explicitly before a re-fetch will actually show ACTIVE. A remote-only
+            // beneficiary has no override to clear — repository.getBeneficiary already re-reads
+            // her currentStatus from the server every time (see RemoteBeneficiaryProfileRepository)
+            // — so this call is a harmless no-op for that case.
+            statusOverrideStore.clearOverride(beneficiaryId)
+            profile = repository.getBeneficiary(beneficiaryId)
+          }
+        }
         // Failing this check must not fail the whole screen — the profile is still worth showing
         // without a working Start Visit button.
         val canStartVisit = runCatching { visitFormRepository.canStartVisit(beneficiaryId) }
@@ -188,12 +227,15 @@ class BeneficiaryProfileViewModel @Inject constructor(
         } else {
           false
         }
+        val isReopenEligible = profile.status == BeneficiaryStatus.CLOSED &&
+          profile.closureReasonCode !in NON_REOPENABLE_CLOSURE_REASONS
         _uiState.update {
           it.copy(
             isLoading = false,
             profile = profile,
             canStartVisit = canStartVisit,
             hasPendingReopenRequest = hasPendingReopenRequest,
+            isReopenEligible = isReopenEligible,
             hasDeliveryRecorded = hasDeliveryRecorded,
             deliveryButtonState = deliveryButtonState,
           )
@@ -295,7 +337,7 @@ class BeneficiaryProfileViewModel @Inject constructor(
         val serverBeneficiaryId = visitScheduleRepository.getForBeneficiary(beneficiaryId)
           .firstNotNullOfOrNull { it.serverBeneficiaryId }
           ?: beneficiaryId
-        reopenRepository.submitReopenRequest(serverBeneficiaryId, reason)
+        reopenRepository.submitReopenRequest(serverBeneficiaryId, reason, UUID.randomUUID().toString())
         _uiState.update { it.copy(isSubmittingReopen = false, hasPendingReopenRequest = true) }
         _events.trySend(BeneficiaryProfileEvent.ReopenRequested)
       } catch (e: ReopenSubmissionException.Failed) {
@@ -316,5 +358,20 @@ class BeneficiaryProfileViewModel @Inject constructor(
 
   companion object {
     const val NAV_ARG_ID = "id"
+
+    /**
+     * CR-Closure-02: `CLOSURE_REASON` backend codes (see
+     * [org.armman.sakhi.data.adhocform.AdHocFormSubmissionCoordinator]'s own mapping tables) the
+     * SRS Beneficiary Reopen form does not cover -- MATERNAL_DEATH/INFANT_OR_CHILD_DEATH,
+     * MISCARRIAGE, ABORTION. MIGRATION, WITHDRAWAL, PROGRAM_CYCLE_COMPLETED and an unknown/null
+     * reason all remain reopen-eligible -- see [isReopenEligible]'s field doc above for why
+     * unknown defaults to eligible rather than blocked.
+     */
+    private val NON_REOPENABLE_CLOSURE_REASONS = setOf(
+      "MATERNAL_DEATH",
+      "INFANT_OR_CHILD_DEATH",
+      "MISCARRIAGE",
+      "ABORTION",
+    )
   }
 }

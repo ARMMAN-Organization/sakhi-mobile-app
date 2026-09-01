@@ -4,6 +4,7 @@ import org.armman.sakhi.data.adhocform.AdHocFormSyncScheduler
 import org.armman.sakhi.data.childregistration.ChildFormSyncScheduler
 import org.armman.sakhi.data.enrollment.EnrollmentSyncScheduler
 import org.armman.sakhi.data.forms.DynamicFormSyncScheduler
+import org.armman.sakhi.data.referral.ReferralEvidenceSyncScheduler
 import org.armman.sakhi.data.schedule.VisitScheduleSyncScheduler
 import org.armman.sakhi.data.visitform.VisitFormSyncScheduler
 import javax.inject.Inject
@@ -13,7 +14,7 @@ import javax.inject.Singleton
  * The single entry point for starting a data upload, per SRS §3A.1 — *"Data Sync — Manual trigger.
  * Deferred with retry."*
  *
- * The app maintains six independent offline queues, each with its own WorkManager unique work
+ * The app maintains seven independent offline queues, each with its own WorkManager unique work
  * name so they are scheduled and de-duplicated separately:
  *  - `dynamic_form_drafts` — Mother Registration (CR-018), the live flow
  *  - `child_registration_drafts` — Children Register (CR-020)
@@ -53,6 +54,7 @@ class ManualSyncTrigger @Inject constructor(
   private val visitScheduleSyncScheduler: VisitScheduleSyncScheduler,
   private val visitFormSyncScheduler: VisitFormSyncScheduler,
   private val adHocFormSyncScheduler: AdHocFormSyncScheduler,
+  private val referralEvidenceSyncScheduler: ReferralEvidenceSyncScheduler,
 ) {
   /** Starts one upload attempt across every offline queue. */
   fun syncAllQueues() {
@@ -62,5 +64,9 @@ class ManualSyncTrigger @Inject constructor(
     visitScheduleSyncScheduler.syncNow()
     visitFormSyncScheduler.syncNow()
     adHocFormSyncScheduler.syncNow()
+    // CR-Referral-02 — referral evidence media, the seventh queue. See
+    // ReferralEvidenceSyncScheduler's doc for why this queue is ALSO kicked off eagerly from
+    // capture time, unlike the other six which are manual-sync-only.
+    referralEvidenceSyncScheduler.syncNow()
   }
 }

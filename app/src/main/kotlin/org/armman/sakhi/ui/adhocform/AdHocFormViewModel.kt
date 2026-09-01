@@ -41,6 +41,13 @@ data class AdHocFormUiState(
   val version: FormVersion? = null,
   val answers: FormAnswers = FormAnswers(),
   val capturedImages: Map<String, String> = emptyMap(),
+  /** question_code -> absolute on-disk file path for every captured `image` field — separate
+   * from [capturedImages] (the `content://` display URI) since the data layer
+   * ([org.armman.sakhi.data.adhocform.AdHocFormSubmissionCoordinator]) needs a real path it can
+   * open without a UI `Context`, for Referral Follow-up's evidence-upload side effect. Set
+   * alongside [capturedImages] by [AdHocFormScreen]'s capture flow, which is the only place that
+   * knows both the URI and the path it was built from. */
+  val capturedImagePaths: Map<String, String> = emptyMap(),
   val isSubmitting: Boolean = false,
   /** The beneficiary's own enrollment date, fetched alongside the form schema — see
    * [AdHocFormViewModel.prefillTodayDateFields] and [FormDateRuleset.DATE_OF_EVENT_QUESTION_CODE].
@@ -88,6 +95,27 @@ class AdHocFormViewModel @Inject constructor(
 
   val beneficiaryId: String = savedStateHandle[NAV_ARG_BENEFICIARY_ID] ?: ""
   val formCode: String = savedStateHandle[NAV_ARG_FORM_CODE] ?: ""
+
+  /** Sakhi-facing header title for [formCode] — CR-Referral-01 (2026-09-01): the header used to
+   * show the raw formCode string (e.g. "REFERRAL_FOLLOWUP_VISIT") verbatim. Falls back to the raw
+   * code itself for any future ad-hoc formCode not yet in [AD_HOC_FORM_TITLES] rather than showing
+   * nothing. */
+  val formTitle: String get() = AD_HOC_FORM_TITLES[formCode] ?: formCode
+
+  /**
+   * CR-Closure-03: true only for the PP5-completion forced mother-closure prompt (see
+   * [org.armman.sakhi.ui.visitform.DynamicVisitFormScreen]'s `routeAfterSubmit` and
+   * [org.armman.sakhi.ui.navigation.AppNavHost]'s `onSubmittedTriggersClosure` wiring). Read by
+   * [org.armman.sakhi.ui.adhocform.AdHocFormScreen] to suppress its own back-arrow/system-back
+   * exit -- the SRS requires this form be completed before exit in that one flow, unlike every
+   * other ad-hoc form's ordinary voluntary-open-from-profile path, which stays freely dismissible.
+   */
+  val forced: Boolean = savedStateHandle[NAV_ARG_FORCED] ?: false
+
+  /** REFERRAL_FOLLOWUP_VISIT only — the parent referral this submission drives a status
+   * transition on (see [AdHocFormDraftEntity.referralId]'s doc). Blank for every other ad-hoc
+   * form, normalized to null before it reaches the coordinator/draft repository. */
+  private val referralId: String? = (savedStateHandle[NAV_ARG_REFERRAL_ID] ?: "").takeIf { it.isNotBlank() }
 
   /** Which visit (e.g. "ANC 3") the Sakhi picked in the "which visit is this referral for?"
    * dialog on the beneficiary profile screen, before this ViewModel was even created — blank for
@@ -240,11 +268,91 @@ class AdHocFormViewModel @Inject constructor(
     }
   }
 
+  /** See [AdHocFormUiState.capturedImagePaths]'s doc. Called by [AdHocFormScreen] right alongside
+   * [setCapturedImage], from the same capture callback that already knows both values. */
+  fun setCapturedImagePath(questionCode: String, filePath: String?) {
+    _uiState.update {
+      it.copy(
+        capturedImagePaths = if (filePath == null) {
+          it.capturedImagePaths - questionCode
+        } else {
+          it.capturedImagePaths + (questionCode to filePath)
+        },
+      )
+    }
+  }
+
   /** Fields currently shown, in schema order — honors [FormVisibilityEvaluator]. */
   fun visibleFields(): List<FormFieldSchema> {
     val state = _uiState.value
     val version = state.version ?: return emptyList()
     return version.schemaJson.filter { FormVisibilityEvaluator.isVisible(it, state.answers) }
+  }
+
+  // --- Section tabs + Summary review (CR-Referral-01, 2026-09-01) — mirrors
+  // DynamicChildRegistrationViewModel's/DeliverySessionViewModel's own sectionOf/sections/
+  // fieldsInSection/isSectionReady/buildSummary exactly; ported here so all five ad-hoc forms get
+  // the same "one tab per schema section + a final Summary review tab" shell every other
+  // schema-driven form in the app already has, instead of one long flat list. No field/question/
+  // validation/submission changes — purely how the same [visibleFields] are grouped and reviewed.
+
+  /** This field's tab label — falls back to [FALLBACK_SECTION] if the schema didn't tag one. */
+  fun sectionOf(field: FormFieldSchema): String = field.section ?: FALLBACK_SECTION
+
+  /** Distinct tab labels across currently-visible fields, in the order each first appears. */
+  fun sections(): List<String> = visibleFields().map(::sectionOf).distinct()
+
+  /** Visible fields belonging to one tab, in schema order. */
+  fun fieldsInSection(section: String): List<FormFieldSchema> =
+    visibleFields().filter { sectionOf(it) == section }
+
+  /** Whether every required field in one tab is answered and every `number` field with a
+   * `numericRange` satisfies it — the per-tab twin of [isReadyToSubmit], gating that tab's
+   * "Next" button the same way every other tabbed dynamic form in the app already does. */
+  fun isSectionReady(section: String): Boolean {
+    if (_uiState.value.version == null) return false
+    return fieldsAnsweredAndInRange(fieldsInSection(section))
+  }
+
+  /** Resolved review data for the Summary tab — every answered, currently-visible field grouped by
+   * schema section into its own card, in the order each section first appears, coded values mapped
+   * to display labels. Mirrors [org.armman.sakhi.ui.childregistration
+   * .DynamicChildRegistrationViewModel.buildSummary] — suspend (unlike
+   * [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel.buildFieldSummary]'s non-suspend
+   * version) since [optionsFor] here can hit [LookupRepository] for a `lookup_category_code` field.
+   * No `media` branch — see [AdHocFormScreen]'s class doc for why that input type isn't supported
+   * on any of these five forms' schemas. */
+  suspend fun buildSummary(imageCapturedLabel: String): List<SummarySection> {
+    if (_uiState.value.version == null) return emptyList()
+    return sections().map { section ->
+      SummarySection(
+        title = section,
+        rows = fieldsInSection(section).mapNotNull { summaryRowFor(it, imageCapturedLabel) },
+      )
+    }.filter { it.rows.isNotEmpty() }
+  }
+
+  private suspend fun summaryRowFor(field: FormFieldSchema, imageCapturedLabel: String): SummaryRow? {
+    val state = _uiState.value
+    val value: String? = when (field.inputType) {
+      FormFieldInputType.MULTISELECT, FormFieldInputType.MULTISELECT_DATE -> {
+        val codes = state.answers.multiValueOf(field.questionCode)
+        if (codes.isEmpty()) {
+          null
+        } else {
+          val options = optionsFor(field)
+          codes.joinToString(", ") { code -> options.firstOrNull { it.valueCode == code }?.label ?: code }
+        }
+      }
+      FormFieldInputType.IMAGE -> imageCapturedLabel.takeIf { field.questionCode in state.capturedImages }
+      FormFieldInputType.SELECT, FormFieldInputType.RADIO -> {
+        val code = state.answers.valueOf(field.questionCode)
+        if (code.isNullOrBlank()) null else optionsFor(field).firstOrNull { it.valueCode == code }?.label ?: code
+      }
+      // text / text_geo / number / date / computed read-only — the stored value is display-ready.
+      else -> state.answers.valueOf(field.questionCode)
+    }
+    return value?.takeIf { it.isNotBlank() }?.let { SummaryRow(label = field.label, value = it) }
   }
 
   /** Options for a select/radio/multiselect field: inline schema `options` first, then a
@@ -314,6 +422,8 @@ class AdHocFormViewModel @Inject constructor(
         formCode = formCode,
         formVersionId = version.id,
         answers = state.answers,
+        referralId = referralId,
+        capturedImagePaths = state.capturedImagePaths,
       )
       _uiState.update { it.copy(isSubmitting = false) }
       when (result) {
@@ -328,6 +438,8 @@ class AdHocFormViewModel @Inject constructor(
     const val NAV_ARG_BENEFICIARY_ID = "beneficiaryId"
     const val NAV_ARG_FORM_CODE = "formCode"
     const val NAV_ARG_VISIT_NAME = "visitName"
+    const val NAV_ARG_FORCED = "forced"
+    const val NAV_ARG_REFERRAL_ID = "referralId"
 
     /** Referral form's spec row 2 — see [AdHocFormViewModel.prefillVisitName]. */
     const val VISIT_NAME_QUESTION_CODE = "visit_name"
@@ -337,5 +449,17 @@ class AdHocFormViewModel @Inject constructor(
 
     /** Referral Follow-up's spec row 3 — see [AdHocFormViewModel.prefillAutoNumberedVisitName]. */
     const val REFERRAL_FOLLOWUP_VISIT_NAME_QUESTION_CODE = "referral_followup_visit_name"
+
+    /** See [AdHocFormViewModel.formTitle]'s doc. Covers all five ad-hoc formCodes this ViewModel
+     * ever loads (see this class's own doc) — kept here rather than a shared constants object
+     * since, like [AD_HOC_FORM_CODE_REFERRAL] et al. in `BeneficiaryProfileScreen`, this is
+     * currently the only place any of them needs a Sakhi-facing display title. */
+    val AD_HOC_FORM_TITLES = mapOf(
+      "REFERRAL_VISIT" to "Referral",
+      "REFERRAL_FOLLOWUP_VISIT" to "Referral Follow Up",
+      "ANC_CLOSURE_VISIT" to "ANC Closure",
+      "CHILD_CLOSURE_VISIT" to "Child Closure",
+      "BENEFICIARY_REOPEN_VISIT" to "Reopen Beneficiary",
+    )
   }
 }

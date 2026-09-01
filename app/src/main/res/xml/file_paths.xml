@@ -46,4 +46,10 @@
   <files-path
     name="delivery_child_registration_captures"
     path="delivery-child-registration/" />
+  <!-- CR-Referral-02 evidence capture (health facility photo, beneficiary photo, case paper,
+       discharge summary, investigation report) — see
+       org.armman.sakhi.ui.referral.ReferralEvidenceCapture.onCaptureImage. -->
+  <files-path
+    name="referral_evidence_captures"
+    path="referral-evidence/" />
 </paths>

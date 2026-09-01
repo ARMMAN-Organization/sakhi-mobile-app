@@ -163,7 +163,7 @@ class RoomVisitFormDraftRepositoryTest {
 
       val result = submit()
 
-      assertEquals(VisitFormSubmitResult.Synced, result)
+      assertEquals(VisitFormSubmitResult.Synced(), result)
       assertEquals(EnrollmentSyncStatus.SYNCED, dao.getByLocalScheduleUuid("schedule-1")?.syncStatus)
       assertEquals("server-visit-42", dao.getByLocalScheduleUuid("schedule-1")?.serverVisitId)
       // Same visible side effect as the pre-CR-026b direct-coordinator call: the schedule flips to
@@ -329,7 +329,7 @@ class RoomVisitFormDraftRepositoryTest {
 
     val onlineResult = submit()
 
-    assertEquals(VisitFormSubmitResult.Synced, onlineResult)
+    assertEquals(VisitFormSubmitResult.Synced(), onlineResult)
     assertEquals(
       listOf(FormAuditEventType.SAVED),
       formAuditRepository.recordedEvents.map { it.eventType },

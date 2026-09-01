@@ -96,6 +96,11 @@ class FakeVisitScheduleDao : VisitScheduleDao {
     { it.copy(status = VisitScheduleStatus.CANCELLED, reasonCode = REASON_LAPSED_ON_DELIVERY) },
   )
 
+  override suspend fun lapseAllOpenVisits(localBeneficiaryId: String): Int = mutateWhere(
+    { it.localBeneficiaryId == localBeneficiaryId && it.status in OPEN_STATUSES },
+    { it.copy(status = VisitScheduleStatus.CANCELLED, reasonCode = REASON_LAPSED_ON_CLOSURE) },
+  )
+
   override suspend fun supersedeOpenVisits(localBeneficiaryId: String): Int = mutateWhere(
     { it.localBeneficiaryId == localBeneficiaryId && it.status in OPEN_STATUSES },
     { it.copy(status = VisitScheduleStatus.SUPERSEDED) },

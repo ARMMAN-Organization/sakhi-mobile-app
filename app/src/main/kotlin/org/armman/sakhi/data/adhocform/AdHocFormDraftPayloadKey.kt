@@ -18,6 +18,11 @@ internal fun adHocFormDraftPayloadKey(localFormInstanceUuid: String): String =
  * `VisitFormDraftPayload`. */
 data class AdHocFormDraftPayload(
   val answers: FormAnswers,
+  /** REFERRAL_FOLLOWUP_VISIT only — see [AdHocFormSubmissionCoordinator.submit]'s
+   * `capturedImagePaths` doc. Defaults to empty so a payload written before this field existed
+   * still deserializes (Gson leaves a missing JSON field at its Kotlin default only when the
+   * property has one, which this does). */
+  val capturedImagePaths: Map<String, String> = emptyMap(),
 )
 
 internal val adHocFormDraftGson = Gson()

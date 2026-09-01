@@ -36,4 +36,15 @@ data class AdHocFormDraftEntity(
   /** Set once `POST /forms/{formCode}/submissions` succeeds. Null until then; terminal once set. */
   val serverSubmissionId: String?,
   val lastErrorMessage: String?,
+  /**
+   * Referral Follow-up only (`formCode == "REFERRAL_FOLLOWUP_VISIT"`) — the parent referral this
+   * submission drives a status transition on, via the paired `POST /referrals/{referralId}/follow-up`
+   * call in [org.armman.sakhi.data.adhocform.AdHocFormSubmissionCoordinator]. Threaded from the
+   * profile screen's tap on a referral-incomplete visit (see
+   * [org.armman.sakhi.ui.adhocform.AdHocFormViewModel]'s `referralId` nav arg) and persisted here —
+   * not just passed transiently through [AdHocFormSubmissionCoordinator.submit] — so a draft that
+   * queues offline still carries it when [org.armman.sakhi.data.adhocform.AdHocFormSyncExecutor]
+   * retries later. Always null for the other four ad-hoc form codes.
+   */
+  val referralId: String? = null,
 )

@@ -69,6 +69,7 @@ class RemotePreVisitHealthHistoryRepositoryTest {
     override suspend fun attachServerBeneficiaryId(localBeneficiaryId: String, serverBeneficiaryId: String) = Unit
     override suspend fun updateStatus(localScheduleUuid: String, status: VisitScheduleStatus, reasonCode: String?) = Unit
     override suspend fun lapseOpenAncVisits(localBeneficiaryId: String) = 0
+    override suspend fun lapseAllOpenVisits(localBeneficiaryId: String) = 0
     override suspend fun supersedeOpenVisits(localBeneficiaryId: String) = 0
   }
 

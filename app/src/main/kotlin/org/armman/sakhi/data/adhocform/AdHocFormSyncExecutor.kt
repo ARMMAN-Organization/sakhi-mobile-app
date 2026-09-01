@@ -76,6 +76,8 @@ class AdHocFormSyncExecutor @Inject constructor(
         formCode = draft.formCode,
         formVersionId = draft.formVersionId,
         answers = payload.answers,
+        referralId = draft.referralId,
+        capturedImagePaths = payload.capturedImagePaths,
       )
 
       result.fold(

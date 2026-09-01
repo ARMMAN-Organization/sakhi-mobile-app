@@ -201,6 +201,9 @@ class LocalEnrolmentBeneficiarySource @Inject constructor(
       // override instead — see LocalBeneficiaryStatusOverrideStore's doc for why this isn't
       // just always ACTIVE any more.
       status = statusOverrideStore.getStatus(localBeneficiaryId) ?: BeneficiaryStatus.ACTIVE,
+      // CR-Closure-02: only ever non-null alongside a CLOSED status this same call just read
+      // above -- see Beneficiary.closureReasonCode's own doc for the "only this device knows" caveat.
+      closureReasonCode = statusOverrideStore.getClosureReason(localBeneficiaryId),
       visitState = VisitState.OPEN,
       pada = answers.padaLabel(if (isChild) CHILD_REGISTRATION_FORM_CODE else MOTHER_REGISTRATION_FORM_CODE),
       // Falls back to today so the card still renders for a beneficiary enrolled before CR-022,

@@ -16,9 +16,6 @@ class FakeClosureRepository(
     val eventDate: String?,
     val closureDate: String,
     val submittedByUserId: String,
-    val supervisorStatus: String?,
-    val supervisorId: String?,
-    val supervisorNotes: String?,
   )
 
   /** Every [submitClosure] call, in call order. */
@@ -32,9 +29,6 @@ class FakeClosureRepository(
     eventDate: String?,
     closureDate: String,
     submittedByUserId: String,
-    supervisorStatus: String?,
-    supervisorId: String?,
-    supervisorNotes: String?,
   ): String {
     recordedClosures += RecordedClosure(
       localClosureUuid = localClosureUuid,
@@ -44,9 +38,6 @@ class FakeClosureRepository(
       eventDate = eventDate,
       closureDate = closureDate,
       submittedByUserId = submittedByUserId,
-      supervisorStatus = supervisorStatus,
-      supervisorId = supervisorId,
-      supervisorNotes = supervisorNotes,
     )
     exceptionToThrow?.let { throw it }
     return submittedClosureId

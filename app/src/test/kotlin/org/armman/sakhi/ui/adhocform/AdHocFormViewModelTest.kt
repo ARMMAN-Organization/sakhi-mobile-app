@@ -47,6 +47,8 @@ class AdHocFormViewModelTest {
       formCode: String,
       formVersionId: String,
       answers: FormAnswers,
+      referralId: String?,
+      capturedImagePaths: Map<String, String>,
     ): AdHocFormSubmitResult = throw NotImplementedError("not exercised by these tests")
 
     override suspend fun countByFormCode(localBeneficiaryId: String, formCode: String): Int = referralCount
@@ -116,6 +118,7 @@ class AdHocFormViewModelTest {
     beneficiaryId: String = "beneficiary-1",
     formCode: String = "REFERRAL_VISIT",
     visitName: String = "",
+    forced: Boolean = false,
   ) =
     AdHocFormViewModel(
       formsRepository = formsRepository,
@@ -128,9 +131,31 @@ class AdHocFormViewModelTest {
           "beneficiaryId" to beneficiaryId,
           "formCode" to formCode,
           "visitName" to visitName,
+          "forced" to forced,
         ),
       ),
     )
+
+  // CR-Closure-03: the PP5-triggered forced mother-closure prompt reads this flag to suppress its
+  // own back affordance (see AdHocFormScreen) -- covering just the nav-arg readback here, since the
+  // actual back-suppression is a Compose-layer concern this JVM test suite doesn't exercise.
+  @Test
+  fun `forced defaults to false when the nav arg is absent`() {
+    formsRepository.version = versionWith()
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertFalse(viewModel.forced)
+  }
+
+  @Test
+  fun `forced is true when the nav arg is set`() {
+    formsRepository.version = versionWith()
+    val viewModel = buildViewModel(formCode = "ANC_CLOSURE_VISIT", forced = true)
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertTrue(viewModel.forced)
+  }
 
   @Test
   fun `load() success writes an OPENED audit event exactly once`() {

@@ -33,6 +33,8 @@ import org.armman.sakhi.data.riskassessment.RiskAssessmentDao
 import org.armman.sakhi.data.riskassessment.RiskAssessmentEntity
 import org.armman.sakhi.data.riskassessment.RiskFlagEntity
 import org.armman.sakhi.data.referral.ReferralLinkEntity
+import org.armman.sakhi.data.referral.ReferralEvidenceDao
+import org.armman.sakhi.data.referral.ReferralEvidenceMediaEntity
 
 /**
  * App's single Room database. Holds enrollment, dynamic-form and Children Register sync-queue
@@ -122,6 +124,36 @@ import org.armman.sakhi.data.referral.ReferralLinkEntity
  *    recomputes on read — see that entity's own doc). Additive [MIGRATION_15_16] — creates
  *    `enrollment_risk_baselines` only, touches no existing table. Same no-automated-migration-test
  *    convention as v4-v15.
+ *  - v17: [ReferralEvidenceMediaEntity] (CR-Referral-02 offline evidence-media queue —
+ *    health facility photo, beneficiary photo, case paper, discharge summary, investigation
+ *    report; one row per captured file). Additive [MIGRATION_16_17] — creates
+ *    `referral_evidence_media` only, touches no existing table. Same
+ *    no-automated-migration-test convention as v4-v16.
+ *  - v18: [ReferralLinkEntity.facilityName]/`facilityType` (CR-Referral-02 — cached so the
+ *    follow-up screen's Step 1 review can show what was recorded at referral creation, with no
+ *    `GET /referrals/{id}` endpoint to fetch it fresh). Additive [MIGRATION_17_18] — `ALTER
+ *    TABLE`s the existing `referral_links` table, adding two `NOT NULL DEFAULT ''` TEXT
+ *    columns (SQLite requires a non-null default to add a NOT NULL column to a table that may
+ *    already have rows) — same pattern as v12's `localSubmissionUuid`. No automated migration
+ *    test for this one either (same explicit team decision as v4-v17).
+ *  - v19: [ReferralEvidenceMediaEntity.followupId] (CR-Referral-02 — backend-confirmed real
+ *    contract, 2026-08-31: media can only be finalized once the parent follow-up's real id is
+ *    known, so every queued row now carries it, nullable until Submit succeeds). Additive
+ *    [MIGRATION_18_19] — `ALTER TABLE`s the existing `referral_evidence_media` table, adding one
+ *    nullable TEXT column. No automated migration test for this one either (same explicit team
+ *    decision as v4-v18).
+ *  - v20: [AdHocFormDraftEntity.referralId] / [ReferralEvidenceMediaEntity.submissionId]
+ *    (CR-Referral-02/CR-Referral-01 — Referral Follow-up switched from the bespoke
+ *    `POST /referrals/{id}/follow-up`-only screen to the schema-driven ad-hoc form pipeline;
+ *    see [org.armman.sakhi.data.adhocform.AdHocFormSubmissionCoordinator]'s `REFERRAL_FOLLOWUP_VISIT`
+ *    branch). [AdHocFormDraftEntity.referralId] lets a queued/retried ad-hoc submission still
+ *    know which referral to transition on sync. [ReferralEvidenceMediaEntity.submissionId] is the
+ *    new link key for evidence captured via the ad-hoc form's native `image` fields (the generic
+ *    submission's own id is known synchronously, unlike the old `followupId` two-phase stamp) —
+ *    [ReferralEvidenceMediaEntity.followupId] is kept, now unused by new rows, for the handful of
+ *    already-queued rows from the retired bespoke screen. Additive [MIGRATION_19_20] — two
+ *    `ALTER TABLE`s, both nullable TEXT columns. No automated migration test (same convention as
+ *    v4-v19).
  */
 @Database(
   entities = [
@@ -139,8 +171,9 @@ import org.armman.sakhi.data.referral.ReferralLinkEntity
     RiskAssessmentEntity::class,
     RiskFlagEntity::class,
     EnrollmentRiskBaselineEntity::class,
+    ReferralEvidenceMediaEntity::class,
   ],
-  version = 16,
+  version = 20,
   exportSchema = true,
 )
 @TypeConverters(ScheduleTypeConverters::class)
@@ -158,6 +191,7 @@ abstract class SakhiDatabase : RoomDatabase() {
   abstract fun referralLinkDao(): ReferralLinkDao
   abstract fun riskAssessmentDao(): RiskAssessmentDao
   abstract fun enrollmentRiskBaselineDao(): EnrollmentRiskBaselineDao
+  abstract fun referralEvidenceDao(): ReferralEvidenceDao
 
   companion object {
     /**
@@ -542,5 +576,76 @@ abstract class SakhiDatabase : RoomDatabase() {
         )
       }
     }
+    /**
+     * v16 → v17: adds the CR-Referral-02 `referral_evidence_media` table. Purely additive — no
+     * existing table is touched.
+     *
+     * Column definitions must match [ReferralEvidenceMediaEntity] exactly or Room's schema
+     * validation fails at open time. `evidenceType`/`syncStatus` are TEXT by enum name, same
+     * convention as every other queue. No automated migration test for this one either (same
+     * explicit team decision as v4-v16).
+     */
+    val MIGRATION_16_17: Migration = object : Migration(16, 17) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `referral_evidence_media` (" +
+            "`localMediaUuid` TEXT NOT NULL, " +
+            "`referralId` TEXT NOT NULL, " +
+            "`evidenceType` TEXT NOT NULL, " +
+            "`localFilePath` TEXT NOT NULL, " +
+            "`syncStatus` TEXT NOT NULL, " +
+            "`createdAtEpochMillis` INTEGER NOT NULL, " +
+            "`lastAttemptAtEpochMillis` INTEGER, " +
+            "`retryCount` INTEGER NOT NULL, " +
+            "`remoteMediaId` TEXT, " +
+            "`lastErrorMessage` TEXT, " +
+            "PRIMARY KEY(`localMediaUuid`))",
+        )
+      }
+    }
+
+    /**
+     * v17 → v18: adds `facilityName`/`facilityType` to the existing `referral_links` table
+     * (CR-Referral-02). Every existing row upgrades with both columns as `''` — acceptable
+     * because no real users are on the app yet (same standing decision as v4-v17), and a blank
+     * value just means Step 1's review card shows nothing for a referral cached before this
+     * migration rather than crashing.
+     */
+    val MIGRATION_17_18: Migration = object : Migration(17, 18) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `referral_links` ADD COLUMN `facilityName` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `referral_links` ADD COLUMN `facilityType` TEXT NOT NULL DEFAULT ''")
+      }
+    }
+
+    /**
+     * v18 → v19: adds a nullable `followupId` column to `referral_evidence_media` (CR-Referral-02,
+     * backend-confirmed real contract, 2026-08-31). Purely additive, defaults to NULL for every
+     * existing row — correct, since a row from before this migration was captured before the
+     * concept of stamping a real follow-up id existed, and [ReferralEvidenceDao.getPendingSync]
+     * treats a null [ReferralEvidenceMediaEntity.followupId] as "not yet eligible to upload"
+     * rather than a data error.
+     */
+    val MIGRATION_18_19: Migration = object : Migration(18, 19) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `referral_evidence_media` ADD COLUMN `followupId` TEXT")
+      }
+    }
+
+    /**
+     * v19 → v20: adds a nullable `referralId` column to `ad_hoc_form_drafts` and a nullable
+     * `submissionId` column to `referral_evidence_media` (Referral Follow-up's switch to the
+     * ad-hoc form pipeline — see this class's own v20 doc). Both purely additive; every existing
+     * row upgrades with `NULL`, which is correct (a pre-migration ad-hoc draft was never a
+     * Referral Follow-up submission needing a referralId, and a pre-migration evidence row was
+     * captured by the retired bespoke screen, which stamped `followupId` instead).
+     */
+    val MIGRATION_19_20: Migration = object : Migration(19, 20) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `ad_hoc_form_drafts` ADD COLUMN `referralId` TEXT")
+        db.execSQL("ALTER TABLE `referral_evidence_media` ADD COLUMN `submissionId` TEXT")
+      }
+    }
+
   }
 }

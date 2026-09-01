@@ -7,8 +7,10 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.beneficiary.BeneficiaryStatus
 import org.armman.sakhi.data.beneficiary.BeneficiaryType
+import org.armman.sakhi.data.beneficiary.LocalBeneficiaryStatusOverrideStore
 import org.armman.sakhi.data.beneficiary.RiskLevel
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfile
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfileRepository
@@ -43,9 +45,18 @@ class BeneficiaryProfileViewModelTest {
 
   private class FakeRepository(
     var error: Exception? = null,
+    /** CR-Closure-02: lets a test swap in a CLOSED variant of MOTHER/CHILD (with a specific
+     * [BeneficiaryProfile.closureReasonCode]) without needing a second fake id per case. */
+    var closureOverride: BeneficiaryProfile? = null,
   ) : BeneficiaryProfileRepository {
+    /** CR-Closure-04: lets a test confirm loadProfile() re-fetches once (not just clears the
+     * local override) after noticing an approved reopen request. */
+    var callCount = 0
+
     override suspend fun getBeneficiary(id: String): BeneficiaryProfile {
+      callCount++
       error?.let { throw it }
+      closureOverride?.let { if (it.id == id) return it }
       return when (id) {
         "mother" -> MOTHER
         "child" -> CHILD
@@ -75,6 +86,7 @@ class BeneficiaryProfileViewModelTest {
   private lateinit var visitScheduleRepository: RoomVisitScheduleRepository
   private lateinit var deliverySessionDao: FakeDeliverySessionDao
   private lateinit var deliverySessionRepository: RoomDeliverySessionRepository
+  private lateinit var statusOverrideStore: LocalBeneficiaryStatusOverrideStore
 
   @Before
   fun setUp() {
@@ -86,6 +98,7 @@ class BeneficiaryProfileViewModelTest {
     visitScheduleRepository = RoomVisitScheduleRepository(scheduleDao)
     deliverySessionDao = FakeDeliverySessionDao()
     deliverySessionRepository = RoomDeliverySessionRepository(deliverySessionDao)
+    statusOverrideStore = LocalBeneficiaryStatusOverrideStore(FakeSecureKeyValueStore())
   }
 
   @After
@@ -102,6 +115,7 @@ class BeneficiaryProfileViewModelTest {
         reopenRepository,
         visitScheduleRepository,
         deliverySessionRepository,
+        statusOverrideStore,
         SavedStateHandle(args),
       )
     dispatcher.scheduler.advanceUntilIdle()
@@ -368,11 +382,91 @@ class BeneficiaryProfileViewModelTest {
     reopenRepository.exceptionToThrow = ReopenSubmissionException.Failed(httpCode = 500, apiMessage = "boom")
     val viewModel = createViewModel("mother")
 
-    viewModel.submitReopenRequest(ReopenRequestReason.OTHER)
+    viewModel.submitReopenRequest(ReopenRequestReason.CLOSED_BY_MISTAKE)
     dispatcher.scheduler.advanceUntilIdle()
 
     assertFalse(viewModel.uiState.value.isSubmittingReopen)
     assertFalse(viewModel.uiState.value.hasPendingReopenRequest)
+  }
+
+  @Test
+  fun `isReopenEligible is false for an ACTIVE beneficiary`() {
+    val state = createViewModel("mother").uiState.value
+    assertFalse(state.isReopenEligible)
+  }
+
+  @Test
+  fun `isReopenEligible is true for a CLOSED beneficiary with an unknown closure reason`() {
+    repository.closureOverride = MOTHER.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = null)
+    val state = createViewModel("mother").uiState.value
+    assertTrue(state.isReopenEligible)
+  }
+
+  @Test
+  fun `isReopenEligible is true for a CLOSED beneficiary closed for migration`() {
+    repository.closureOverride = MOTHER.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = "MIGRATION")
+    val state = createViewModel("mother").uiState.value
+    assertTrue(state.isReopenEligible)
+  }
+
+  @Test
+  fun `isReopenEligible is false for a CLOSED beneficiary closed for maternal death`() {
+    repository.closureOverride = MOTHER.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = "MATERNAL_DEATH")
+    val state = createViewModel("mother").uiState.value
+    assertFalse(state.isReopenEligible)
+  }
+
+  @Test
+  fun `isReopenEligible is false for a CLOSED beneficiary closed for miscarriage or abortion`() {
+    repository.closureOverride = MOTHER.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = "MISCARRIAGE")
+    assertFalse(createViewModel("mother").uiState.value.isReopenEligible)
+
+    repository.closureOverride = MOTHER.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = "ABORTION")
+    assertFalse(createViewModel("mother").uiState.value.isReopenEligible)
+  }
+
+  @Test
+  fun `isReopenEligible is false for a CLOSED infant closed for infant death`() {
+    repository.closureOverride = CHILD.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = "INFANT_OR_CHILD_DEATH")
+    val state = createViewModel("child").uiState.value
+    assertFalse(state.isReopenEligible)
+  }
+
+  @Test
+  fun `loadProfile clears the local override and re-fetches when a reopen request is approved`() = runTest {
+    statusOverrideStore.setStatus("mother", BeneficiaryStatus.CLOSED)
+    statusOverrideStore.setClosureReason("mother", "MIGRATION")
+    repository.closureOverride = MOTHER.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = "MIGRATION")
+    reopenRepository.approvedBeneficiaryIds = setOf("mother")
+
+    createViewModel("mother")
+
+    assertNull(statusOverrideStore.getStatus("mother"))
+    assertNull(statusOverrideStore.getClosureReason("mother"))
+    assertEquals(2, repository.callCount)
+  }
+
+  @Test
+  fun `loadProfile leaves the local override alone when no reopen request is approved yet`() = runTest {
+    statusOverrideStore.setStatus("mother", BeneficiaryStatus.CLOSED)
+    repository.closureOverride = MOTHER.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = "MIGRATION")
+    reopenRepository.approvedBeneficiaryIds = emptySet()
+
+    createViewModel("mother")
+
+    assertEquals(BeneficiaryStatus.CLOSED, statusOverrideStore.getStatus("mother"))
+    assertEquals(1, repository.callCount)
+  }
+
+  @Test
+  fun `loadProfile never checks for an approved reopen request when the beneficiary is ACTIVE`() = runTest {
+    reopenRepository.approvedBeneficiaryIds = setOf("mother")
+
+    createViewModel("mother")
+
+    // ACTIVE the whole time -- the approved-request check is CLOSED-gated, same as
+    // hasPendingReopenRequest, so this must not trigger a second getBeneficiary() call.
+    assertEquals(1, repository.callCount)
   }
 
   private companion object {

@@ -57,4 +57,12 @@ data class Beneficiary(
    * — see [org.armman.sakhi.data.forms.FormDateRuleset.DATE_OF_EVENT_QUESTION_CODE].
    */
   val registrationDate: LocalDate? = null,
+  /**
+   * CR-Closure-02: the `CLOSURE_REASON` backend code this beneficiary was closed under, non-null
+   * only when [status] is CLOSED AND this device is the one that submitted the closure -- see
+   * [org.armman.sakhi.data.beneficiary.LocalBeneficiaryStatusOverrideStore.getClosureReason]'s doc
+   * for why it can be null even for a genuinely closed beneficiary. Drives the Reopen eligibility
+   * gate on the profile screen.
+   */
+  val closureReasonCode: String? = null,
 )

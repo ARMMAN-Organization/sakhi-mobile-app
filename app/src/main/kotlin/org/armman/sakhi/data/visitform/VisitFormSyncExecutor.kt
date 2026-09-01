@@ -63,7 +63,13 @@ class VisitFormSyncExecutor @Inject constructor(
    */
   suspend fun runOne(localScheduleUuid: String): VisitFormSyncItemResult? {
     val draft = dao.getByLocalScheduleUuid(localScheduleUuid) ?: return null
-    if (draft.syncStatus == EnrollmentSyncStatus.SYNCED) return VisitFormSyncItemResult.Synced
+    // A draft already SYNCED before this call didn't just go through attemptSync() here, so there
+    // is no fresh submission response to read a CR-Closure-01 #5/#6 signal from — defaults to "no
+    // signal" (see VisitSubmitOutcome's own doc), same as it would have before that outcome
+    // existed. Only reachable in practice via a re-entrant runOne() call on an id that already
+    // finished; the one real call site (RoomVisitFormDraftRepository.submitDraft) never re-enters
+    // this way for a single Submit tap.
+    if (draft.syncStatus == EnrollmentSyncStatus.SYNCED) return VisitFormSyncItemResult.Synced()
     return attemptSync(draft)
   }
 
@@ -98,7 +104,7 @@ class VisitFormSyncExecutor @Inject constructor(
       )
 
       result.fold(
-        onSuccess = {
+        onSuccess = { outcome ->
           dao.upsert(
             draft.copy(
               syncStatus = EnrollmentSyncStatus.SYNCED,
@@ -107,7 +113,7 @@ class VisitFormSyncExecutor @Inject constructor(
               serverVisitId = capturedVisitId,
             ),
           )
-          VisitFormSyncItemResult.Synced
+          VisitFormSyncItemResult.Synced(outcome)
         },
         onFailure = { error ->
           when {

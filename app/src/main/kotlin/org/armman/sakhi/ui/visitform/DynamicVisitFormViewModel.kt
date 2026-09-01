@@ -25,6 +25,7 @@ import org.armman.sakhi.data.forms.DeliveryQuestionCodes
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormCrossFieldRule
 import org.armman.sakhi.data.forms.FormCrossFieldValidator
+import org.armman.sakhi.data.forms.FormDateRuleset
 import org.armman.sakhi.data.forms.FormFieldOption
 import org.armman.sakhi.data.forms.FormFieldSchema
 import org.armman.sakhi.data.forms.FormFieldInputType
@@ -34,6 +35,8 @@ import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.FormVisibilityEvaluator
 import org.armman.sakhi.data.forms.FormsRepository
 import org.armman.sakhi.data.forms.VisitCodeFormResolver
+import org.armman.sakhi.data.schedule.PpScheduleGenerator
+import org.armman.sakhi.data.schedule.ScheduleContext
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
 import org.armman.sakhi.data.visitform.CriticalCondition
 import org.armman.sakhi.data.visitform.InfantVisitFormComputedFieldEvaluator
@@ -57,7 +60,6 @@ import org.armman.sakhi.data.healtheducation.HealthEducationTopic
 import org.armman.sakhi.data.rules.GoRulesRiskAdapter
 import org.armman.sakhi.data.rules.RiskConditionIds
 import org.armman.sakhi.data.rules.RiskGrade
-import org.armman.sakhi.data.referral.FacilityType
 import org.armman.sakhi.data.referral.ReferralCapture
 import org.armman.sakhi.data.referral.ReferralType
 import org.armman.sakhi.data.rules.RiskGradingResult
@@ -142,23 +144,36 @@ data class DynamicVisitFormUiState(
    * [cancelReferralCapture]; a second [onFinish] call while this is already true skips the trigger
    * check and proceeds straight to the real submission. */
   val showReferralCaptureStep: Boolean = false,
-  /** Standalone hand-built fields for the referral capture step (bharath, 2026-08-08; moved out of
-   * a persistent "Referral" tab into a conditional post-visit step in Pass 4, 2026-08-27 — see
-   * [showReferralCaptureStep]'s doc for why) - NOT part of the ANC_VISIT schema's own "Referrals"
-   * section (that's a different set of questions, already rendered as a Visit Data sub-tab).
-   * Bundled into a [org.armman.sakhi.data.referral.ReferralCapture] by [referralCaptureOrNull] and
-   * passed to [VisitFormDraftRepository.submitDraft] on the same real Submit as the rest of the
-   * form. Still only ever results in an actual referral once the server's risk-assessment response
-   * *also* confirms a trigger (the authoritative check — see
-   * [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator.maybeCreateReferral]'s doc for
-   * why the on-device result that gates this step isn't treated as good enough on its own). */
-  val referralDate: LocalDate? = null,
-  /** Free-text facility name — CR-Referral-01 replaced the old hardcoded-placeholder-dropdown
-   * capture with this + [referralFacilityType] (the backend's actual `POST /referrals` shape has
-   * no facility directory to select from; confirmed 2026-08-27). */
-  val referralFacilityName: String? = null,
-  val referralFacilityType: FacilityType? = null,
-  val referralType: ReferralType? = null,
+  /**
+   * Referral capture step (bharath, 2026-08-08; moved out of a persistent "Referral" tab into a
+   * conditional post-visit step in Pass 4, 2026-08-27 — see [showReferralCaptureStep]'s doc for
+   * why) - NOT part of the ANC_VISIT schema's own "Referrals" section (that's a different set of
+   * questions, already rendered as a Visit Data sub-tab).
+   *
+   * CR-Referral-01 Pass 6 (2026-08-31): genuinely schema-driven now, same as every ad-hoc form —
+   * [referralFormVersion] is fetched live from `GET /forms/REFERRAL_VISIT/active-version` (see
+   * [DynamicVisitFormViewModel.loadReferralFormIfNeeded]) the first time this step is triggered,
+   * and [referralAnswers] holds whatever she's answered so far, rendered field-by-field through
+   * the same generic [org.armman.sakhi.ui.forms.DynamicFormField] every other form uses — no more
+   * hand-copied labels/options (Pass 5's approach, which looked right but silently went stale the
+   * moment the backend schema changed; this is what Pass 5 should have been).
+   *
+   * [DynamicVisitFormViewModel.visibleReferralFields] filters to what's actually shown, honoring
+   * the schema's own `visibleWhen` branching (new condition → willing → declined-reason, or
+   * accompanied/date/place/facility-name) exactly like [visibleFields] does for the main form.
+   * [DynamicVisitFormViewModel.referralCaptureOrNull] reads the answers straight off
+   * [referralAnswers] by question code and only ever bundles a real
+   * [org.armman.sakhi.data.referral.ReferralCapture] once she's gone all the way down the
+   * "new condition, yes → willing, yes" branch — every other branch (declined, not a new
+   * condition, or leaving the step blank and tapping Skip) means no referral, same as before.
+   */
+  val referralFormVersion: FormVersion? = null,
+  /** True while [DynamicVisitFormViewModel.loadReferralFormIfNeeded]'s fetch is in flight —
+   * distinct from [isLoading] (that's the main visit form's own load), so
+   * [DynamicVisitFormScreen]'s `ReferralCaptureStep` can show its own small loading state without
+   * the whole screen flashing back to the top-level loader. */
+  val referralFormLoading: Boolean = false,
+  val referralAnswers: FormAnswers = FormAnswers(),
   /** Offline high-risk rule evaluation (CR — real-time field highlighting), evaluated live as
    * relevant fields are filled — see [DynamicVisitFormViewModel.recheckGoRulesRisk]'s doc. Null
    * until the first successful evaluation (no cached rule pack yet, or nothing relevant answered
@@ -166,6 +181,41 @@ data class DynamicVisitFormUiState(
    * philosophy as [criticalCondition] — a Sakhi who has already seen a highlight shouldn't see it
    * silently vanish because a transient re-evaluation had no cached pack that instant. */
   val goRulesRiskResult: RiskGradingResult? = null,
+  /**
+   * CR-Closure-03: true when this visit is PP5 (the last scheduled postpartum visit) — set once
+   * at [DynamicVisitFormViewModel.load] time from [org.armman.sakhi.data.schedule
+   * .PpScheduleGenerator.isClosurePromptTrigger], not recomputed per-answer since it depends only
+   * on which schedule row this screen was opened for, never on the form's own answers. Read by
+   * [org.armman.sakhi.ui.visitform.DynamicVisitFormScreen]'s `routeAfterSubmit` to route into the
+   * forced mother-closure form instead of Health Education/back on a successful submit.
+   */
+  val triggersClosurePrompt: Boolean = false,
+  /**
+   * CR-Closure-01 items #5/#6: true only right after a LAST `CCV_VISIT` submission whose response
+   * came back with `closureDeferredForExtension == false` (no HR at this, the last scheduled CCV
+   * visit) — see [org.armman.sakhi.data.visitform.VisitSubmitOutcome]'s doc for the full contract.
+   * Unlike [triggersClosurePrompt] this can only be known from the actual submission response,
+   * never at [DynamicVisitFormViewModel.load] time, so it starts false and is set by [onFinish]'s
+   * own `Synced` branch. Read by [org.armman.sakhi.ui.visitform.DynamicVisitFormScreen]'s
+   * `routeAfterSubmit`, same as [triggersClosurePrompt], but routes into the CHILD closure form
+   * rather than the mother one. Never true while offline ([DynamicVisitFormEvent.QueuedOffline]) —
+   * the app has no way to know this signal until the submission actually reaches the backend; a
+   * known, accepted limitation (same shape as CR-Closure-03's own "no persisted resume state"
+   * limitation), not a bug.
+   */
+  val triggersChildClosurePrompt: Boolean = false,
+  /**
+   * CR-Closure-01 items #5/#6: non-null only right after a LAST `CCV_VISIT` submission whose
+   * response came back with `closureDeferredForExtension == true` (HR detected at this visit) —
+   * carries the extension visit's window so the Sakhi can be told when to expect it. Deliberately
+   * NOT turned into a real persisted `visit_schedules` row here: the backend has not shipped that
+   * part yet (flagged as a follow-up, CR-Closure-01's own doc, 2026-08-31) — fabricating one
+   * client-side against an unfinished, unconfirmed contract risks conflicting with
+   * [org.armman.sakhi.data.schedule.CcvScheduleGenerator]'s own invariants (e.g. it assumes exactly
+   * one `CCV_HR` row, the journey's opening visit, per child). Same offline limitation as
+   * [triggersChildClosurePrompt] — never set while offline.
+   */
+  val ccvHrExtensionWindow: org.armman.sakhi.data.forms.ExtensionVisitWindowDto? = null,
   /** `question_code` -> the worst (highest [RiskConditionFinding.gradeRank]) [RiskGrade] to
    * visually highlight right now, derived from [goRulesRiskResult] via [RiskConditionFieldMap] —
    * every condition graded MILD or worse whose code has a confirmed field mapping. A field mapped
@@ -270,6 +320,7 @@ class DynamicVisitFormViewModel @Inject constructor(
   private val goRulesRiskAdapter: GoRulesRiskAdapter,
   private val ancRiskRegistrationResolver: AncRiskRegistrationResolver,
   private val healthEducationRepository: HealthEducationRepository,
+  private val ppScheduleGenerator: PpScheduleGenerator,
   savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -301,13 +352,14 @@ class DynamicVisitFormViewModel @Inject constructor(
         _uiState.update { it.copy(isLoading = false, hasError = true) }
         return@launch
       }
-      val beneficiaryType = try {
-        beneficiaryProfileRepository.getBeneficiary(beneficiaryId).type
+      val beneficiaryProfile = try {
+        beneficiaryProfileRepository.getBeneficiary(beneficiaryId)
       } catch (e: NoSuchElementException) {
         Log.w(TAG, "DynamicVisitFormViewModel.load($beneficiaryId): getBeneficiary threw NoSuchElementException")
         _uiState.update { it.copy(isLoading = false, hasError = true) }
         return@launch
       }
+      val beneficiaryType = beneficiaryProfile.type
       // CR-033/CR-034: prefer the schedule row's VisitCodeType (covers PP/NN/INC/CCV/HR, not just
       // ANC/Infant) — see VisitCodeFormResolver's own doc for what's still a backend placeholder
       // for INC/CCV/HR specifically. Falls back to the old beneficiary-type-only switch only if
@@ -338,7 +390,28 @@ class DynamicVisitFormViewModel @Inject constructor(
             "label='${field.label}' computedFrom='${field.computedFrom}' visibleWhen=${field.visibleWhen}",
         )
       }
-      _uiState.update { it.copy(isLoading = false, formCode = formCode, version = version) }
+      // CR-Closure-03: PP5 (the last scheduled postpartum visit) is the SRS's mother-closure
+      // trigger point ("PP5 completion triggers the mother closure prompt") -- reuses
+      // PpScheduleGenerator.isClosurePromptTrigger, the existing unit-tested domain check, rather
+      // than re-deriving "is this the last PP visit" here. [schedule] is null for a beneficiary
+      // whose Visit Form was somehow opened without a real schedule row (shouldn't happen in
+      // practice -- see this same val's own doc above) or for a non-PP visit type where the check
+      // trivially returns false anyway; both read as "not the trigger" rather than a load error.
+      val triggersClosurePrompt = schedule != null && ppScheduleGenerator.isClosurePromptTrigger(
+        visit = schedule,
+        context = ScheduleContext(
+          localBeneficiaryId = beneficiaryId,
+          registrationDate = beneficiaryProfile.registrationDate ?: visitDate,
+        ),
+      )
+      _uiState.update {
+        it.copy(
+          isLoading = false,
+          formCode = formCode,
+          version = version,
+          triggersClosurePrompt = triggersClosurePrompt,
+        )
+      }
       // CR-035: logged only once the form has genuinely loaded (version confirmed non-null) —
       // NOT on any of the earlier blank-id/beneficiary-not-found/version-null failure branches
       // above, each of which returns before reaching here. Every open is logged, not just the
@@ -587,22 +660,93 @@ class DynamicVisitFormViewModel @Inject constructor(
     }
   }
 
-  // --- Referral tab (standalone form, not schema-driven - see DynamicVisitFormUiState's doc) ---
+  // --- Referral capture step (genuinely schema-driven since Pass 6 — see
+  // DynamicVisitFormUiState's doc) ---
 
-  fun setReferralDate(date: LocalDate?) {
-    _uiState.update { it.copy(referralDate = date) }
+  /** Fetches `GET /forms/REFERRAL_VISIT/active-version` the first time the referral capture step
+   * is triggered this session, and prefills the one metadata field [visibleReferralFields] still
+   * needs a value for even though it's hidden from her (see that function's doc). No-op on a
+   * later [onFinish] call once a version is already cached — same "fetch once, reuse" contract
+   * [FormsRepository.getActiveVersion] already documents (it falls back to the last cached
+   * version itself if this call is offline/fails, so no separate offline handling is needed here).
+   */
+  private suspend fun loadReferralFormIfNeeded() {
+    if (_uiState.value.referralFormVersion != null) {
+      Log.d(TAG, "loadReferralFormIfNeeded: already cached, skipping fetch")
+      return
+    }
+    Log.d(TAG, "loadReferralFormIfNeeded: fetching GET /forms/$FORM_CODE_REFERRAL_VISIT/active-version")
+    _uiState.update { it.copy(referralFormLoading = true) }
+    val version = formsRepository.getActiveVersion(FORM_CODE_REFERRAL_VISIT)
+    // Temporary diagnostic (CR-Referral-01 Pass 6.2) — confirms in logcat whether this fetch ran
+    // and exactly which question codes it got back, so a stale-build/stale-cache report can be
+    // told apart from a real schema/render bug. Safe to remove once the field is confirmed live.
+    Log.d(
+      TAG,
+      "loadReferralFormIfNeeded: fetch result = " +
+        if (version == null) {
+          "null (no version ever cached for $FORM_CODE_REFERRAL_VISIT)"
+        } else {
+          "versionId=${version.id} fields=${version.schemaJson.map { it.questionCode }}"
+        },
+    )
+    _uiState.update {
+      it.copy(
+        referralFormLoading = false,
+        referralFormVersion = version,
+        referralAnswers = if (version != null) prefilledReferralAnswers(version) else it.referralAnswers,
+      )
+    }
   }
 
-  fun setReferralFacilityName(name: String?) {
-    _uiState.update { it.copy(referralFacilityName = name) }
+  /** [FormDateRuleset.REFERRAL_FORM_FILLED_DATE_QUESTION_CODE] ("Referral visit form filled
+   * date") is now shown (see [visibleReferralFields]'s doc), but still defaults to today so she
+   * isn't starting from a blank required date — she can still change it within `dateRule
+   * .notFuture`. [FormDateRuleset.DECIDED_VISIT_DATE_QUESTION_CODE]'s own `dateRule.notBefore`
+   * bound is relative to this field's value (see [FormDateRuleset]'s doc for both codes), so the
+   * prefill also keeps that bound resolvable even before she's touched anything.
+   * `visit_name`/`referral_visit_name` are left genuinely blank — neither has a home in
+   * `POST /referrals` yet (see [referralCaptureOrNull]'s doc), so there's nothing to prefill them
+   * WITH beyond a guess; she can still type into them, it's just not sent anywhere today.
+   */
+  private fun prefilledReferralAnswers(version: FormVersion): FormAnswers {
+    var answers = FormAnswers()
+    if (version.schemaJson.any { it.questionCode == FormDateRuleset.REFERRAL_FORM_FILLED_DATE_QUESTION_CODE }) {
+      answers = answers.withSingleValue(FormDateRuleset.REFERRAL_FORM_FILLED_DATE_QUESTION_CODE, visitDate.toString())
+    }
+    return answers
   }
 
-  fun setReferralFacilityType(type: FacilityType?) {
-    _uiState.update { it.copy(referralFacilityType = type) }
+  /** Fields currently shown in the referral capture step, in schema order — honors
+   * [FormVisibilityEvaluator] exactly like [visibleFields] does for the main form, so the
+   * schema's own `visibleWhen` branching (new condition → willing → declined-reason, or
+   * accompanied/date/place/facility-name) drives what she sees, not hand-coded `if` checks.
+   *
+   * CR-Referral-01 (2026-09-01): `referral_form_filled_date`/`visit_name`/`referral_visit_name`
+   * are shown again — none of the three is consumed by `POST /referrals` today (still flagged to
+   * backend, see [referralCaptureOrNull]'s doc), but hiding fields the schema declares turned out
+   * to read as a bug rather than a feature, so they're now genuinely part of the form like
+   * everything else. [prefilledReferralAnswers] still defaults `referral_form_filled_date` to
+   * today so she isn't starting from a blank required date field.
+   */
+  fun visibleReferralFields(): List<FormFieldSchema> {
+    val state = _uiState.value
+    val version = state.referralFormVersion ?: return emptyList()
+    return version.schemaJson
+      .filter { FormVisibilityEvaluator.isVisible(it, state.referralAnswers) }
   }
 
-  fun setReferralType(type: ReferralType?) {
-    _uiState.update { it.copy(referralType = type) }
+  /** Generic per-field answer setter for the referral capture step — same contract as [setAnswer]
+   * (including [FormHiddenFieldReset], so answering an earlier branch clears whatever was filled
+   * in further down once it's no longer shown), just scoped to [DynamicVisitFormUiState
+   * .referralAnswers] instead of the main form's [DynamicVisitFormUiState.answers]. */
+  fun setReferralAnswer(questionCode: String, value: String?) {
+    val fields = _uiState.value.referralFormVersion?.schemaJson.orEmpty()
+    _uiState.update {
+      val previousAnswers = it.referralAnswers
+      val updatedAnswers = previousAnswers.withSingleValue(questionCode, value)
+      it.copy(referralAnswers = FormHiddenFieldReset.apply(fields, previousAnswers, updatedAnswers))
+    }
   }
 
   /** CR-Referral-01 Pass 4: back out of the referral capture step to keep editing the visit form
@@ -614,35 +758,45 @@ class DynamicVisitFormViewModel @Inject constructor(
 
   /** CR-Referral-01 Pass 4: "no referral needed" — her judgement call per the PRD's decision
    * tree ("Sakhi uses her best judgement"), even though the on-device evaluation flagged a
-   * trigger. Clears any partially-filled fields so [referralCaptureOrNull] returns null, then
-   * finishes the same real submit [onFinish] already performs (showReferralCaptureStep is already
-   * true at this point, so that second call skips straight past the trigger check). */
+   * trigger. Clears any partially-filled answers (keeping the fetched schema itself — no need to
+   * refetch) so [referralCaptureOrNull] returns null, then finishes the same real submit
+   * [onFinish] already performs (showReferralCaptureStep is already true at this point, so that
+   * second call skips straight past the trigger check). */
   fun skipReferralCapture() {
-    _uiState.update {
-      it.copy(
-        referralDate = null,
-        referralFacilityName = null,
-        referralFacilityType = null,
-        referralType = null,
-      )
-    }
+    _uiState.update { it.copy(referralAnswers = FormAnswers()) }
     onFinish()
   }
 
-  /** CR-Referral-01: bundles the Referral tab's captured fields for [onFinish] to pass down to
-   * [VisitFormDraftRepository.submitDraft] — null unless the Sakhi has selected both a referral
-   * type and a facility, since a create-referral call with a missing required field would just
-   * be rejected server-side; incomplete capture is treated as "she hasn't filled this in yet",
-   * not submitted partially. */
+  /** CR-Referral-01 (2026-08-31, Pass 6): bundles the referral capture step's schema-driven
+   * answers for [onFinish] to pass down to [VisitFormDraftRepository.submitDraft] — null unless
+   * she's gone all the way down the schema's "Yes → Yes" branch (needs referral for a new
+   * condition, AND is willing to go), since a create-referral call with a missing required field
+   * would just be rejected server-side. The "not a new condition" and "beneficiary declined"
+   * branches are both treated as "no referral captured", same as leaving the step untouched and
+   * tapping Skip.
+   *
+   * `referral_declined_reason` is read into UI state (so the dropdown works) but never appears
+   * here — `POST /referrals` has no field for it, same open backend question as
+   * `referral_needed_new_condition`/`beneficiary_willing_for_referral`/`referral_form_filled_date`
+   * /`visit_name`/`referral_visit_name` — see CR-Referral-01's backend-ask doc.
+   */
   private fun referralCaptureOrNull(): ReferralCapture? {
-    val state = _uiState.value
-    val type = state.referralType ?: return null
-    val facilityName = state.referralFacilityName?.trim()?.takeIf { it.isNotBlank() } ?: return null
-    val facilityType = state.referralFacilityType ?: return null
-    // referralDate is required by POST /referrals (backend-confirmed 2026-08-27) — an
-    // incompletely-filled Referral tab (this field still null) means no referral is captured at
-    // all, same as any other missing required field above.
-    val referralDate = state.referralDate ?: return null
+    val answers = _uiState.value.referralAnswers
+    if (answers.valueOf(QUESTION_CODE_REFERRAL_NEEDED_NEW_CONDITION) != VALUE_YES) return null
+    if (answers.valueOf(QUESTION_CODE_BENEFICIARY_WILLING_FOR_REFERRAL) != VALUE_YES) return null
+    val type = when (answers.valueOf(QUESTION_CODE_IS_ACCOMPANIED_REFERRAL)) {
+      VALUE_YES -> ReferralType.ACCOMPANIED
+      VALUE_NO -> ReferralType.STANDARD
+      else -> return null
+    }
+    val facilityType = answers.valueOf(QUESTION_CODE_PLACE_OF_REFERRAL)
+      ?.let { PLACE_OF_REFERRAL_TO_FACILITY_TYPE[it] } ?: return null
+    val facilityName = answers.valueOf(QUESTION_CODE_HEALTH_FACILITY_NAME)?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    // Required by POST /referrals's referralDate (backend-confirmed 2026-08-27) — a
+    // still-unanswered/unparseable decided_visit_date means no referral is captured at all, same
+    // as any other missing required field above.
+    val referralDate = answers.valueOf(FormDateRuleset.DECIDED_VISIT_DATE_QUESTION_CODE)
+      ?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return null
     return ReferralCapture(
       referralType = type,
       facilityName = facilityName,
@@ -1008,6 +1162,9 @@ class DynamicVisitFormViewModel @Inject constructor(
       // this submit attempt, whether she filled it in or skipped it).
       val referralTriggered = finalRiskResult?.conditions.orEmpty().any { it.isReferralTrigger }
       if (referralTriggered && !state.showReferralCaptureStep) {
+        // Pass 6: fetch the real schema before showing the step, so its fields are never stale —
+        // see loadReferralFormIfNeeded's doc.
+        loadReferralFormIfNeeded()
         _uiState.update { it.copy(showReferralCaptureStep = true) }
         return@launch
       }
@@ -1024,7 +1181,20 @@ class DynamicVisitFormViewModel @Inject constructor(
       )
       _uiState.update { it.copy(isSubmitting = false) }
       when (result) {
-        is VisitFormSubmitResult.Synced -> _events.trySend(DynamicVisitFormEvent.Submitted)
+        is VisitFormSubmitResult.Synced -> {
+          // CR-Closure-01 items #5/#6: only ever non-default for the LAST CCV_VISIT submission —
+          // see VisitSubmitOutcome's own doc. closureDeferredForExtension is a Boolean?, not a
+          // Boolean, specifically so "false" (route to child closure) and "null" (not the
+          // boundary visit, no routing at all) stay distinguishable here.
+          _uiState.update {
+            it.copy(
+              triggersChildClosurePrompt = result.outcome.closureDeferredForExtension == false,
+              ccvHrExtensionWindow = result.outcome.extensionVisit
+                ?.takeIf { result.outcome.closureDeferredForExtension == true },
+            )
+          }
+          _events.trySend(DynamicVisitFormEvent.Submitted)
+        }
         is VisitFormSubmitResult.QueuedOffline -> _events.trySend(DynamicVisitFormEvent.QueuedOffline)
         is VisitFormSubmitResult.Failed ->
           _events.trySend(DynamicVisitFormEvent.SubmitFailed(result.message))
@@ -1150,6 +1320,54 @@ class DynamicVisitFormViewModel @Inject constructor(
     const val HAVE_YOU_BEEN_ABLE_TO_MEET_QUESTION_CODE = "have_you_been_able_to_meet_the_beneficiary_for_the_visit"
     const val IF_NO_MENTION_REASONS_QUESTION_CODE = "if_no_mention_reasons"
     const val VALUE_NO = "no"
+    const val VALUE_YES = "yes"
+
+    // CR-Referral-01 Pass 6: the in-visit referral capture step's schema code + question codes —
+    // see DynamicVisitFormUiState's doc. Matches GET /forms/REFERRAL_VISIT/active-version verbatim.
+    const val FORM_CODE_REFERRAL_VISIT = "REFERRAL_VISIT"
+    const val QUESTION_CODE_REFERRAL_NEEDED_NEW_CONDITION = "referral_needed_new_condition"
+    const val QUESTION_CODE_BENEFICIARY_WILLING_FOR_REFERRAL = "beneficiary_willing_for_referral"
+    const val QUESTION_CODE_IS_ACCOMPANIED_REFERRAL = "is_accompanied_referral"
+    const val QUESTION_CODE_PLACE_OF_REFERRAL = "place_of_referral"
+    const val QUESTION_CODE_HEALTH_FACILITY_NAME = "health_facility_name"
+    // visit_name/referral_visit_name are rendered like any other schema field now (see
+    // visibleReferralFields' doc) but still aren't read by referralCaptureOrNull() — no constants
+    // needed for them since nothing in this file references their question codes directly.
+
+    /**
+     * CR-Referral-01 Pass 6.1 (2026-08-31): best-effort mapping from the real schema's
+     * `place_of_referral` value_code (11 values) to the 6 values `POST /referrals`'s `facilityType`
+     * actually accepts — confirmed BROKEN in production the same day: a real device log showed
+     * `POST /referrals` rejecting `facilityType: "private_clinic"` outright
+     * (`IllegalStateException: facilityType: Invalid enum value. Expected 'PUBLIC' | 'PRIVATE' |
+     * 'PHC' | 'RH' | 'DH' | 'OTHER'`), which meant every referral whose facility wasn't already one
+     * of those exact 6 uppercase values was silently failing to create (maybeCreateReferral
+     * swallows the failure so the visit submission itself still looked fine to her).
+     *
+     * This restores referral creation to a working state using ONLY the 6 values backend has
+     * actually confirmed it accepts — it does not change what backend is asked to accept (still
+     * exactly `PUBLIC`/`PRIVATE`/`PHC`/`RH`/`DH`/`OTHER`), so it does not need backend's sign-off
+     * to ship. It IS lossy for `sc`/`sdh`/`ngo`/`anganwadi_center`/`private_laboratory`/
+     * `private_hospital` (no clean equivalent among the 6), so precisely which of these facility
+     * types was actually chosen is no longer visible to `POST /referrals` — flagged to backend as
+     * the real fix (either accept the schema's own 11 values, or provide a lookup like
+     * `referralType` already uses) in CR-Referral-01's backend-ask doc; this mapping is a stopgap,
+     * not the resolution.
+     */
+    val PLACE_OF_REFERRAL_TO_FACILITY_TYPE = mapOf(
+      "sc" to "PUBLIC", // Sub Centre — government facility, no closer equivalent than PUBLIC.
+      "phc" to "PHC",
+      "rh" to "RH",
+      "sdh" to "OTHER", // Sub-District Hospital — between RH and DH in the real hierarchy; no
+      // existing value is accurate, so OTHER rather than guessing DH.
+      "dh" to "DH",
+      "private_clinic" to "PRIVATE",
+      "ngo" to "OTHER",
+      "anganwadi_center" to "PUBLIC", // Government-run maternal/child health facility.
+      "private_laboratory" to "PRIVATE",
+      "private_hospital" to "PRIVATE",
+      "other" to "OTHER",
+    )
 
     // INFANT_VISIT's own "Tests" section question codes prefillFromChildRegistration() writes.
     // Confirmed 2026-08-20 against the live GET /forms/INFANT_VISIT/active-version payload.

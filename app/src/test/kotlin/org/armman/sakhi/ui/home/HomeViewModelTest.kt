@@ -184,6 +184,7 @@ class HomeViewModelTest {
       visitScheduleScheduler,
       visitFormScheduler,
       adHocFormScheduler,
+      org.armman.sakhi.data.referral.FakeReferralEvidenceSyncScheduler(),
     )
     connectivityChecker = FakeConnectivityChecker()
   }

@@ -5,6 +5,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val KEY_PREFIX = "local_beneficiary_status_override_"
+private const val CLOSURE_REASON_KEY_PREFIX = "local_beneficiary_closure_reason_"
 
 /**
  * On-device optimistic override of a locally-enrolled beneficiary's [BeneficiaryStatus] — set once
@@ -34,5 +35,35 @@ class LocalBeneficiaryStatusOverrideStore @Inject constructor(
   fun getStatus(localBeneficiaryId: String): BeneficiaryStatus? {
     val raw = store.getString(KEY_PREFIX + localBeneficiaryId) ?: return null
     return runCatching { BeneficiaryStatus.valueOf(raw) }.getOrNull()
+  }
+
+  /**
+   * CR-Closure-02: the `CLOSURE_REASON` lookup category's backend code (e.g. `"MATERNAL_DEATH"`,
+   * `"MIGRATION"`) this beneficiary was closed under, set alongside [setStatus] by
+   * [org.armman.sakhi.data.adhocform.AdHocFormSubmissionCoordinator.submitClosure] — the only
+   * place this app currently learns a closure reason at all, since there is no
+   * `GET /closures` readback endpoint yet (see CR-Closure-01's backend ask #1). Only meaningful
+   * for a closure THIS device submitted; a beneficiary closed elsewhere, or before this field
+   * existed, has no entry here even though [getStatus] correctly reports CLOSED for her.
+   */
+  fun setClosureReason(localBeneficiaryId: String, closureReasonBackendCode: String) {
+    store.putString(CLOSURE_REASON_KEY_PREFIX + localBeneficiaryId, closureReasonBackendCode)
+  }
+
+  /** Null when no closure reason was ever recorded for this device — see [setClosureReason]'s doc
+   * for why that is a real, expected case and not just "never closed". */
+  fun getClosureReason(localBeneficiaryId: String): String? =
+    store.getString(CLOSURE_REASON_KEY_PREFIX + localBeneficiaryId)
+
+  /**
+   * CR-Closure-04: clears both the status and closure-reason overrides for [localBeneficiaryId] —
+   * called once [org.armman.sakhi.data.reopen.ReopenRepository.hasApprovedReopenRequest] confirms
+   * a reopen request was approved server-side, so the next [getStatus] read falls back to its own
+   * ACTIVE default instead of continuing to report the now-stale local CLOSED override. Idempotent
+   * — clearing an override that was never set (or already cleared) is a no-op either way.
+   */
+  fun clearOverride(localBeneficiaryId: String) {
+    store.remove(KEY_PREFIX + localBeneficiaryId)
+    store.remove(CLOSURE_REASON_KEY_PREFIX + localBeneficiaryId)
   }
 }

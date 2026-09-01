@@ -2,12 +2,16 @@ package org.armman.sakhi.data.referral
 
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.armman.sakhi.data.lookup.LookupValue
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -18,14 +22,25 @@ import java.time.LocalDate
 
 class RemoteReferralRepositoryTest {
 
+  private val s3Server = MockWebServer().apply { start() }
+
+  @After
+  fun tearDown() {
+    s3Server.shutdown()
+  }
+
   private class FakeReferralApi(
     var response: (() -> Response<ReferralFollowUpListResponseDto>)? = null,
     var createResponse: (() -> Response<CreateReferralResponseDto>)? = null,
     var followUpResponse: (() -> Response<SubmitReferralFollowUpResponseDto>)? = null,
     var convertResponse: (() -> Response<CreateReferralResponseDto>)? = null,
+    var uploadUrlResponse: (() -> Response<MediaUploadUrlResponseDto>)? = null,
+    var finalizeResponse: (() -> Response<FinalizeMediaResponseDto>)? = null,
   ) : ReferralApi {
     var lastCreateRequest: CreateReferralRequestDto? = null
     var lastFollowUpRequest: SubmitReferralFollowUpRequestDto? = null
+    var lastUploadUrlRequest: RequestMediaUploadUrlDto? = null
+    var lastFinalizeRequest: FinalizeMediaRequestDto? = null
 
     override suspend fun getPendingFollowUps(sakhiId: String): Response<ReferralFollowUpListResponseDto> {
       assertEquals("sakhi-1", sakhiId)
@@ -47,6 +62,16 @@ class RemoteReferralRepositoryTest {
 
     override suspend fun convertToAccompanied(referralId: String): Response<CreateReferralResponseDto> =
       convertResponse?.invoke() ?: throw IOException("offline")
+
+    override suspend fun requestMediaUploadUrl(request: RequestMediaUploadUrlDto): Response<MediaUploadUrlResponseDto> {
+      lastUploadUrlRequest = request
+      return uploadUrlResponse?.invoke() ?: throw IOException("offline")
+    }
+
+    override suspend fun finalizeMedia(request: FinalizeMediaRequestDto): Response<FinalizeMediaResponseDto> {
+      lastFinalizeRequest = request
+      return finalizeResponse?.invoke() ?: throw IOException("offline")
+    }
   }
 
   private fun item(
@@ -94,13 +119,13 @@ class RemoteReferralRepositoryTest {
   ): RemoteReferralRepository {
     val sessionStore = SessionStore(FakeSecureKeyValueStore())
     sessionStore.saveSession(session())
-    return RemoteReferralRepository(api, sessionStore, store, lookupRepository)
+    return RemoteReferralRepository(api, sessionStore, store, lookupRepository, OkHttpClient())
   }
 
   private fun capture(
     referralType: ReferralType = ReferralType.STANDARD,
     facilityName: String = "Civil Hospital",
-    facilityType: FacilityType = FacilityType.PHC,
+    facilityType: String = "phc",
   ) = ReferralCapture(
     referralType = referralType,
     facilityName = facilityName,
@@ -214,8 +239,10 @@ class RemoteReferralRepositoryTest {
     )
 
     assertEquals("lookup-accompanied-1", api.lastCreateRequest?.referralTypeLookupValueId)
-    // facilityType stays a plain string, unlike referralType — not resolved through a lookup.
-    assertEquals("PHC", api.lastCreateRequest?.facilityType)
+    // CR-Referral-01 (2026-08-31): facilityType is now sent raw and verbatim from
+    // ReferralCapture.facilityType (the schema's place_of_referral value_code, e.g. "phc") —
+    // no enum, no casing transform, unlike referralType which still goes through a lookup.
+    assertEquals("phc", api.lastCreateRequest?.facilityType)
     // status is always sent explicitly — required by the backend, no server default.
     assertEquals("PENDING_FOLLOWUP", api.lastCreateRequest?.status)
     // triggerConditionListJson is a real array in the request, not a JSON-encoded string.
@@ -409,5 +436,161 @@ class RemoteReferralRepositoryTest {
 
     assertTrue(result.isFailure)
     assertEquals("This referral is already Accompanied.", result.exceptionOrNull()?.message)
+  }
+
+  // CR-Referral-02 — uploadEvidence's real, backend-confirmed 3-step presigned-URL contract
+  // (2026-08-31). Step 2 (the raw PUT) goes to s3Server, a MockWebServer standing in for S3 —
+  // same pattern AuthInterceptorTest uses for a real OkHttp round trip.
+
+  @Test
+  fun `uploadEvidence success runs all 3 steps and returns the server media id`() = runTest {
+    val tempFile = kotlin.io.path.createTempFile(suffix = ".jpg").toFile().apply { writeBytes(byteArrayOf(1, 2, 3)) }
+    s3Server.enqueue(MockResponse().setResponseCode(200))
+    val api = FakeReferralApi(
+      uploadUrlResponse = {
+        Response.success(
+          MediaUploadUrlResponseDto(
+            success = true,
+            message = "OK",
+            data = MediaUploadUrlDataDto(
+              uploadUrl = s3Server.url("/media/referral_case_paper/abc").toString(),
+              s3Key = "media/referral_case_paper/abc",
+              expiresInSeconds = 900,
+              maxSizeBytes = 26214400,
+            ),
+          ),
+        )
+      },
+      finalizeResponse = {
+        Response.success(
+          201,
+          FinalizeMediaResponseDto(
+            success = true,
+            message = "OK",
+            data = MediaAssetDataDto(
+              id = "media-1",
+              assetType = "REFERRAL_CASE_PAPER",
+              storageUri = "s3://bucket/media/referral_case_paper/abc",
+              mimeType = "image/jpeg",
+              sizeBytes = "3",
+              uploadedByUserId = null,
+              uploadedAt = "2026-08-31T00:00:00.000Z",
+              encryptedFlag = true,
+              createdAt = "2026-08-31T00:00:00.000Z",
+            ),
+          ),
+        )
+      },
+    )
+
+    val result = repo(api).uploadEvidence("ref-1", "followup-1", ReferralEvidenceType.REFERRAL_CASE_PAPER, tempFile)
+
+    assertEquals("media-1", result.getOrThrow())
+    assertEquals("REFERRAL_CASE_PAPER", api.lastUploadUrlRequest?.assetType)
+    assertEquals(3L, api.lastUploadUrlRequest?.sizeBytes)
+    assertEquals("media/referral_case_paper/abc", api.lastFinalizeRequest?.s3Key)
+    assertEquals("ref-1", api.lastFinalizeRequest?.referralId)
+    assertEquals("followup-1", api.lastFinalizeRequest?.followupId)
+    val s3Request = s3Server.takeRequest()
+    assertEquals("PUT", s3Request.method)
+    tempFile.delete()
+  }
+
+  @Test
+  fun `uploadEvidence Step 1 non-2xx surfaces as a Result failure with the backend message, never reaches S3`() = runTest {
+    val tempFile = kotlin.io.path.createTempFile(suffix = ".jpg").toFile().apply { writeBytes(byteArrayOf(1, 2, 3)) }
+    val api = FakeReferralApi(
+      uploadUrlResponse = {
+        Response.error(
+          400,
+          "{\"success\":false,\"message\":\"sizeBytes must not exceed 26214400 bytes\",\"errorCode\":\"VALIDATION_ERROR\"}"
+            .toResponseBody("application/json".toMediaType()),
+        )
+      },
+    )
+
+    val result = repo(api).uploadEvidence("ref-1", "followup-1", ReferralEvidenceType.REFERRAL_INVESTIGATION_REPORT, tempFile)
+
+    assertTrue(result.isFailure)
+    assertEquals("sizeBytes must not exceed 26214400 bytes", result.exceptionOrNull()?.message)
+    assertEquals(0, s3Server.requestCount)
+    tempFile.delete()
+  }
+
+  @Test
+  fun `uploadEvidence Step 2 (S3 PUT) failure surfaces as a Result failure, never calls finalize`() = runTest {
+    val tempFile = kotlin.io.path.createTempFile(suffix = ".jpg").toFile().apply { writeBytes(byteArrayOf(1, 2, 3)) }
+    s3Server.enqueue(MockResponse().setResponseCode(500))
+    val api = FakeReferralApi(
+      uploadUrlResponse = {
+        Response.success(
+          MediaUploadUrlResponseDto(
+            success = true,
+            message = "OK",
+            data = MediaUploadUrlDataDto(
+              uploadUrl = s3Server.url("/media/x").toString(),
+              s3Key = "media/x",
+              expiresInSeconds = 900,
+              maxSizeBytes = 26214400,
+            ),
+          ),
+        )
+      },
+    )
+
+    val result = repo(api).uploadEvidence("ref-1", "followup-1", ReferralEvidenceType.REFERRAL_HEALTH_FACILITY_PHOTO, tempFile)
+
+    assertTrue(result.isFailure)
+    assertEquals(null, api.lastFinalizeRequest)
+    tempFile.delete()
+  }
+
+  @Test
+  fun `uploadEvidence Step 3 (finalize) non-2xx surfaces as a Result failure with the backend message`() = runTest {
+    val tempFile = kotlin.io.path.createTempFile(suffix = ".jpg").toFile().apply { writeBytes(byteArrayOf(1, 2, 3)) }
+    s3Server.enqueue(MockResponse().setResponseCode(200))
+    val api = FakeReferralApi(
+      uploadUrlResponse = {
+        Response.success(
+          MediaUploadUrlResponseDto(
+            success = true,
+            message = "OK",
+            data = MediaUploadUrlDataDto(
+              uploadUrl = s3Server.url("/media/x").toString(),
+              s3Key = "media/x",
+              expiresInSeconds = 900,
+              maxSizeBytes = 26214400,
+            ),
+          ),
+        )
+      },
+      finalizeResponse = {
+        Response.error(
+          422,
+          "{\"success\":false,\"message\":\"Uploaded file size does not match expectedSizeBytes.\",\"errorCode\":\"UNPROCESSABLE\"}"
+            .toResponseBody("application/json".toMediaType()),
+        )
+      },
+    )
+
+    val result = repo(api).uploadEvidence("ref-1", "followup-1", ReferralEvidenceType.REFERRAL_DISCHARGE_SUMMARY, tempFile)
+
+    assertTrue(result.isFailure)
+    assertEquals("Uploaded file size does not match expectedSizeBytes.", result.exceptionOrNull()?.message)
+    tempFile.delete()
+  }
+
+  @Test
+  fun `uploadEvidence network failure surfaces as a Result failure`() = runTest {
+    val tempFile = kotlin.io.path.createTempFile(suffix = ".jpg").toFile().apply { writeBytes(byteArrayOf(1, 2, 3)) }
+    val result = repo(FakeReferralApi()).uploadEvidence(
+      "ref-1",
+      "followup-1",
+      ReferralEvidenceType.REFERRAL_SAKHI_BENEFICIARY_PHOTO,
+      tempFile,
+    )
+
+    assertTrue(result.isFailure)
+    tempFile.delete()
   }
 }

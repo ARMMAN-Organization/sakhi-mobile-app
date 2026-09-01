@@ -62,12 +62,6 @@ import org.armman.sakhi.ui.components.ConditionChip
 import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.components.RiskBadge
 import org.armman.sakhi.ui.components.SecondaryButton
-import org.armman.sakhi.data.referral.FacilityType
-import org.armman.sakhi.data.referral.ReferralType
-import org.armman.sakhi.ui.components.AppTextField
-import org.armman.sakhi.ui.enrollment.components.AppDateField
-import org.armman.sakhi.ui.enrollment.components.AppDropdownField
-import org.armman.sakhi.ui.enrollment.components.AppRadioGroup
 import org.armman.sakhi.ui.forms.DynamicFormField
 import org.armman.sakhi.ui.forms.FormSectionScroll
 import org.armman.sakhi.ui.theme.Dimens
@@ -103,6 +97,14 @@ fun DynamicVisitFormScreen(
    * `isEducationTrigger` condition — (beneficiaryId, conditionCodes). Defaults to falling
    * straight back to [onBack] for any caller that hasn't wired Health Education yet. */
   onSubmittedNeedsEducation: (String, List<String>) -> Unit = { _, _ -> onBack() },
+  /** CR-Closure-03/CR-Closure-01 items #5/#6: called instead of [onBack]/[onSubmittedNeedsEducation]
+   * when the just-submitted visit forces a same-session closure prompt — either PP5 (see
+   * [DynamicVisitFormUiState.triggersClosurePrompt]) or the last CCV visit with no HR detected
+   * (see [DynamicVisitFormUiState.triggersChildClosurePrompt]) — (beneficiaryId, isChildClosure).
+   * `isChildClosure` picks which closure form the caller should force open: `false` for the PP5/
+   * mother case, `true` for the CCV/child case. Defaults to [onBack] for any caller that hasn't
+   * wired the forced-closure hand-off yet. */
+  onSubmittedTriggersClosure: (String, Boolean) -> Unit = { _, _ -> onBack() },
   viewModel: DynamicVisitFormViewModel = hiltViewModel(),
 ) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -124,15 +126,41 @@ fun DynamicVisitFormScreen(
         DynamicVisitFormEvent.ComingSoon -> Toast.makeText(context, comingSoon, Toast.LENGTH_SHORT).show()
         DynamicVisitFormEvent.Submitted -> {
           Toast.makeText(context, submitted, Toast.LENGTH_SHORT).show()
+          // CR-Closure-01 items #5/#6: HR detected at the last CCV visit — tell the Sakhi the
+          // extension window before routeAfterSubmit below silently exits on it (see that
+          // function's own doc for why this case has nothing further to route into this session).
+          viewModel.uiState.value.ccvHrExtensionWindow?.let { window ->
+            Toast.makeText(
+              context,
+              context.getString(
+                R.string.visit_form_ccv_hr_extension_deferred,
+                window.windowStartDate.orEmpty(),
+                window.windowEndDate.orEmpty(),
+              ),
+              Toast.LENGTH_LONG,
+            ).show()
+          }
           // Read viewModel.uiState.value directly, NOT the composable-scoped `state` — this
           // LaunchedEffect(viewModel) never restarts (its key never changes), so a captured
           // `state` reference here would be pinned to whatever it was on first composition, not
           // the goRulesRiskResult DynamicVisitFormViewModel.onFinish just wrote moments ago.
-          routeAfterSubmit(viewModel.uiState.value, viewModel.beneficiaryId, onSubmittedNeedsEducation, onBack)
+          routeAfterSubmit(
+            viewModel.uiState.value,
+            viewModel.beneficiaryId,
+            onSubmittedNeedsEducation,
+            onSubmittedTriggersClosure,
+            onBack,
+          )
         }
         DynamicVisitFormEvent.QueuedOffline -> {
           Toast.makeText(context, queuedOffline, Toast.LENGTH_LONG).show()
-          routeAfterSubmit(viewModel.uiState.value, viewModel.beneficiaryId, onSubmittedNeedsEducation, onBack)
+          routeAfterSubmit(
+            viewModel.uiState.value,
+            viewModel.beneficiaryId,
+            onSubmittedNeedsEducation,
+            onSubmittedTriggersClosure,
+            onBack,
+          )
         }
         is DynamicVisitFormEvent.SubmitFailed ->
           Toast.makeText(context, event.message, Toast.LENGTH_LONG).show()
@@ -711,13 +739,26 @@ private fun FieldSummaryReviewRow(label: String, value: String) {
  * always-visible tab did, and — because the trigger check is on-device — appears identically
  * whether she's online or offline when she taps Submit.
  *
- * Still a standalone hand-built form (Date/Facility name+type/Referral type), NOT schema-driven
- * — intentionally separate from the ANC_VISIT schema's own "Referrals" section (a different set
- * of questions, already rendered as a Visit Data sub-tab).
+ * CR-Referral-01 Pass 6 (2026-08-31): genuinely schema-driven now — the fields rendered here are
+ * fetched live from `GET /forms/REFERRAL_VISIT/active-version`
+ * ([DynamicVisitFormViewModel.loadReferralFormIfNeeded]) and rendered through the same generic
+ * [org.armman.sakhi.ui.forms.DynamicFormField] every other form uses, honoring the schema's own
+ * `visibleWhen` branching via [org.armman.sakhi.data.forms.FormVisibilityEvaluator] instead of
+ * hand-coded `if` checks (Pass 5's approach — labels/options copied by hand into this composable
+ * — looked identical but silently went stale the moment the backend schema changed; a real device
+ * log confirmed exactly that gap, so this step never actually called the API before Pass 6).
+ * Still not the generic [org.armman.sakhi.ui.adhocform.AdHocFormScreen] though — this step is
+ * auto-triggered mid-visit, not opened as its own ad-hoc form (see
+ * [DynamicVisitFormUiState.showReferralCaptureStep]'s doc for why that whole screen wasn't
+ * reused), and intentionally still separate from the ANC_VISIT schema's own "Referrals" section (a
+ * different set of questions, already rendered as a Visit Data sub-tab).
  *
- * Facility capture is free-text name + a [FacilityType] enum, matching `POST /referrals`'s actual
- * contract exactly (backend-confirmed 2026-08-27) — there is no facility directory/search
- * endpoint, so this deliberately does NOT try to be a lookup field.
+ * Facility capture is free-text name + `place_of_referral` (the schema's dropdown, mapped by
+ * [DynamicVisitFormViewModel.referralCaptureOrNull] into `POST /referrals`'s `facilityType` — see
+ * [org.armman.sakhi.data.referral.ReferralCapture.facilityType]'s doc for why this is no longer
+ * the app's old [org.armman.sakhi.data.referral.FacilityType] enum, and
+ * [DynamicVisitFormViewModel.PLACE_OF_REFERRAL_TO_FACILITY_TYPE]'s doc for why the mapping is
+ * lossy rather than a raw passthrough).
  *
  * These fields are bundled into a [org.armman.sakhi.data.referral.ReferralCapture] by
  * [DynamicVisitFormViewModel.onFinish]'s second (post-capture) call and only ever become an
@@ -727,31 +768,17 @@ private fun FieldSummaryReviewRow(label: String, value: String) {
  * why the on-device result that gates this screen isn't treated as authoritative on its own.
  * [DynamicVisitFormViewModel.skipReferralCapture] clears these fields and submits anyway (her
  * judgement call, per the PRD, that no referral is actually needed); leaving them blank and
- * tapping Submit here has the identical effect.
+ * tapping Submit here has the identical effect — same as answering "not a new condition" or
+ * "beneficiary declined" partway through this step (see [DynamicVisitFormViewModel
+ * .referralCaptureOrNull]'s doc for why both of those branches also end with no referral).
  */
 @Composable
 private fun ReferralCaptureStep(state: DynamicVisitFormUiState, viewModel: DynamicVisitFormViewModel) {
-  val typeOptions = listOf(
-    stringResource(R.string.visit_form_referral_type_accompanied),
-    stringResource(R.string.visit_form_referral_type_standard),
-  )
-  val typeValues = listOf(ReferralType.ACCOMPANIED, ReferralType.STANDARD)
-  val facilityTypeOptions = listOf(
-    stringResource(R.string.visit_form_referral_facility_type_public),
-    stringResource(R.string.visit_form_referral_facility_type_private),
-    stringResource(R.string.visit_form_referral_facility_type_phc),
-    stringResource(R.string.visit_form_referral_facility_type_rh),
-    stringResource(R.string.visit_form_referral_facility_type_dh),
-    stringResource(R.string.visit_form_referral_facility_type_other),
-  )
-  val facilityTypeValues = listOf(
-    FacilityType.PUBLIC,
-    FacilityType.PRIVATE,
-    FacilityType.PHC,
-    FacilityType.RH,
-    FacilityType.DH,
-    FacilityType.OTHER,
-  )
+  // CR-Referral-01 Pass 6 (2026-08-31): genuinely schema-driven — every field below is rendered
+  // through the same generic DynamicFormField the ad-hoc forms use, off the schema this ViewModel
+  // fetched live from GET /forms/REFERRAL_VISIT/active-version (DynamicVisitFormViewModel
+  // .loadReferralFormIfNeeded). No hand-copied labels/options here anymore — see
+  // DynamicVisitFormUiState's doc for why Pass 5's hand-built approach was replaced.
   Column(modifier = Modifier.fillMaxSize()) {
     Column(
       verticalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
@@ -772,33 +799,36 @@ private fun ReferralCaptureStep(state: DynamicVisitFormUiState, viewModel: Dynam
         style = MaterialTheme.typography.bodyMedium,
         color = NeutralG200,
       )
-      AppDateField(
-        label = stringResource(R.string.visit_form_referral_date),
-        placeholder = "",
-        value = state.referralDate,
-        onDateSelected = viewModel::setReferralDate,
-        maxDate = viewModel.visitDate,
-      )
-      AppTextField(
-        label = stringResource(R.string.visit_form_referral_facility_name),
-        placeholder = "",
-        value = state.referralFacilityName.orEmpty(),
-        onValueChange = { viewModel.setReferralFacilityName(it) },
-      )
-      AppDropdownField(
-        label = stringResource(R.string.visit_form_referral_facility_type),
-        placeholder = "",
-        options = facilityTypeOptions,
-        selectedIndex = facilityTypeValues.indexOf(state.referralFacilityType).takeIf { it >= 0 },
-        onSelected = { index -> viewModel.setReferralFacilityType(facilityTypeValues.getOrNull(index)) },
-      )
-      AppRadioGroup(
-        label = stringResource(R.string.visit_form_referral_type),
-        options = typeOptions,
-        selectedIndex = typeValues.indexOf(state.referralType).takeIf { it >= 0 },
-        onSelected = { index -> viewModel.setReferralType(typeValues.getOrNull(index)) },
-        horizontal = true,
-      )
+      when {
+        state.referralFormLoading -> {
+          Box(modifier = Modifier.fillMaxWidth().padding(vertical = Dimens.ItemSpacing), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+          }
+        }
+        state.referralFormVersion == null -> {
+          Text(
+            text = stringResource(R.string.visit_form_error_load),
+            style = MaterialTheme.typography.bodyMedium,
+            color = NeutralG400,
+          )
+        }
+        else -> {
+          viewModel.visibleReferralFields().forEach { field ->
+            DynamicFormField(
+              field = field,
+              answers = state.referralAnswers,
+              registrationDate = viewModel.visitDate,
+              mediaCompleted = false,
+              capturedImageUri = null,
+              loadOptions = { viewModel.optionsFor(field) },
+              onSingleAnswer = { value -> viewModel.setReferralAnswer(field.questionCode, value) },
+              onMultiAnswer = {}, // REFERRAL_VISIT's schema has no multiselect fields.
+              onPlayMedia = {}, // ...nor any media/audio fields.
+              onCaptureImage = {}, // ...nor any image-capture fields.
+            )
+          }
+        }
+      }
     }
     HorizontalDivider(color = NeutralG50)
     Row(
@@ -911,19 +941,45 @@ private fun DynamicVisitFormFieldList(
   }
 }
 
-/** CR-M3-06: decides whether a just-completed submit routes into the Health Education screen —
- * true when [DynamicVisitFormUiState.goRulesRiskResult] (set to the final, authoritative grading
- * by [DynamicVisitFormViewModel.onFinish] right before this event fires) has at least one
- * `isEducationTrigger` condition. [state.formCode] decides MOTHER vs CHILD the same way
- * [DynamicVisitFormViewModel.evaluateGoRulesRisk] branches. Falls back to [onBack] whenever there
- * is nothing to show — no triggered condition, or no result at all (e.g. a form code with no risk
- * pack, like POSTPARTUM_VISIT). */
+/** CR-M3-06 (Health Education) + CR-Closure-03 (PP5 forced closure): decides where a
+ * just-completed submit routes to. [DynamicVisitFormUiState.triggersClosurePrompt] is checked
+ * FIRST and wins outright when true — the SRS's PP5-closure trigger is not conditional on risk
+ * grading, and in practice POSTPARTUM_VISIT has no risk-grading pack at all yet (see
+ * `docs/context/delivery-log.md`'s CR-M3-05 notes), so the two paths never actually compete on a
+ * real submission; the ordering just makes that non-competition explicit rather than accidental.
+ * Otherwise, routes into Health Education when [DynamicVisitFormUiState.goRulesRiskResult] (set to
+ * the final, authoritative grading by [DynamicVisitFormViewModel.onFinish] right before this event
+ * fires) has at least one `isEducationTrigger` condition. [state.formCode] decides MOTHER vs CHILD
+ * the same way [DynamicVisitFormViewModel.evaluateGoRulesRisk] branches. Falls back to [onBack]
+ * whenever there is nothing to show — no triggered condition, or no result at all. */
 private fun routeAfterSubmit(
   state: DynamicVisitFormUiState,
   beneficiaryId: String,
   onSubmittedNeedsEducation: (String, List<String>) -> Unit,
+  onSubmittedTriggersClosure: (String, Boolean) -> Unit,
   onBack: () -> Unit,
 ) {
+  if (state.triggersClosurePrompt) {
+    onSubmittedTriggersClosure(beneficiaryId, false)
+    return
+  }
+  // CR-Closure-01 items #5/#6: checked ahead of the education-routing fallback below, not folded
+  // into it — the SRS's CCV-boundary routing (closure prompt OR HR extension) is not conditional
+  // on risk grading either, same non-competition rationale triggersClosurePrompt's own doc above
+  // gives for PP5. A coincidental isEducationTrigger flag on this same submission must not divert
+  // either branch into Health Education instead.
+  if (state.triggersChildClosurePrompt) {
+    onSubmittedTriggersClosure(beneficiaryId, true)
+    return
+  }
+  if (state.ccvHrExtensionWindow != null) {
+    // HR detected at the last CCV visit: the extension window was already surfaced to the Sakhi
+    // via a Toast in this screen's own event handler (see the Submitted branch above) before this
+    // function was called — nothing left to route into, since the extension itself isn't a form
+    // to fill this session (no persisted schedule row for it yet, see that field's own doc).
+    onBack()
+    return
+  }
   val formCode = state.formCode
   val conditionMap = if (formCode == FORM_CODE_MOTHER) {
     org.armman.sakhi.data.rules.RiskConditionIds.ANC

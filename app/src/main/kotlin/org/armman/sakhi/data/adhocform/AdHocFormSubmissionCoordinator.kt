@@ -7,14 +7,24 @@ import org.armman.sakhi.data.beneficiary.LocalBeneficiaryStatusOverrideStore
 import org.armman.sakhi.data.closure.ClosureRepository
 import org.armman.sakhi.data.closure.ClosureSubmissionException
 import org.armman.sakhi.data.enrollment.ApiErrorParser
+import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.CreateSubmissionRequestDto
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormDateRuleset
 import org.armman.sakhi.data.forms.FormSubmissionApi
 import org.armman.sakhi.data.forms.SubmitErrorCopy
 import org.armman.sakhi.data.lookup.LookupRepository
+import org.armman.sakhi.data.referral.ReferralEvidenceDao
+import org.armman.sakhi.data.referral.ReferralLinkDao
+import org.armman.sakhi.data.referral.ReferralEvidenceMediaEntity
+import org.armman.sakhi.data.referral.ReferralEvidenceSyncScheduler
+import org.armman.sakhi.data.referral.ReferralEvidenceType
+import org.armman.sakhi.data.referral.ReferralRepository
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
+import java.io.File
+import java.time.Instant
 import java.time.LocalDate
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -69,6 +79,24 @@ sealed class AdHocFormSubmissionException(message: String) : Exception(message) 
       get() = SubmitErrorCopy.forApiError(apiMessage, emptyMap(), violations)
   }
 
+  /** [ReferralRepository.submitFollowUp] failed for a `REFERRAL_FOLLOWUP_VISIT` submission — the
+   * generic form-answer submission above still went through, but the referral-status-transition
+   * `POST /referrals/{referralId}/follow-up` call did not. Kept as its own case for the same
+   * reason [ClosureSubmissionFailed] is. */
+  data class ReferralFollowUpSubmissionFailed(val apiMessage: String) :
+    AdHocFormSubmissionException("POST /referrals/{referralId}/follow-up failed: $apiMessage") {
+    override val userMessage: String get() = apiMessage
+  }
+
+  /** [submit] was called for `REFERRAL_FOLLOWUP_VISIT` with a null [referralId] — the caller
+   * (ultimately [org.armman.sakhi.ui.adhocform.AdHocFormViewModel]'s nav arg, persisted on
+   * [org.armman.sakhi.data.adhocform.AdHocFormDraftEntity.referralId]) must always supply one for
+   * this form code; every entry point does today (the profile screen only ever opens this form
+   * from a referral-incomplete visit, which always carries a referralId). Defensive only. */
+  data object ReferralIdMissing : AdHocFormSubmissionException(
+    "REFERRAL_FOLLOWUP_VISIT submitted with no referralId",
+  )
+
   /** The loaded `closure_reason` answer is a `value_code` string (e.g. `"MIGRATION"`) that could
    * not be resolved to a `CLOSURE_REASON` lookup value id — either the field was left unanswered
    * (should never happen given [isReadyToSubmit]'s required-field gate) or the `CLOSURE_REASON`
@@ -114,6 +142,10 @@ class AdHocFormSubmissionCoordinator @Inject constructor(
   private val closureRepository: ClosureRepository,
   private val lookupRepository: LookupRepository,
   private val statusOverrideStore: LocalBeneficiaryStatusOverrideStore,
+  private val referralRepository: ReferralRepository,
+  private val referralEvidenceDao: ReferralEvidenceDao,
+  private val referralEvidenceSyncScheduler: ReferralEvidenceSyncScheduler,
+  private val referralLinkDao: ReferralLinkDao,
 ) {
 
   /** Returns the server-assigned submission id on success. [formAuditRepository.recordSubmitted]
@@ -126,6 +158,12 @@ class AdHocFormSubmissionCoordinator @Inject constructor(
     formCode: String,
     formVersionId: String,
     answers: FormAnswers,
+    referralId: String? = null,
+    /** REFERRAL_FOLLOWUP_VISIT only — question_code -> absolute on-disk file path for every
+     * captured `image` field, as recorded by [org.armman.sakhi.ui.adhocform.AdHocFormScreen] at
+     * capture time (this coordinator has no UI `Context` to resolve a `content://` URI itself —
+     * see [queueReferralFollowUpEvidence]'s doc). Empty for every other ad-hoc form. */
+    capturedImagePaths: Map<String, String> = emptyMap(),
   ): Result<String> = runCatching {
     sessionStore.readSession() ?: throw AdHocFormSubmissionException.NoActiveSession
 
@@ -180,7 +218,143 @@ class AdHocFormSubmissionCoordinator @Inject constructor(
       )
     }
 
+    // CR-Referral-01/02: Referral Follow-up switched from a bespoke screen driving
+    // POST /referrals/{referralId}/follow-up directly to this schema-driven ad-hoc form — the
+    // status-transition call now runs as a paired side effect here, same shape as submitClosure()
+    // above. Evidence photos (case_paper_photo/further_investigation_photo, native `image`
+    // fields) are queued for upload separately, keyed by this submission's own id.
+    if (formCode == FORM_CODE_REFERRAL_FOLLOWUP) {
+      submitReferralFollowUp(referralId ?: throw AdHocFormSubmissionException.ReferralIdMissing, answers)
+      queueReferralFollowUpEvidence(referralId, submissionData.id, answers, capturedImagePaths)
+    }
+
     submissionData.id
+  }
+
+  /**
+   * Maps the dynamic Referral Follow-up form's own answers to `POST /referrals/{referralId}/follow-up`'s
+   * body and submits it — the call that actually moves [org.armman.sakhi.data.referral.ReferralStatus]
+   * (COMPLETED when the beneficiary visited, unchanged/PENDING_FOLLOWUP otherwise; see
+   * [org.armman.sakhi.data.referral.ReferralRepository.submitFollowUp]'s doc). Runs after the
+   * generic form-answer submission already succeeded (see [submit]).
+   *
+   * The DTO's free-text [org.armman.sakhi.data.referral.SubmitReferralFollowUpRequestDto.diagnosis]/
+   * `treatmentGiven`/`outcome` fields don't map 1:1 onto this schema's categorical
+   * `diagnosis_confirmed`/`treatment_given`/`treatment_type`/`clinical_status_now`/
+   * `referral_final_outcome` questions — by product decision, this concatenates the selected
+   * option labels into readable free text (rather than leaving them null) so the referral record
+   * itself carries a human-readable summary, not just the generic submission's raw `formData`.
+   */
+  private suspend fun submitReferralFollowUp(referralId: String, answers: FormAnswers) {
+    val visited = answers.valueOf(QUESTION_CODE_VISITED_HEALTH_FACILITY) == VALUE_YES
+    val followupDate = answers.valueOf(FormDateRuleset.FOLLOWUP_FORM_FILLED_DATE_QUESTION_CODE)
+      ?: LocalDate.now().toString()
+
+    val notVisitedReason = answers.valueOf(QUESTION_CODE_NOT_VISITED_REASON)
+      ?.let { NOT_VISITED_REASON_LABELS[it] ?: it }
+
+    val diagnosis = if (visited) {
+      val confirmed = answers.valueOf(QUESTION_CODE_DIAGNOSIS_CONFIRMED)?.let { yesNoLabel(it) }
+      val clinicalStatus = answers.valueOf(QUESTION_CODE_CLINICAL_STATUS_NOW)
+        ?.let { CLINICAL_STATUS_LABELS[it] ?: it }
+      listOfNotNull(
+        confirmed?.let { "Diagnosis confirmed: $it" },
+        clinicalStatus?.let { "Clinical status: $it" },
+      ).joinToString("; ").ifBlank { null }
+    } else {
+      null
+    }
+
+    val treatmentGiven = if (visited) {
+      val given = answers.valueOf(QUESTION_CODE_TREATMENT_GIVEN)?.let { yesNoLabel(it) }
+      val types = answers.multiValueOf(QUESTION_CODE_TREATMENT_TYPE)
+        .map { TREATMENT_TYPE_LABELS[it] ?: it }
+      listOfNotNull(
+        given?.let { "Treatment given: $it" },
+        types.takeIf { it.isNotEmpty() }?.let { "Type: " + it.joinToString(", ") },
+      ).joinToString("; ").ifBlank { null }
+    } else {
+      null
+    }
+
+    val outcome = answers.valueOf(QUESTION_CODE_REFERRAL_FINAL_OUTCOME)
+      ?.let { REFERRAL_OUTCOME_LABELS[it] ?: it }
+
+    val result = referralRepository.submitFollowUp(
+      referralId = referralId,
+      visitedFacilityFlag = visited,
+      followupDate = LocalDate.parse(followupDate),
+      notVisitedReason = notVisitedReason,
+      diagnosis = diagnosis,
+      treatmentGiven = treatmentGiven,
+      outcome = outcome,
+    )
+    result.onFailure { error ->
+      throw AdHocFormSubmissionException.ReferralFollowUpSubmissionFailed(
+        error.message ?: "unknown error",
+      )
+    }
+    result.onSuccess { followUpResult ->
+      // Mirror the referral's new status into the local ReferralLinkEntity cache immediately —
+      // same fix the retired bespoke screen's submit() applied, now keyed by referralId (the
+      // ad-hoc form route has no localScheduleUuid to look this row up by — see
+      // ReferralLinkDao.getByReferralId's doc). Without this, BeneficiaryProfileScreen keeps
+      // showing "Referral Followup Incomplete" until the next full server reconcile, even though
+      // the backend already moved the referral to COMPLETED.
+      referralLinkDao.getByReferralId(referralId)?.let { existing ->
+        referralLinkDao.upsert(existing.copy(status = followUpResult.referral.status.name))
+      }
+    }
+  }
+
+  private fun yesNoLabel(valueCode: String): String = if (valueCode == VALUE_YES) "Yes" else "No"
+
+  /**
+   * Queues [QUESTION_CODE_CASE_PAPER_PHOTO]/[QUESTION_CODE_FURTHER_INVESTIGATION_PHOTO] (if
+   * captured) for the existing offline-safe evidence-upload queue
+   * ([org.armman.sakhi.data.referral.ReferralEvidenceSyncExecutor]), keyed by [submissionId]
+   * rather than a `followupId` — unlike the retired bespoke screen's capture-then-stamp two-phase
+   * flow, [submissionId] is already known here, so every row is inserted already eligible for
+   * upload (see [ReferralEvidenceMediaEntity.submissionId]'s doc). Best-effort: a queuing failure
+   * here must never fail the follow-up submission itself, which has already succeeded — mirrors
+   * [org.armman.sakhi.data.referral.ReferralEvidenceSyncExecutor]'s own "never a hard user-facing
+   * error" rule for the upload step itself.
+   *
+   * [capturedImagePaths] carries the real on-disk file path per question code (see [submit]'s own
+   * doc) — this coordinator never resolves a `content://` URI itself, keeping it Context-free and
+   * unit-testable, same as every other coordinator/executor in this app.
+   */
+  private suspend fun queueReferralFollowUpEvidence(
+    referralId: String,
+    submissionId: String,
+    answers: FormAnswers,
+    capturedImagePaths: Map<String, String>,
+  ) {
+    for ((questionCode, evidenceType) in EVIDENCE_QUESTION_CODES) {
+      if (answers.valueOf(questionCode).isNullOrBlank()) continue
+      val filePath = capturedImagePaths[questionCode] ?: continue
+      val file = File(filePath)
+      if (!file.exists()) continue
+      runCatching {
+        referralEvidenceDao.upsert(
+          ReferralEvidenceMediaEntity(
+            localMediaUuid = UUID.randomUUID().toString(),
+            referralId = referralId,
+            evidenceType = evidenceType.name,
+            localFilePath = file.absolutePath,
+            syncStatus = EnrollmentSyncStatus.PENDING,
+            createdAtEpochMillis = Instant.now().toEpochMilli(),
+            lastAttemptAtEpochMillis = null,
+            retryCount = 0,
+            followupId = null,
+            submissionId = submissionId,
+            remoteMediaId = null,
+            lastErrorMessage = null,
+          ),
+        )
+      }
+    }
+    referralEvidenceSyncScheduler.syncNow()
   }
 
   /**
@@ -213,6 +387,15 @@ class AdHocFormSubmissionCoordinator @Inject constructor(
       ?: throw AdHocFormSubmissionException.NoActiveSession
 
     try {
+      // 2026-08-31: supervisorStatus/supervisorId/supervisorNotes are NOT sent -- backend
+      // confirmed these are deliberately excluded from create-closure.dto.ts (a client-settable
+      // supervisorStatus would let a SAKHI bypass supervisor review) and are always server-derived
+      // now. Backend also described a new Migration-only PENDING-until-approved gate that isn't
+      // in the SRS form spec (both Closure forms say every reason, Migration included, closes
+      // IMMEDIATELY on submit -- only Reopen's form spec has a supervisor-approval step). That
+      // conflict is flagged back to backend/product, unresolved -- this client still marks CLOSED
+      // + lapses visits immediately for every reason below, matching the SRS as documented, not
+      // backend's new server-side behavior. See ClosureRequestDto's doc for the full history.
       closureRepository.submitClosure(
         localClosureUuid = localClosureUuid,
         beneficiaryId = serverBeneficiaryId,
@@ -221,12 +404,6 @@ class AdHocFormSubmissionCoordinator @Inject constructor(
         eventDate = eventDate,
         closureDate = closureDate,
         submittedByUserId = submittedByUserId,
-        // Judgment call — flagged for product sanity-check: only a MIGRATION-reason closure is
-        // supervisor-reviewed before it takes effect (per the backend contract's own note); every
-        // other reason closes immediately, so supervisorStatus stays unset for those.
-        supervisorStatus = if (backendReasonCode == CLOSURE_REASON_MIGRATION) SUPERVISOR_STATUS_PENDING else null,
-        supervisorId = null,
-        supervisorNotes = null,
       )
     } catch (e: ClosureSubmissionException.Failed) {
       throw AdHocFormSubmissionException.ClosureSubmissionFailed(
@@ -239,6 +416,20 @@ class AdHocFormSubmissionCoordinator @Inject constructor(
     }
 
     statusOverrideStore.setStatus(localBeneficiaryId, BeneficiaryStatus.CLOSED)
+    // CR-Closure-02: recorded so the Reopen eligibility gate (BeneficiaryProfileViewModel) can
+    // tell a death/miscarriage/abortion closure apart from a migration/mistake one -- see
+    // LocalBeneficiaryStatusOverrideStore.setClosureReason's doc for the "only this device knows"
+    // caveat.
+    statusOverrideStore.setClosureReason(localBeneficiaryId, backendReasonCode)
+
+    // CR-Closure-01 items #3/#7: every remaining open visit stops being actionable once this
+    // beneficiary is closed -- fires unconditionally, including for a MIGRATION-reason closure
+    // still awaiting Supervisor review (supervisorStatus PENDING above), same "write optimistically"
+    // treatment the CLOSED status override itself already gets a few lines up. Best-effort: a
+    // lapse-sweep failure must not undo an already-successful closure submission -- the visits
+    // would just stay open a little longer than intended, recoverable on a later profile load
+    // rather than something worth failing this whole submit() call over.
+    runCatching { visitScheduleRepository.lapseAllOpenVisits(localBeneficiaryId) }
   }
 
   /**
@@ -281,6 +472,74 @@ class AdHocFormSubmissionCoordinator @Inject constructor(
   private companion object {
     const val FORM_CODE_ANC_CLOSURE = "ANC_CLOSURE_VISIT"
     const val FORM_CODE_CHILD_CLOSURE = "CHILD_CLOSURE_VISIT"
+    const val FORM_CODE_REFERRAL_FOLLOWUP = "REFERRAL_FOLLOWUP_VISIT"
+
+    // Referral Follow-up (REFERRAL_FOLLOWUP_VISIT) question codes — confirmed against a live
+    // GET /forms/REFERRAL_FOLLOWUP_VISIT/active-version payload, 2026-08-31 (formDefinitionId
+    // 9da3e972-62f1-4c12-bca5-1c39b8b72ad3). Kept file-local rather than shared constants, same
+    // convention QUESTION_CODE_CLOSURE_REASON above already follows.
+    const val QUESTION_CODE_VISITED_HEALTH_FACILITY = "visited_health_facility"
+    const val QUESTION_CODE_NOT_VISITED_REASON = "not_visited_reason"
+    const val QUESTION_CODE_DIAGNOSIS_CONFIRMED = "diagnosis_confirmed"
+    const val QUESTION_CODE_TREATMENT_GIVEN = "treatment_given"
+    const val QUESTION_CODE_TREATMENT_TYPE = "treatment_type"
+    const val QUESTION_CODE_CLINICAL_STATUS_NOW = "clinical_status_now"
+    const val QUESTION_CODE_REFERRAL_FINAL_OUTCOME = "referral_final_outcome"
+    const val QUESTION_CODE_CASE_PAPER_PHOTO = "case_paper_photo"
+    const val QUESTION_CODE_FURTHER_INVESTIGATION_PHOTO = "further_investigation_photo"
+    const val VALUE_YES = "yes"
+
+    // question_code -> ReferralEvidenceType this evidence file is finalized as. case_paper_photo
+    // bundles case paper/discharge summary/health facility/Sakhi photo into ONE schema field
+    // (confirmed 2026-08-31 backend scope decision — see this app's CR-Referral-02 docs), so it
+    // maps to the closest single existing assetType rather than the 4-way split the retired
+    // bespoke screen offered; further_investigation_photo maps 1:1 to its own type.
+    val EVIDENCE_QUESTION_CODES: Map<String, org.armman.sakhi.data.referral.ReferralEvidenceType> = mapOf(
+      QUESTION_CODE_CASE_PAPER_PHOTO to org.armman.sakhi.data.referral.ReferralEvidenceType.REFERRAL_CASE_PAPER,
+      QUESTION_CODE_FURTHER_INVESTIGATION_PHOTO to org.armman.sakhi.data.referral.ReferralEvidenceType.REFERRAL_INVESTIGATION_REPORT,
+    )
+
+    // value_code -> readable label, transcribed from the schema's own `options[].label` — see
+    // submitReferralFollowUp's doc for why these are concatenated into the follow-up DTO's
+    // free-text fields rather than left null.
+    val NOT_VISITED_REASON_LABELS: Map<String, String> = mapOf(
+      "condition_not_serious_enough" to "Belief that the condition is not serious enough to require referral",
+      "family_opposition" to "Family opposition to visit health facility",
+      "cost_of_transportation" to "Cost of transportation to the facility",
+      "fear_of_procedures_and_cost" to "Fear of unnecessary procedures and cost of treatment",
+      "preference_for_home_remedies" to "Preference for home remedies or traditional healers",
+      "cultural_norms_restricting_mobility" to "Cultural norms restricting women's mobility",
+      "woman_migrating" to "Woman migrating",
+      "other" to "Other",
+    )
+    val REFERRAL_OUTCOME_LABELS: Map<String, String> = mapOf(
+      "ipd_still_hospitalized" to "IPD: Still Hospitalized for management",
+      "ipd_delivered" to "IPD: Delivered",
+      "ipd_discharged_with_management" to "IPD: Discharged with management",
+      "opd_given_medications" to "OPD and given medications",
+      "further_referral_advised" to "Further referral advised",
+      "addressed_no_high_risk_sent_back" to "Addressed as no high risk and sent back",
+      "health_center_closed" to "Health center closed",
+      "no_staff_available" to "No staff available at the health centre",
+    )
+    val TREATMENT_TYPE_LABELS: Map<String, String> = mapOf(
+      "injection" to "Injection",
+      "tablet" to "Tablet",
+      "iron_sucrose_injection" to "Iron sucrose injection",
+      "saline_injection" to "Saline injection",
+      "syrup" to "Syrup",
+      "blood_transfusion" to "Blood transfusion",
+      "supplementary_feeding_mother" to "Supplementary feeding to the Mother (shatavari/protein/multivitamin etc.)",
+      "supplementary_feeding_child" to "Supplementary feeding to the Child (formula milk, etc.)",
+      "further_investigations_advised" to "Further investigations advised",
+      "other" to "Other",
+    )
+    val CLINICAL_STATUS_LABELS: Map<String, String> = mapOf(
+      "resolved" to "Resolved",
+      "improving" to "Improving",
+      "same" to "Same",
+      "worsened" to "Worsened",
+    )
 
     // closure_visit_date/date_of_event reuse FormDateRuleset's own constants rather than
     // duplicating the literals here. closure_reason has no existing shared constant (nothing else
@@ -290,7 +549,6 @@ class AdHocFormSubmissionCoordinator @Inject constructor(
     const val QUESTION_CODE_CLOSURE_REASON = "closure_reason"
 
     const val LOOKUP_CATEGORY_CLOSURE_REASON = "CLOSURE_REASON"
-    const val CLOSURE_REASON_MIGRATION = "MIGRATION"
 
     // closure_reason value_code (snake_case, off the form schema) -> CLOSURE_REASON lookup
     // category valueCode (SCREAMING_CASE, off the backend) — confirmed against both closure
@@ -317,7 +575,5 @@ class AdHocFormSubmissionCoordinator @Inject constructor(
     const val CLOSURE_TYPE_MEDICAL = "MEDICAL"
     const val CLOSURE_TYPE_NON_MEDICAL = "NON_MEDICAL"
     const val CLOSURE_TYPE_PROGRAM_COMPLETION = "PROGRAM_COMPLETION"
-
-    const val SUPERVISOR_STATUS_PENDING = "PENDING"
   }
 }

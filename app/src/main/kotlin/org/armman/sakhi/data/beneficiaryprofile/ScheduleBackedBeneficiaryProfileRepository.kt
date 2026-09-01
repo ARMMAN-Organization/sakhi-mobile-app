@@ -144,6 +144,7 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
     // suspend caller (getBeneficiary) and passed straight through — see the call site's comment.
     diagnoses = diagnoses,
     registrationDate = registrationDate,
+    closureReasonCode = closureReasonCode,
   )
 
   private val Beneficiary.dobQuestionCode: String

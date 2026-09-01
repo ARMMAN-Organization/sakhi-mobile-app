@@ -3,15 +3,23 @@ package org.armman.sakhi.data.referral
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.enrollment.ApiErrorParser
 import org.armman.sakhi.data.lookup.LookupRepository
+import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
+import javax.inject.Named
 import javax.inject.Singleton
 
 private const val KEY_REFERRAL_FOLLOWUP_CACHE = "referral_pending_followup_cache"
@@ -33,6 +41,8 @@ private data class CachedReferralFollowUp(
   val status: String,
 )
 
+private const val EVIDENCE_MIME_TYPE = "image/jpeg"
+
 /**
  * Real [ReferralRepository] backed by `GET /sakhi/{sakhiId}/referrals/pending-followup`,
  * `POST /referrals`, `POST /referrals/{id}/follow-up`, and `PATCH /referrals/{id}/convert`. Same
@@ -47,6 +57,9 @@ class RemoteReferralRepository @Inject constructor(
   private val sessionStore: SessionStore,
   private val store: SecureKeyValueStore,
   private val lookupRepository: LookupRepository,
+  /** Unauthenticated client for the S3 PUT hop — see [org.armman.sakhi.di.NetworkModule
+   * .provideRawOkHttp]'s doc for why this must not carry this app's Bearer token. */
+  @Named("rawHttpClient") private val rawHttpClient: OkHttpClient,
 ) : ReferralRepository {
 
   private val gson = Gson()
@@ -86,7 +99,7 @@ class RemoteReferralRepository @Inject constructor(
       referralTypeLookupValueId = referralTypeLookupValueId,
       referralDate = capture.referralDate.format(DateTimeFormatter.ISO_LOCAL_DATE),
       status = STATUS_PENDING_FOLLOWUP,
-      facilityType = capture.facilityType.name,
+      facilityType = capture.facilityType,
       facilityName = capture.facilityName,
       triggerConditionListJson = triggeringConditionIds,
     )
@@ -165,6 +178,70 @@ class RemoteReferralRepository @Inject constructor(
     val data = response.body()?.data
       ?: throw IllegalStateException("Convert succeeded but returned no referral data")
     data.toDomain()
+  }
+
+  /** See [ReferralRepository.uploadEvidence]'s doc — the real, backend-confirmed 3-step
+   * presigned-URL flow (2026-08-31). [file] is read from disk on the caller's dispatcher (this is
+   * invoked from [ReferralEvidenceSyncExecutor], never directly from a UI thread). */
+  override suspend fun uploadEvidence(
+    referralId: String,
+    followupId: String?,
+    evidenceType: ReferralEvidenceType,
+    file: File,
+    submissionId: String?,
+  ): Result<String> = runCatching {
+    val sizeBytes = file.length()
+
+    // Step 1 — request a presigned upload URL.
+    val uploadUrlResponse = referralApi.requestMediaUploadUrl(
+      RequestMediaUploadUrlDto(
+        assetType = evidenceType.name,
+        mimeType = EVIDENCE_MIME_TYPE,
+        sizeBytes = sizeBytes,
+      ),
+    )
+    if (!uploadUrlResponse.isSuccessful) {
+      val apiError = ApiErrorParser.parse(uploadUrlResponse.errorBody()?.string())
+      throw IllegalStateException(apiError.message ?: "POST /media/upload-url failed: HTTP ${uploadUrlResponse.code()}")
+    }
+    val uploadUrlData = uploadUrlResponse.body()?.data
+      ?: throw IllegalStateException("POST /media/upload-url succeeded but returned no data")
+    val uploadUrl = uploadUrlData.uploadUrl
+      ?: throw IllegalStateException("POST /media/upload-url succeeded but returned no uploadUrl")
+    val s3Key = uploadUrlData.s3Key
+      ?: throw IllegalStateException("POST /media/upload-url succeeded but returned no s3Key")
+
+    // Step 2 — raw PUT of the file bytes straight to S3. Uses rawHttpClient (no Bearer token,
+    // no Retrofit) since this URL is a third-party AWS host, not the API gateway.
+    withContext(Dispatchers.IO) {
+      val body = file.asRequestBody(EVIDENCE_MIME_TYPE.toMediaTypeOrNull())
+      val putRequest = Request.Builder().url(uploadUrl).put(body).build()
+      rawHttpClient.newCall(putRequest).execute().use { s3Response ->
+        if (!s3Response.isSuccessful) {
+          throw IllegalStateException("S3 upload failed: HTTP ${s3Response.code}")
+        }
+      }
+    }
+
+    // Step 3 — finalize: register the now-uploaded object as a real media asset, linked to this
+    // referral/follow-up.
+    val finalizeResponse = referralApi.finalizeMedia(
+      FinalizeMediaRequestDto(
+        assetType = evidenceType.name,
+        s3Key = s3Key,
+        expectedSizeBytes = sizeBytes,
+        referralId = referralId,
+        followupId = followupId,
+        submissionId = submissionId,
+      ),
+    )
+    if (!finalizeResponse.isSuccessful) {
+      val apiError = ApiErrorParser.parse(finalizeResponse.errorBody()?.string())
+      throw IllegalStateException(apiError.message ?: "POST /media failed: HTTP ${finalizeResponse.code()}")
+    }
+    val mediaData = finalizeResponse.body()?.data
+      ?: throw IllegalStateException("POST /media succeeded but returned no data")
+    mediaData.id ?: throw IllegalStateException("POST /media succeeded but returned no media id")
   }
 
   private fun ReferralDataDto.toDomain() = Referral(

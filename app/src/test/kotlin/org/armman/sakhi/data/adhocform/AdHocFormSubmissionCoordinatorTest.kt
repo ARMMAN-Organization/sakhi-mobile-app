@@ -17,15 +17,20 @@ import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.SubmissionResponseData
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.armman.sakhi.data.lookup.LookupValue
+import org.armman.sakhi.data.referral.FakeReferralEvidenceDao
+import org.armman.sakhi.data.referral.FakeReferralLinkDao
+import org.armman.sakhi.data.referral.FakeReferralEvidenceSyncScheduler
 import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
 import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
 import org.armman.sakhi.data.schedule.schedule
+import org.armman.sakhi.data.visitform.FakeReferralRepository
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import retrofit2.Response
+import java.time.LocalDate
 
 /**
  * Covers [AdHocFormSubmissionCoordinator] — the ad-hoc-form twin of
@@ -42,6 +47,10 @@ class AdHocFormSubmissionCoordinatorTest {
   private lateinit var closureRepository: FakeClosureRepository
   private lateinit var lookupRepository: FakeLookupRepository
   private lateinit var statusOverrideStore: LocalBeneficiaryStatusOverrideStore
+  private lateinit var referralRepository: FakeReferralRepository
+  private lateinit var referralEvidenceDao: FakeReferralEvidenceDao
+  private lateinit var referralEvidenceSyncScheduler: FakeReferralEvidenceSyncScheduler
+  private lateinit var referralLinkDao: FakeReferralLinkDao
   private lateinit var coordinator: AdHocFormSubmissionCoordinator
 
   private val session = UserSession(
@@ -79,6 +88,10 @@ class AdHocFormSubmissionCoordinatorTest {
       ),
     )
     statusOverrideStore = LocalBeneficiaryStatusOverrideStore(FakeSecureKeyValueStore())
+    referralRepository = FakeReferralRepository()
+    referralEvidenceDao = FakeReferralEvidenceDao()
+    referralEvidenceSyncScheduler = FakeReferralEvidenceSyncScheduler()
+    referralLinkDao = FakeReferralLinkDao()
     coordinator = AdHocFormSubmissionCoordinator(
       formSubmissionApi = formSubmissionApi,
       visitScheduleRepository = scheduleRepository,
@@ -87,6 +100,10 @@ class AdHocFormSubmissionCoordinatorTest {
       closureRepository = closureRepository,
       lookupRepository = lookupRepository,
       statusOverrideStore = statusOverrideStore,
+      referralRepository = referralRepository,
+      referralEvidenceDao = referralEvidenceDao,
+      referralEvidenceSyncScheduler = referralEvidenceSyncScheduler,
+      referralLinkDao = referralLinkDao,
     )
   }
 
@@ -214,8 +231,59 @@ class AdHocFormSubmissionCoordinatorTest {
     assertEquals("NON_MEDICAL", recorded.closureType)
     assertEquals("lookup-closure-migration", recorded.closureReasonLookupValueId)
     assertEquals("sakhi-uuid-1", recorded.submittedByUserId)
-    assertEquals("PENDING", recorded.supervisorStatus)
+    // 2026-08-31: supervisorStatus/supervisorId/supervisorNotes are no longer sent at all --
+    // backend confirmed these are deliberately excluded from create-closure.dto.ts (a client that
+    // could set supervisorStatus directly could bypass supervisor review). RecordedClosure no
+    // longer has these fields. Backend separately described a new Migration-only PENDING gate
+    // that isn't in the SRS form spec (both Closure forms say every reason, Migration included,
+    // closes immediately) -- flagged back to backend/product, unresolved. This test still asserts
+    // immediate CLOSED, matching the SRS as documented.
     assertEquals(BeneficiaryStatus.CLOSED, statusOverrideStore.getStatus("ben-1"))
+    // CR-Closure-02: the closure reason is persisted alongside the status so the Reopen
+    // eligibility gate can read it back later.
+    assertEquals("MIGRATION", statusOverrideStore.getClosureReason("ben-1"))
+  }
+
+  @Test
+  fun `closure submission lapses every remaining open visit for the beneficiary`() = runTest {
+    seedSyncedBeneficiary()
+    // A second, still-open visit for the same beneficiary, of a different visit type than the
+    // one seedSyncedBeneficiary() itself creates -- CR-Closure-01 items #3/#7 must lapse EVERY
+    // open visit type, not just the ANC family lapseOpenAncVisits already covers.
+    scheduleRepository.saveGenerated(
+      listOf(
+        org.armman.sakhi.data.schedule.schedule(
+          "schedule-pp1-ben-1",
+          localBeneficiaryId = "ben-1",
+          visitCode = "PP1",
+          visitType = org.armman.sakhi.data.schedule.VisitCodeType.PP,
+          serverBeneficiaryId = "server-ben-1",
+        ),
+      ),
+    )
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    submitClosure(closureAnswers = FormAnswers(singleValues = mapOf("closure_reason" to "migration")))
+
+    val allRows = scheduleRepository.getForBeneficiary("ben-1")
+    assertTrue(allRows.all { it.status == org.armman.sakhi.data.schedule.VisitScheduleStatus.CANCELLED })
+    assertTrue(allRows.all { it.reasonCode == "LAPSED_ON_CLOSURE" })
+  }
+
+  @Test
+  fun `a failed closure submission does not lapse any visits`() = runTest {
+    seedSyncedBeneficiary()
+    closureRepository.exceptionToThrow = org.armman.sakhi.data.closure.ClosureSubmissionException.Failed(
+      httpCode = 422,
+      apiMessage = "rejected",
+      violations = emptyList(),
+    )
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    submitClosure(closureAnswers = FormAnswers(singleValues = mapOf("closure_reason" to "migration")))
+
+    val row = scheduleRepository.getForBeneficiary("ben-1").single()
+    assertEquals(org.armman.sakhi.data.schedule.VisitScheduleStatus.GENERATED, row.status)
   }
 
   @Test
@@ -279,5 +347,205 @@ class AdHocFormSubmissionCoordinatorTest {
     assertEquals("CHILD_CLOSURE_VISIT", exception.formCode)
     assertEquals("maternal_death", exception.rawValueCode)
     assertTrue(closureRepository.recordedClosures.isEmpty())
+  }
+
+  // --- REFERRAL_FOLLOWUP_VISIT (CR-Referral-01/02: switched from the bespoke screen to this
+  // ad-hoc form pipeline) ---
+
+  private fun successfulFollowUpResult() = Result.success(
+    org.armman.sakhi.data.referral.ReferralFollowUpResult(
+      followUp = org.armman.sakhi.data.referral.ReferralFollowUpSubmission(
+        id = "followup-1",
+        referralId = "referral-1",
+        visitedFacilityFlag = true,
+        notVisitedReason = null,
+        diagnosis = null,
+        treatmentGiven = null,
+        outcome = null,
+        followupStatus = org.armman.sakhi.data.referral.ReferralFollowUpOutcomeStatus.COMPLETED,
+      ),
+      referral = org.armman.sakhi.data.referral.Referral(
+        referralId = "referral-1",
+        visitId = null,
+        sourceSubmissionId = null,
+        beneficiaryId = "server-ben-1",
+        referralTypeLookupValueId = "type-1",
+        status = org.armman.sakhi.data.referral.ReferralStatus.COMPLETED,
+        facilityName = "PHC Sonapur",
+        facilityType = org.armman.sakhi.data.referral.FacilityType.PHC,
+        triggeringConditionIds = emptyList(),
+        createdAt = null,
+        validTill = null,
+      ),
+    ),
+  )
+
+  private suspend fun submitFollowUpForm(
+    followUpAnswers: FormAnswers,
+    referralId: String? = "referral-1",
+    capturedImagePaths: Map<String, String> = emptyMap(),
+  ) = coordinator.submit(
+    localFormInstanceUuid = "instance-1",
+    localBeneficiaryId = "ben-1",
+    formCode = "REFERRAL_FOLLOWUP_VISIT",
+    formVersionId = "version-1",
+    answers = followUpAnswers,
+    referralId = referralId,
+    capturedImagePaths = capturedImagePaths,
+  )
+
+  @Test
+  fun `REFERRAL_FOLLOWUP_VISIT submission calls ReferralRepository submitFollowUp with mapped visited-facility fields`() = runTest {
+    seedSyncedBeneficiary()
+    formSubmissionApi.response = successfulSubmissionResponse()
+    referralRepository.submitFollowUpResult = successfulFollowUpResult()
+
+    val result = submitFollowUpForm(
+      FormAnswers(
+        singleValues = mapOf(
+          "form_filled_date" to "2026-08-31",
+          "visited_health_facility" to "yes",
+          "diagnosis_confirmed" to "yes",
+          "clinical_status_now" to "improving",
+          "treatment_given" to "yes",
+          "referral_final_outcome" to "opd_given_medications",
+        ),
+        multiValues = mapOf("treatment_type" to listOf("tablet", "syrup")),
+      ),
+    )
+
+    assertTrue(result.isSuccess)
+    val call = referralRepository.submitFollowUpCalls.single()
+    assertEquals("referral-1", call.referralId)
+    assertTrue(call.visitedFacilityFlag)
+    assertEquals(LocalDate.parse("2026-08-31"), call.followupDate)
+    assertEquals("Diagnosis confirmed: Yes; Clinical status: Improving", call.diagnosis)
+    assertEquals("Treatment given: Yes; Type: Tablet, Syrup", call.treatmentGiven)
+    assertEquals("OPD and given medications", call.outcome)
+  }
+
+  @Test
+  fun `REFERRAL_FOLLOWUP_VISIT not-visited path maps the not_visited_reason label and sends visitedFacilityFlag false`() = runTest {
+    seedSyncedBeneficiary()
+    formSubmissionApi.response = successfulSubmissionResponse()
+    referralRepository.submitFollowUpResult = successfulFollowUpResult()
+
+    val result = submitFollowUpForm(
+      FormAnswers(
+        singleValues = mapOf(
+          "form_filled_date" to "2026-08-31",
+          "visited_health_facility" to "no",
+          "not_visited_reason" to "cost_of_transportation",
+        ),
+      ),
+    )
+
+    assertTrue(result.isSuccess)
+    val call = referralRepository.submitFollowUpCalls.single()
+    assertFalse(call.visitedFacilityFlag)
+    assertEquals("Cost of transportation to the facility", call.notVisitedReason)
+    assertEquals(null, call.diagnosis)
+    assertEquals(null, call.treatmentGiven)
+  }
+
+  @Test
+  fun `REFERRAL_FOLLOWUP_VISIT with no referralId fails with ReferralIdMissing and does not call ReferralRepository`() = runTest {
+    seedSyncedBeneficiary()
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    val result = submitFollowUpForm(
+      FormAnswers(singleValues = mapOf("visited_health_facility" to "no")),
+      referralId = null,
+    )
+
+    assertTrue(result.isFailure)
+    assertTrue(result.exceptionOrNull() is AdHocFormSubmissionException.ReferralIdMissing)
+    assertTrue(referralRepository.submitFollowUpCalls.isEmpty())
+  }
+
+  @Test
+  fun `a failed ReferralRepository submitFollowUp call surfaces as ReferralFollowUpSubmissionFailed even though the generic submission succeeded`() = runTest {
+    seedSyncedBeneficiary()
+    formSubmissionApi.response = successfulSubmissionResponse()
+    referralRepository.submitFollowUpResult = Result.failure(IllegalStateException("HTTP 500"))
+
+    val result = submitFollowUpForm(FormAnswers(singleValues = mapOf("visited_health_facility" to "no")))
+
+    assertTrue(result.isFailure)
+    assertTrue(result.exceptionOrNull() is AdHocFormSubmissionException.ReferralFollowUpSubmissionFailed)
+  }
+
+  @Test
+  fun `REFERRAL_FOLLOWUP_VISIT queues a captured evidence photo keyed by the submission id and triggers a sync`() = runTest {
+    seedSyncedBeneficiary()
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-77")
+    referralRepository.submitFollowUpResult = successfulFollowUpResult()
+    val tempFile = kotlin.io.path.createTempFile(suffix = ".jpg").toFile().apply { writeBytes(byteArrayOf(1, 2, 3)) }
+
+    val result = submitFollowUpForm(
+      FormAnswers(singleValues = mapOf("visited_health_facility" to "no", "case_paper_photo" to "content://ad-hoc-form/case_paper_photo")),
+      capturedImagePaths = mapOf("case_paper_photo" to tempFile.absolutePath),
+    )
+
+    assertTrue(result.isSuccess)
+    val queued = referralEvidenceDao.getByReferralId("referral-1").single()
+    assertEquals("server-sub-77", queued.submissionId)
+    assertEquals(null, queued.followupId)
+    assertEquals("REFERRAL_CASE_PAPER", queued.evidenceType)
+    assertEquals(tempFile.absolutePath, queued.localFilePath)
+    assertEquals(1, referralEvidenceSyncScheduler.syncNowCallCount)
+
+    tempFile.delete()
+  }
+
+  @Test
+  fun `REFERRAL_FOLLOWUP_VISIT with no captured photo does not queue anything but still calls syncNow`() = runTest {
+    seedSyncedBeneficiary()
+    formSubmissionApi.response = successfulSubmissionResponse()
+    referralRepository.submitFollowUpResult = successfulFollowUpResult()
+
+    val result = submitFollowUpForm(FormAnswers(singleValues = mapOf("visited_health_facility" to "no")))
+
+    assertTrue(result.isSuccess)
+    assertTrue(referralEvidenceDao.getByReferralId("referral-1").isEmpty())
+    assertEquals(1, referralEvidenceSyncScheduler.syncNowCallCount)
+  }
+
+  @Test
+  fun `REFERRAL_FOLLOWUP_VISIT success mirrors the referral's new status into the local ReferralLinkEntity cache`() = runTest {
+    seedSyncedBeneficiary()
+    formSubmissionApi.response = successfulSubmissionResponse()
+    referralRepository.submitFollowUpResult = successfulFollowUpResult() // referral.status = COMPLETED
+    referralLinkDao.upsert(
+      org.armman.sakhi.data.referral.ReferralLinkEntity(
+        localScheduleUuid = "schedule-for-ben-1",
+        referralId = "referral-1",
+        visitId = "visit-1",
+        status = "PENDING_FOLLOWUP",
+        referralTypeLookupValueId = "type-1",
+        validTill = null,
+        createdAtEpochMillis = 0L,
+      ),
+    )
+
+    val result = submitFollowUpForm(FormAnswers(singleValues = mapOf("visited_health_facility" to "yes")))
+
+    assertTrue(result.isSuccess)
+    // Regression coverage for a real bug: without this, BeneficiaryProfileScreen kept showing
+    // "Referral Followup Incomplete" after a successful submission, since the local cache the
+    // profile screen reads from was never told the backend had already moved the referral on.
+    assertEquals("COMPLETED", referralLinkDao.getByReferralId("referral-1")?.status)
+  }
+
+  @Test
+  fun `REFERRAL_FOLLOWUP_VISIT success with no matching local ReferralLinkEntity row does not throw`() = runTest {
+    seedSyncedBeneficiary()
+    formSubmissionApi.response = successfulSubmissionResponse()
+    referralRepository.submitFollowUpResult = successfulFollowUpResult()
+    // No referralLinkDao row seeded — the cache-mirroring step must be a no-op, not a crash.
+
+    val result = submitFollowUpForm(FormAnswers(singleValues = mapOf("visited_health_facility" to "yes")))
+
+    assertTrue(result.isSuccess)
   }
 }

@@ -40,4 +40,11 @@ data class ReferralLinkEntity(
    * observed. */
   val validTill: String?,
   val createdAtEpochMillis: Long,
+  /** CR-Referral-02 — added so the follow-up screen's Step 1 (visit data/summary review) can
+   * show what was recorded at referral creation without a second network call (no `GET
+   * /referrals/{id}` exists to fetch it fresh). Nullable/blank-default so existing rows from
+   * before this migration read back as empty strings rather than crashing Room's NOT NULL
+   * constraint. */
+  val facilityName: String = "",
+  val facilityType: String = "",
 )

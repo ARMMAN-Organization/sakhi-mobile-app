@@ -72,6 +72,9 @@ class RoomVisitScheduleRepository @Inject constructor(
   override suspend fun lapseOpenAncVisits(localBeneficiaryId: String): Int =
     dao.lapseOpenAncVisits(localBeneficiaryId)
 
+  override suspend fun lapseAllOpenVisits(localBeneficiaryId: String): Int =
+    dao.lapseAllOpenVisits(localBeneficiaryId)
+
   override suspend fun supersedeOpenVisits(localBeneficiaryId: String): Int =
     dao.supersedeOpenVisits(localBeneficiaryId)
 }

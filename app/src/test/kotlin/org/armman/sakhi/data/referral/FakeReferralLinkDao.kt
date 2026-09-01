@@ -14,4 +14,7 @@ class FakeReferralLinkDao : ReferralLinkDao {
 
   override suspend fun getByLocalScheduleUuids(localScheduleUuids: List<String>): List<ReferralLinkEntity> =
     localScheduleUuids.mapNotNull { rows[it] }
+
+  override suspend fun getByReferralId(referralId: String): ReferralLinkEntity? =
+    rows.values.firstOrNull { it.referralId == referralId }
 }

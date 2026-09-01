@@ -69,6 +69,12 @@ interface VisitScheduleRepository {
   /** FR-S-3.7 — lapses every open ANC-family visit on delivery. Returns the number affected. */
   suspend fun lapseOpenAncVisits(localBeneficiaryId: String): Int
 
+  /** CR-Closure-01 items #3/#7 — lapses every open visit of any type on a mother/child closure.
+   * Returns the number affected. See [VisitScheduleDao.lapseAllOpenVisits]'s doc for why this is a
+   * client-side sweep rather than waiting on a server-side cascade this app has no sync path to
+   * ever observe. */
+  suspend fun lapseAllOpenVisits(localBeneficiaryId: String): Int
+
   /** Retires the open cohort ahead of a regeneration. Completed rows are untouched. */
   suspend fun supersedeOpenVisits(localBeneficiaryId: String): Int
 }

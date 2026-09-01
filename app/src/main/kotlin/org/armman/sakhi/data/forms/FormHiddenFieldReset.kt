@@ -48,14 +48,28 @@ object FormHiddenFieldReset {
     previousAnswers: FormAnswers,
     updatedAnswers: FormAnswers,
   ): FormAnswers {
+    // Iterated to a fixed point, not a single pass: clearing a field can itself hide the fields
+    // gated on THAT field, and those need clearing too. REFERRAL_VISIT is two levels deep
+    // (referral_needed_new_condition -> beneficiary_willing_for_referral -> is_accompanied_referral
+    // /decided_visit_date/place_of_referral/health_facility_name), so answering the first question
+    // "no" used to clear level 1 and leave level 2's stale answers behind — visible to nobody, but
+    // still in `answers` and still submitted. Each round strictly shrinks the visible set, so this
+    // terminates; `fields.size + 1` is a belt-and-braces cap in case a schema ever ships a
+    // circular visibleWhen (which would otherwise spin here rather than fail loudly).
     var result = updatedAnswers
-    newlyHiddenFields(fields, previousAnswers, updatedAnswers).forEach { field ->
-      result = if (field.questionCode in RESET_TO_ZERO_QUESTION_CODES) {
-        result.withSingleValue(field.questionCode, "0")
-      } else {
-        result.withSingleValue(field.questionCode, null).withMultiValue(field.questionCode, emptyList())
+    var beforeRound: FormAnswers
+    var rounds = 0
+    do {
+      beforeRound = result
+      newlyHiddenFields(fields, previousAnswers, result).forEach { field ->
+        result = if (field.questionCode in RESET_TO_ZERO_QUESTION_CODES) {
+          result.withSingleValue(field.questionCode, "0")
+        } else {
+          result.withSingleValue(field.questionCode, null).withMultiValue(field.questionCode, emptyList())
+        }
       }
-    }
+      rounds++
+    } while (result != beforeRound && rounds <= fields.size)
     return result
   }
 
@@ -66,7 +80,19 @@ object FormHiddenFieldReset {
     fields: List<FormFieldSchema>,
     previousAnswers: FormAnswers,
     updatedAnswers: FormAnswers,
-  ): Set<String> = newlyHiddenFields(fields, previousAnswers, updatedAnswers).map { it.questionCode }.toSet()
+  ): Set<String> {
+    // Derived from [apply]'s own fixed-point result rather than a single pass, so a field hidden
+    // only as a knock-on of an earlier field being cleared still gets its stale error dropped —
+    // otherwise a two-level chain left an error showing under a field that is no longer on screen.
+    val settled = apply(fields, previousAnswers, updatedAnswers)
+    return fields
+      .filter {
+        FormVisibilityEvaluator.isVisible(it, previousAnswers) &&
+          !FormVisibilityEvaluator.isVisible(it, settled)
+      }
+      .map { it.questionCode }
+      .toSet()
+  }
 
   private fun newlyHiddenFields(
     fields: List<FormFieldSchema>,

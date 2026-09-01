@@ -31,8 +31,12 @@ class RoomAdHocFormDraftRepository @Inject constructor(
     formCode: String,
     formVersionId: String,
     answers: FormAnswers,
+    referralId: String?,
+    capturedImagePaths: Map<String, String>,
   ): AdHocFormSubmitResult {
-    saveLocally(localFormInstanceUuid, localBeneficiaryId, formCode, formVersionId, answers)
+    saveLocally(
+      localFormInstanceUuid, localBeneficiaryId, formCode, formVersionId, answers, referralId, capturedImagePaths,
+    )
 
     // Offline: saved and queued for the Sakhi's next Data Upload tap — same manual-trigger rule
     // every other queue in this app follows.
@@ -62,11 +66,13 @@ class RoomAdHocFormDraftRepository @Inject constructor(
     formCode: String,
     formVersionId: String,
     answers: FormAnswers,
+    referralId: String?,
+    capturedImagePaths: Map<String, String>,
   ) {
     // Unconditional — runs before the online/offline branch, so both the online-success and
     // offline-queued paths get a SAVED event. Same rule CR-035 established for every other queue.
     formAuditRepository.recordSaved(localFormInstanceUuid, formCode)
-    val payload = AdHocFormDraftPayload(answers = answers)
+    val payload = AdHocFormDraftPayload(answers = answers, capturedImagePaths = capturedImagePaths)
     secureStore.putString(adHocFormDraftPayloadKey(localFormInstanceUuid), adHocFormDraftGson.toJson(payload))
 
     val existing = dao.getByLocalFormInstanceUuid(localFormInstanceUuid)
@@ -85,6 +91,7 @@ class RoomAdHocFormDraftRepository @Inject constructor(
         retryCount = existing?.retryCount ?: 0,
         serverSubmissionId = existing?.serverSubmissionId,
         lastErrorMessage = null,
+        referralId = referralId,
       ),
     )
   }

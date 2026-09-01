@@ -19,6 +19,7 @@ import org.armman.sakhi.data.delivery.FakeDeliverySessionDao
 import org.armman.sakhi.data.delivery.RoomDeliverySessionRepository
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.CreateSubmissionResponseDto
+import org.armman.sakhi.data.forms.ExtensionVisitWindowDto
 import org.armman.sakhi.data.forms.FakeFormSubmissionApi
 import org.armman.sakhi.data.forms.FakeFormsApi
 import org.armman.sakhi.data.forms.VisitCodeFormResolver
@@ -26,8 +27,8 @@ import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.SubmissionResponseData
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.armman.sakhi.data.lookup.LookupValue
-import org.armman.sakhi.data.referral.CreateReferralOutcome
 import org.armman.sakhi.data.referral.FacilityType
+import org.armman.sakhi.data.referral.CreateReferralOutcome
 import org.armman.sakhi.data.referral.Referral
 import org.armman.sakhi.data.referral.ReferralCapture
 import org.armman.sakhi.data.referral.ReferralStatus
@@ -179,6 +180,24 @@ class VisitFormSubmissionCoordinatorTest {
     CreateSubmissionResponseDto(success = true, message = "OK", data = SubmissionResponseData(id = id)),
   )
 
+  /** CR-Closure-01 items #5/#6: mirrors [successfulSubmissionResponse] but with the CCV
+   * per-visit HR re-evaluation fields populated, as the backend contract confirmed 2026-08-31. */
+  private fun ccvBoundarySubmissionResponse(
+    id: String = "server-sub-1",
+    closureDeferredForExtension: Boolean,
+    extensionVisit: ExtensionVisitWindowDto? = null,
+  ) = Response.success(
+    CreateSubmissionResponseDto(
+      success = true,
+      message = "OK",
+      data = SubmissionResponseData(
+        id = id,
+        closureDeferredForExtension = closureDeferredForExtension,
+        extensionVisit = extensionVisit,
+      ),
+    ),
+  )
+
   private fun errorResponse(code: Int, body: String) =
     Response.error<CreateVisitInstanceResponseDto>(code, body.toResponseBody("application/json".toMediaType()))
 
@@ -210,6 +229,72 @@ class VisitFormSubmissionCoordinatorTest {
 
     val updated = scheduleRepository.getByLocalScheduleUuid("schedule-1")
     assertEquals(VisitScheduleStatus.COMPLETED, updated?.status)
+  }
+
+  @Test
+  fun `last CCV visit with no HR returns closureDeferredForExtension false and no extension window`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse()
+    formSubmissionApi.response = ccvBoundarySubmissionResponse(closureDeferredForExtension = false)
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+    )
+
+    assertTrue(result.isSuccess)
+    val outcome = result.getOrNull()
+    assertEquals(false, outcome?.closureDeferredForExtension)
+    assertEquals(null, outcome?.extensionVisit)
+  }
+
+  @Test
+  fun `last CCV visit with HR detected returns closureDeferredForExtension true with its window`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse()
+    val window = ExtensionVisitWindowDto(
+      scheduledDate = "2026-09-15",
+      windowStartDate = "2026-09-10",
+      windowEndDate = "2026-09-20",
+    )
+    formSubmissionApi.response = ccvBoundarySubmissionResponse(
+      closureDeferredForExtension = true,
+      extensionVisit = window,
+    )
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+    )
+
+    assertTrue(result.isSuccess)
+    val outcome = result.getOrNull()
+    assertEquals(true, outcome?.closureDeferredForExtension)
+    assertEquals(window, outcome?.extensionVisit)
+  }
+
+  @Test
+  fun `a non-boundary visit returns a default outcome with no CCV signal`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+    )
+
+    assertTrue(result.isSuccess)
+    assertEquals(VisitSubmitOutcome(), result.getOrNull())
   }
 
   @Test
@@ -775,7 +860,7 @@ class VisitFormSubmissionCoordinatorTest {
   private fun capture() = ReferralCapture(
     referralType = ReferralType.STANDARD,
     facilityName = "Civil Hospital",
-    facilityType = FacilityType.PHC,
+    facilityType = "phc",
     referralDate = LocalDate.of(2026, 8, 27),
   )
 

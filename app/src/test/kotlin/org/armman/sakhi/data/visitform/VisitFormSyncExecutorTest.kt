@@ -198,7 +198,7 @@ class VisitFormSyncExecutorTest {
 
     val result = executor.runOne("schedule-1")
 
-    assertEquals(VisitFormSyncItemResult.Synced, result)
+    assertEquals(VisitFormSyncItemResult.Synced(), result)
     assertEquals(0, visitApi.callCount)
     assertEquals(0, formSubmissionApi.callCount)
   }

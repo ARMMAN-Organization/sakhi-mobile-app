@@ -36,6 +36,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.collectLatest
 import org.armman.sakhi.R
 import org.armman.sakhi.data.beneficiary.BeneficiaryType
+import org.armman.sakhi.data.beneficiary.BeneficiaryStatus
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfile
 import org.armman.sakhi.data.beneficiaryprofile.ProfileVisit
 import org.armman.sakhi.data.beneficiaryprofile.ProfileVisitAction
@@ -149,6 +150,7 @@ fun BeneficiaryProfileScreen(
               onComingSoon = { onComingSoon() },
               canStartVisit = state.canStartVisit,
               hasPendingReopenRequest = state.hasPendingReopenRequest,
+              isReopenEligible = state.isReopenEligible,
               deliveryButtonState = state.deliveryButtonState,
               onStartVisit = { visit -> onStartVisit(profile.id, visit) },
               onReferralFollowUp = { visit -> onReferralFollowUp(profile.id, visit) },
@@ -175,6 +177,7 @@ private fun ProfileContent(
   isTablet: Boolean,
   canStartVisit: Boolean,
   hasPendingReopenRequest: Boolean,
+  isReopenEligible: Boolean,
   deliveryButtonState: DeliveryButtonState,
   onComingSoon: () -> Unit,
   onStartVisit: (ProfileVisit) -> Unit,
@@ -248,8 +251,10 @@ private fun ProfileContent(
     }
     Footer(
       beneficiaryType = profile.type,
+      status = profile.status,
       visits = profile.visits,
       hasPendingReopenRequest = hasPendingReopenRequest,
+      isReopenEligible = isReopenEligible,
       deliveryButtonState = deliveryButtonState,
       onComingSoon = onComingSoon,
       onStartAdHocForm = onStartAdHocForm,
@@ -299,8 +304,10 @@ private fun ProfileContent(
 @Composable
 private fun Footer(
   beneficiaryType: BeneficiaryType,
+  status: BeneficiaryStatus,
   visits: List<ProfileVisit>,
   hasPendingReopenRequest: Boolean,
+  isReopenEligible: Boolean,
   deliveryButtonState: DeliveryButtonState,
   onComingSoon: () -> Unit,
   onStartAdHocForm: (formCode: String, visitName: String?) -> Unit,
@@ -323,29 +330,41 @@ private fun Footer(
   var showReopenReasonPicker by remember { mutableStateOf(false) }
   Column {
     HorizontalDivider(color = NeutralG50)
-    Row(
-      horizontalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
-      modifier = Modifier.fillMaxWidth().padding(Dimens.ItemSpacing),
-    ) {
-      // Delivery only applies to a mother's own journey (recording her delivery outcome) — an
-      // infant's profile has no delivery event of its own. Per PRD: "Delivery - This will be
-      // shown only in case of pregnant women."
-      if (beneficiaryType == BeneficiaryType.MOTHER) {
-        DeliveryButton(
-          state = deliveryButtonState,
-          onStartDelivery = onStartDelivery,
-          onResumeDeliveryVisit = onResumeDeliveryVisit,
-          onContinueChildRegistration = onContinueChildRegistration,
-          modifier = Modifier.weight(1f),
-        )
+    // Delivery only applies to a mother's own journey; Closure is hidden once she's already
+    // CLOSED (closing her again is meaningless -- it used to stay visible and re-open the
+    // closure form indefinitely). For a non-mother beneficiary who is CLOSED, neither button
+    // has anything to show, so skip the row entirely rather than leaving an empty gap.
+    val showDelivery = beneficiaryType == BeneficiaryType.MOTHER
+    val showClosure = status != BeneficiaryStatus.CLOSED
+    if (showDelivery || showClosure) {
+      Row(
+        horizontalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
+        modifier = Modifier.fillMaxWidth().padding(Dimens.ItemSpacing),
+      ) {
+        // Delivery only applies to a mother's own journey (recording her delivery outcome) — an
+        // infant's profile has no delivery event of its own. Per PRD: "Delivery - This will be
+        // shown only in case of pregnant women."
+        if (showDelivery) {
+          DeliveryButton(
+            state = deliveryButtonState,
+            onStartDelivery = onStartDelivery,
+            onResumeDeliveryVisit = onResumeDeliveryVisit,
+            onContinueChildRegistration = onContinueChildRegistration,
+            modifier = Modifier.weight(1f),
+          )
+        }
+        if (showClosure) {
+          SecondaryButton(
+            text = stringResource(R.string.beneficiary_profile_closure_form),
+            onClick = { onStartAdHocForm(closureFormCode, null) },
+            modifier = Modifier.weight(1f),
+          )
+        }
       }
-      SecondaryButton(
-        text = stringResource(R.string.beneficiary_profile_closure_form),
-        onClick = { onStartAdHocForm(closureFormCode, null) },
-        modifier = Modifier.weight(1f),
-      )
     }
-    // Referral / Referral Follow-up / Reopen hidden — not in this sprint scope (temporary; see CR for restoring).
+    // Referral / Referral Follow-up hidden — not in this sprint scope (temporary; see CR for
+    // restoring). Reopen (CR-Closure-02) is re-enabled below on its own, since its data layer
+    // (submission + supervisor routing) is built and tested independently of Referral's.
     if (false) {
     Row(
       horizontalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
@@ -367,15 +386,30 @@ private fun Footer(
         onClick = { onStartAdHocForm(AD_HOC_FORM_CODE_REFERRAL_FOLLOWUP, null) },
         modifier = Modifier.weight(1f),
       )
-      SecondaryButton(
-        // hasPendingReopenRequest: a second request while one is already PENDING would just be
-        // noise for whichever supervisor reviews it -- disabled with different copy rather than
-        // hidden, so the Sakhi can see her request was registered.
-        text = if (hasPendingReopenRequest) "Reopen pending review" else "Reopen",
-        onClick = { if (!hasPendingReopenRequest) showReopenReasonPicker = true },
-        modifier = Modifier.weight(1f),
-      )
     }
+    }
+    // CR-Closure-02: only offered once the beneficiary is actually CLOSED and, per the SRS
+    // Beneficiary Reopen form / design-discussion transcript, not for a death/miscarriage/abortion
+    // closure — see BeneficiaryProfileViewModel.isReopenEligible's own doc for the exact rule and
+    // its "unknown reason defaults to eligible" caveat.
+    if (isReopenEligible) {
+      Row(
+        horizontalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
+        modifier = Modifier.fillMaxWidth().padding(
+          start = Dimens.ItemSpacing,
+          end = Dimens.ItemSpacing,
+          bottom = Dimens.ItemSpacing,
+        ),
+      ) {
+        SecondaryButton(
+          // hasPendingReopenRequest: a second request while one is already PENDING would just be
+          // noise for whichever supervisor reviews it -- disabled with different copy rather than
+          // hidden, so the Sakhi can see her request was registered.
+          text = if (hasPendingReopenRequest) "Reopen pending review" else "Reopen",
+          onClick = { if (!hasPendingReopenRequest) showReopenReasonPicker = true },
+          modifier = Modifier.weight(1f),
+        )
+      }
     }
   }
   if (showVisitPicker) {

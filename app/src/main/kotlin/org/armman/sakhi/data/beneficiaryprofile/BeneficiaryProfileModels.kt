@@ -98,4 +98,7 @@ data class BeneficiaryProfile(
   /** The beneficiary's original enrollment date, or null when unavailable (see
    * [org.armman.sakhi.data.beneficiary.Beneficiary.registrationDate]). */
   val registrationDate: java.time.LocalDate? = null,
+  /** CR-Closure-02: see [org.armman.sakhi.data.beneficiary.Beneficiary.closureReasonCode]'s doc --
+   * same "only known if this device submitted the closure" caveat applies here. */
+  val closureReasonCode: String? = null,
 )

@@ -25,9 +25,17 @@ class RemoteReopenRepository @Inject constructor(
   private val reopenApi: ReopenApi,
 ) : ReopenRepository {
 
-  override suspend fun submitReopenRequest(beneficiaryId: String, reason: ReopenRequestReason) {
+  override suspend fun submitReopenRequest(
+    beneficiaryId: String,
+    reason: ReopenRequestReason,
+    localReopenRequestUuid: String,
+  ) {
     val response = reopenApi.createReopenRequest(
-      ReopenRequestDto(beneficiaryId = beneficiaryId, requestReason = reason.wireValue),
+      ReopenRequestDto(
+        beneficiaryId = beneficiaryId,
+        requestReason = reason.wireValue,
+        localReopenRequestUuid = localReopenRequestUuid,
+      ),
     )
     if (!response.isSuccessful) {
       val rawBody = response.errorBody()?.string()
@@ -47,6 +55,19 @@ class RemoteReopenRepository @Inject constructor(
       ?.takeIf { it.success }
       ?.data
       ?.any { it.isPending() }
+      ?: false
+  } catch (e: Exception) {
+    // Offline, timeout, malformed body — best-effort, see the interface doc.
+    false
+  }
+
+  override suspend fun hasApprovedReopenRequest(beneficiaryId: String): Boolean = try {
+    reopenApi.getReopenRequests(beneficiaryId)
+      .takeIf { it.isSuccessful }
+      ?.body()
+      ?.takeIf { it.success }
+      ?.data
+      ?.any { it.isApproved() }
       ?: false
   } catch (e: Exception) {
     // Offline, timeout, malformed body — best-effort, see the interface doc.
