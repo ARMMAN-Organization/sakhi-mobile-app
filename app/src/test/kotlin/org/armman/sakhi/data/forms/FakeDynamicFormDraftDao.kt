@@ -20,6 +20,9 @@ class FakeDynamicFormDraftDao : DynamicFormDraftDao {
   override suspend fun getByLocalBeneficiaryId(localBeneficiaryId: String): DynamicFormDraftEntity? =
     rows[localBeneficiaryId]
 
+  override suspend fun getByRemoteBeneficiaryId(remoteBeneficiaryId: String): DynamicFormDraftEntity? =
+    rows.values.firstOrNull { it.remoteBeneficiaryId == remoteBeneficiaryId }
+
   override suspend fun getPendingSync(): List<DynamicFormDraftEntity> =
     rows.values
       .filter { it.syncStatus == EnrollmentSyncStatus.PENDING || it.syncStatus == EnrollmentSyncStatus.FAILED }

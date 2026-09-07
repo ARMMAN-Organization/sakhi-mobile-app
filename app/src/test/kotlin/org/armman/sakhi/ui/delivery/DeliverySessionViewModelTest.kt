@@ -22,6 +22,7 @@ import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
 import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
 import org.armman.sakhi.data.schedule.VisitCodeType
+import org.armman.sakhi.data.schedule.VisitScheduleStatus
 import org.armman.sakhi.data.schedule.schedule
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -276,6 +277,36 @@ class DeliverySessionViewModelTest {
     val submitted = viewModel.events.first() as DeliverySessionEvent.Submitted
     assertNull(submitted.childBeneficiaryIds)
     assertEquals("pp1-schedule", submitted.pp1LocalScheduleUuid)
+  }
+
+  @Test
+  fun `onSubmit Synced falls back to null pp1LocalScheduleUuid when the PP1 row is already completed`() = runTest {
+    // Bug fix (2026-09-02): same guard as DeliveryChildRegistrationViewModel.findPp1ScheduleUuid —
+    // an already-COMPLETED PP1 row must never be handed back for auto-navigation.
+    formsRepository.version = versionWith(fields = listOf(dateField(DeliveryQuestionCodes.DATE_OF_DELIVERY)))
+    deliveryFormDraftRepository.resultToReturn = DeliveryFormSubmitResult.Synced(childBeneficiaryIds = null)
+    visitScheduleRepository.saveGenerated(
+      listOf(
+        schedule(
+          "pp1-schedule",
+          localBeneficiaryId = "mother-1",
+          visitCode = "PP1",
+          visitType = VisitCodeType.PP,
+          sequenceNo = 1,
+          status = VisitScheduleStatus.COMPLETED,
+        ),
+      ),
+    )
+    val viewModel = buildViewModel()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.setAnswer(DeliveryQuestionCodes.DATE_OF_DELIVERY, "2026-08-01")
+    viewModel.onSubmit()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val submitted = viewModel.events.first() as DeliverySessionEvent.Submitted
+    assertNull(submitted.childBeneficiaryIds)
+    assertNull(submitted.pp1LocalScheduleUuid)
   }
 
   @Test

@@ -10,11 +10,13 @@ import okhttp3.OkHttpClient
 import org.armman.sakhi.BuildConfig
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.DynamicFormSyncScheduler
+import org.armman.sakhi.data.forms.FieldEditsRepository
 import org.armman.sakhi.data.forms.FormSubmissionApi
 import org.armman.sakhi.data.forms.FormVisibleWhen
 import org.armman.sakhi.data.forms.FormVisibleWhenDeserializer
 import org.armman.sakhi.data.forms.FormsApi
 import org.armman.sakhi.data.forms.FormsRepository
+import org.armman.sakhi.data.forms.RemoteFieldEditsRepository
 import org.armman.sakhi.data.forms.RemoteFormsRepository
 import org.armman.sakhi.data.forms.RoomDynamicFormDraftRepository
 import org.armman.sakhi.data.forms.WorkManagerDynamicFormSyncScheduler
@@ -38,6 +40,12 @@ abstract class FormsModule {
   @Binds
   @Singleton
   abstract fun bindDynamicFormSyncScheduler(impl: WorkManagerDynamicFormSyncScheduler): DynamicFormSyncScheduler
+
+  /** CR-Registration-Edit: same `Retrofit`/`FormSubmissionApi` as `createSubmission` above — no
+   * separate module needed, this is the same `visit-form-service`. */
+  @Binds
+  @Singleton
+  abstract fun bindFieldEditsRepository(impl: RemoteFieldEditsRepository): FieldEditsRepository
 
   companion object {
     /**

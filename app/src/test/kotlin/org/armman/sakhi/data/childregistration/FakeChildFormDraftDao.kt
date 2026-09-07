@@ -21,6 +21,9 @@ class FakeChildFormDraftDao : ChildFormDraftDao {
   override suspend fun getByLocalBeneficiaryId(localBeneficiaryId: String): ChildFormDraftEntity? =
     rows[localBeneficiaryId]
 
+  override suspend fun getByRemoteBeneficiaryId(remoteBeneficiaryId: String): ChildFormDraftEntity? =
+    rows.values.firstOrNull { it.remoteBeneficiaryId == remoteBeneficiaryId }
+
   override suspend fun getPendingSync(): List<ChildFormDraftEntity> =
     rows.values
       .filter { it.syncStatus == EnrollmentSyncStatus.PENDING || it.syncStatus == EnrollmentSyncStatus.FAILED }

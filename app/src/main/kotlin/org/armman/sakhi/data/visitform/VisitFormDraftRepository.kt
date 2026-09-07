@@ -3,6 +3,7 @@ package org.armman.sakhi.data.visitform
 import kotlinx.coroutines.flow.Flow
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormUploadRecord
+import org.armman.sakhi.data.lmpchange.LmpChangeCapture
 import org.armman.sakhi.data.referral.ReferralCapture
 import org.armman.sakhi.data.rules.RiskGradingResult
 import java.time.LocalDate
@@ -42,6 +43,11 @@ interface VisitFormDraftRepository {
      * [VisitFormDraftPayload.referralCapture]'s doc for how/when this actually results in a
      * created referral. Null when she left that tab untouched. */
     referralCapture: ReferralCapture? = null,
+    /** Task 2 (LMP/Reopen/Referral/Audit task list): whatever the Sakhi filled on ANC_VISIT's own
+     * sonography-confirmation branch — see [VisitFormDraftPayload.lmpChangeCapture]'s doc. Null
+     * for every form code except ANC_VISIT and every ANC_VISIT submission where she left that
+     * branch untouched. */
+    lmpChangeCapture: LmpChangeCapture? = null,
   ): VisitFormSubmitResult
 
   /** All CR-026b visit-form drafts, newest first, for the Home screen's "Forms Uploaded"
@@ -57,4 +63,19 @@ interface VisitFormDraftRepository {
    * sync run. Merged with the other queues by
    * [org.armman.sakhi.data.sync.UploadRecordsSource]. */
   fun observeUploadRecords(): Flow<List<FormUploadRecord>>
+
+  /**
+   * Bug fix (2026-09-04): the persisted answers for one visit-form draft — whether still queued
+   * locally or already synced (the encrypted payload is never cleared once written, same as every
+   * other queue in this app). Lets a later visit carry forward an earlier one's own answer as a
+   * computed field's baseline — e.g. ANC_VISIT's "Gestational weight gain" needs the woman's
+   * weight from her FIRST ANC visit, which [org.armman.sakhi.data.visitform
+   * .StaticVisitFormRepository] has no other local source for (MOTHER_REGISTRATION never asks for
+   * it — see that class's own doc).
+   *
+   * Null when nothing was ever saved locally for [localScheduleUuid] on THIS device — a
+   * beneficiary whose earlier visit was recorded on a different device, or one that genuinely
+   * hasn't happened yet. Callers must treat that as "unknown", not "zero".
+   */
+  suspend fun getAnswers(localScheduleUuid: String): FormAnswers?
 }

@@ -131,11 +131,16 @@ object FormDateRuleset {
   /**
    * Spec row 42 ("If ANC1 completed, please record the date"): "Only accept date after LMP or +5
    * days after enrollment form submission date. Should not accept any date post this." Read as two
-   * bounds — must be strictly after LMP, and no later than the registration date (this form's own
-   * submission-day proxy, per this file's existing LMP/DOB convention) plus 5 days.
+   * bounds — must be strictly after LMP, and no later than today (this form's own submission-day
+   * proxy, per this file's existing LMP/DOB convention).
+   *
+   * Bug fix (2026-09-02): this previously capped the upper bound at registration date + 5 days,
+   * which is a literal reading of "+5 days after ... submission date" but let the picker (and a
+   * manually-entered value) accept a date up to 5 days in the future — contradicting the spec
+   * row's own closing sentence, "Should not accept any date post this" (i.e. post today). "No
+   * future date" now wins; there is no longer a grace window past today.
    */
   const val ANC1_DATE_QUESTION_CODE = "if_anc1_completed_please_record_the_date"
-  const val ANC1_DATE_MAX_DAYS_AFTER_REGISTRATION = 5L
 
   /**
    * ANC_VISIT's sonography-confirmed LMP edit (spec row 8, "Copy of ... ANC visit form.csv").
@@ -173,21 +178,37 @@ object FormDateRuleset {
   /**
    * Referral form's "Referral visit form filled date" (spec row 1): "Should accept only today's
    * date." The backend's own `dateRule` for this field only declares `notFuture: true` (confirmed
-   * 2026-08-18 against a real `GET /forms/REFERRAL_VISIT/active-version` payload) — stricter than
-   * the spec text, which reads as "must equal today," but this file follows the backend's actual
-   * enforced rule rather than the spec's prose, same as every other bound here. Auto-populated
-   * with today on load (`AdHocFormViewModel.prefillTodayDateFields`), so in practice this only
-   * matters if the Sakhi manually edits it into the future.
+   * 2026-08-18 against a real `GET /forms/REFERRAL_VISIT/active-version` payload) — looser than the
+   * spec text, which reads as "must equal today."
+   *
+   * Bug fix (2026-09-04): this file previously followed the backend's looser rule (no lower bound
+   * at all), which let a Sakhi manually edit this field into a past date after it was auto-populated
+   * with today — contradicting spec row 1's "only today's date." Now floored at [registrationDate]
+   * in [boundsFor] (min = max = today), stricter client-side than the backend actually enforces.
+   * Safe: the backend still accepts anything not in the future, so this only narrows what the app
+   * offers, never what it submits. Auto-populated with today on load
+   * (`AdHocFormViewModel.prefillTodayDateFields`), so in practice this only matters if the Sakhi
+   * manually edits it.
    */
   const val REFERRAL_FORM_FILLED_DATE_QUESTION_CODE = "referral_form_filled_date"
 
   /**
    * Referral form's "Decided date for visit to health facility" (spec row 8): "Should accept
-   * todays date or future date." The backend expresses this relationally — `dateRule.notBefore.field
-   * = "referral_form_filled_date"` — rather than as a fixed "today" floor, so the real lower bound
-   * is whatever date the Sakhi actually put in [REFERRAL_FORM_FILLED_DATE_QUESTION_CODE] (which is
-   * today unless she edited it). Falls back to [registrationDate] (today) if that field is
-   * somehow still blank, so this never opens up to the unbounded past.
+   * todays date or future date." The backend expresses part of this relationally —
+   * `dateRule.notBefore.field = "referral_form_filled_date"` — so the floor honours whatever date
+   * the Sakhi put in [REFERRAL_FORM_FILLED_DATE_QUESTION_CODE] when that is today or later.
+   *
+   * Bug fix (2026-09-04): at the time of this fix, [REFERRAL_FORM_FILLED_DATE_QUESTION_CODE] had
+   * no lower bound of its own, so a Sakhi could backdate it, and this field's floor was inheriting
+   * that past date wholesale — letting her then pick yesterday (or earlier) here too, which
+   * directly contradicted this field's own "todays date or future date" rule. The floor was set to
+   * the LATER of [registrationDate] (today) and the answered [REFERRAL_FORM_FILLED_DATE_QUESTION_CODE]
+   * value, so today is always the hard floor regardless of what that other field holds.
+   *
+   * [REFERRAL_FORM_FILLED_DATE_QUESTION_CODE] was itself floored at today in a later fix the same
+   * day, so the backdated-answer path this guards against should no longer be reachable through the
+   * UI — this floor is kept anyway as a defensive second layer, and its own bounds check still
+   * defaults correctly to today if that field is ever unanswered.
    */
   const val DECIDED_VISIT_DATE_QUESTION_CODE = "decided_visit_date"
 
@@ -263,8 +284,7 @@ object FormDateRuleset {
     /** [ANC1_DATE_QUESTION_CODE] is on or before the answered LMP date (must be strictly after). */
     ANC1_DATE_NOT_AFTER_LMP,
 
-    /** [ANC1_DATE_QUESTION_CODE] is more than [ANC1_DATE_MAX_DAYS_AFTER_REGISTRATION] days after
-     * the registration date. */
+    /** [ANC1_DATE_QUESTION_CODE] is after today (the registration date). */
     ANC1_DATE_TOO_LATE,
 
     /** One of the 3 Td-dose dates ([TdDoseQuestionCodes]) is after the registration date — spec
@@ -357,10 +377,24 @@ object FormDateRuleset {
 
       DATE_OF_EVENT_QUESTION_CODE -> Bounds(min = beneficiaryRegistrationDate, max = registrationDate)
 
-      REFERRAL_FORM_FILLED_DATE_QUESTION_CODE -> Bounds(min = null, max = registrationDate)
+      // Bug fix (2026-09-04): backend's own dateRule only declares notFuture (no lower bound),
+      // which is looser than spec row 1's "Should accept only today's date" — a Sakhi could
+      // backdate this into the past. The picker/prefill already default it to today, but nothing
+      // stopped a manual edit into an earlier date. Flooring it at registrationDate (today) makes
+      // this field today-only client-side, stricter than the backend's enforced rule but matching
+      // the SRS text; the backend still accepts anything not in the future, so this is safe.
+      REFERRAL_FORM_FILLED_DATE_QUESTION_CODE -> Bounds(min = registrationDate, max = registrationDate)
 
+      // Bug fix (2026-09-04): floored solely at the answered referral_form_filled_date, which
+      // itself has no lower bound (see that constant's own case above) and can therefore hold a
+      // backdated value if the Sakhi edits it into the past. That let this field's picker inherit
+      // a past-date floor and offer yesterday (or earlier) for "Decided date for visit to health
+      // facility" — contradicting spec row 8's "Should accept todays date or future date". Now
+      // floored at whichever is LATER of the two: the backend's own relational rule
+      // (dateRule.notBefore.field = referral_form_filled_date) still applies when that answer is
+      // today or later, but registrationDate (today) always wins as the hard floor otherwise.
       DECIDED_VISIT_DATE_QUESTION_CODE -> Bounds(
-        min = referralFormFilledDateAnswer(answers) ?: registrationDate,
+        min = maxOfNullable(referralFormFilledDateAnswer(answers), registrationDate),
         max = null,
       )
 
@@ -385,17 +419,28 @@ object FormDateRuleset {
 
       MOTHER_DOB_QUESTION_CODE -> adultDobBounds(reference)
 
+      // Bug fix (2026-09-02): the picker's ceiling was wrongly set to
+      // reference.minusDays(LMP_MIN_DAYS_BEFORE_REGISTRATION) — the "registration/LMP gap must be
+      // >30 days" rule applied as a CALENDAR bound, which greyed out every date from ~31 days ago
+      // up to today (reported: max selectable was ~a month before "today", not "today" itself).
+      // "Cannot be future" (this constant's own KDoc) is the only picker-level ceiling; the
+      // >30-day recency rule stays enforced, just as a post-pick validation message
+      // ([Violation.LMP_TOO_RECENT] below) rather than blocking the date from being selected at all.
       LMP_DATE_QUESTION_CODE -> Bounds(
         min = reference.minusDays(LMP_MAX_DAYS_BEFORE_REGISTRATION),
-        max = reference.minusDays(LMP_MIN_DAYS_BEFORE_REGISTRATION),
+        max = reference,
       )
 
       // "After LMP" with no LMP answer yet has nothing to bound against — leave the lower end
       // open rather than guessing; violationFor is likewise a no-op until LMP is answered (parse()
       // returns null and the whole check is skipped, same convention as every other rule here).
+      // Bug fix (2026-09-02): "max = registrationDate.plusDays(5)" let the picker open 5 days
+      // into the future, which is what let a Sakhi pick a future ANC-1 date at all — see this
+      // question code's own KDoc for why "no future date" now wins over the literal "+5 days"
+      // spec reading.
       ANC1_DATE_QUESTION_CODE -> Bounds(
         min = lmpDateAnswer(answers)?.plusDays(1),
-        max = registrationDate.plusDays(ANC1_DATE_MAX_DAYS_AFTER_REGISTRATION),
+        max = registrationDate,
       )
 
       // Matches BOTH published spellings — see REGISTRATION_DATE_QUESTION_CODES.
@@ -594,7 +639,7 @@ object FormDateRuleset {
 
       ANC1_DATE_QUESTION_CODE -> {
         val lmp = lmpDateAnswer(answers)
-        val tooLate = value.isAfter(registrationDate.plusDays(ANC1_DATE_MAX_DAYS_AFTER_REGISTRATION))
+        val tooLate = value.isAfter(registrationDate)
         when {
           lmp != null && !value.isAfter(lmp) -> Violation.ANC1_DATE_NOT_AFTER_LMP
           tooLate -> Violation.ANC1_DATE_TOO_LATE

@@ -15,6 +15,8 @@ import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormSubmissionApi
 import org.armman.sakhi.data.forms.SubmitErrorCopy
 import org.armman.sakhi.data.forms.VisitCodeFormResolver
+import org.armman.sakhi.data.lmpchange.LmpChangeCapture
+import org.armman.sakhi.data.lmpchange.LmpChangeRepository
 import org.armman.sakhi.data.lookup.LookupRepository
 import org.armman.sakhi.data.referral.CreateReferralOutcome
 import org.armman.sakhi.data.referral.Referral
@@ -198,6 +200,8 @@ class VisitFormSubmissionCoordinator @Inject constructor(
   private val referralRepository: ReferralRepository,
   private val referralLinkDao: ReferralLinkDao,
   private val riskAssessmentDao: RiskAssessmentDao,
+  /** Task 2 (LMP/Reopen/Referral/Audit task list). */
+  private val lmpChangeRepository: LmpChangeRepository,
 ) {
 
   private val riskAssessmentJsonMapper = Gson()
@@ -233,6 +237,15 @@ class VisitFormSubmissionCoordinator @Inject constructor(
      * creates a referral the Sakhi didn't actually fill in facility/type for.
      */
     referralCapture: ReferralCapture? = null,
+    /**
+     * Task 2 (LMP/Reopen/Referral/Audit task list): whatever the Sakhi filled on ANC_VISIT's own
+     * sonography-confirmation branch (`lmp_date_edit` + `upload_sonography_report_image`) — see
+     * [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel.lmpChangeCaptureOrNull]'s doc. Null
+     * when she left that branch untouched (sonography = No, or the branch is incomplete), in which
+     * case [maybeCreateLmpChangeRequest] never fires. Only meaningful for ANC_VISIT — every other
+     * caller of [submit] passes nothing and gets the default no-op, same as [referralCapture].
+     */
+    lmpChangeCapture: LmpChangeCapture? = null,
     /**
      * Fired the moment step 1 succeeds, with the server's visit id — before step 2 is even
      * attempted. The background executor uses this to persist that id onto the draft immediately,
@@ -330,6 +343,16 @@ class VisitFormSubmissionCoordinator @Inject constructor(
     // CR-042: only after the form submission above has actually succeeded — see this class's own
     // doc for why a generic hook here, rather than a PP/NN-specific coordinator, is correct.
     advanceDeliverySessionIfDue(schedule)
+
+    // Task 2: only after the form submission above has actually succeeded, same rationale as
+    // advanceDeliverySessionIfDue and triggerRiskAssessment below — see maybeCreateLmpChangeRequest's
+    // own doc for why a failure here never fails this whole submit() call. Independent of the risk
+    // assessment/referral chain below (an LMP correction doesn't need a risk-assessment response),
+    // so it runs here rather than being threaded through triggerRiskAssessment.
+    maybeCreateLmpChangeRequest(
+      beneficiaryId = serverBeneficiaryId,
+      capture = lmpChangeCapture,
+    )
 
     // Phase 5 (CR — offline high-risk rule evaluation): only after the form submission above has
     // actually succeeded, same as advanceDeliverySessionIfDue — see triggerRiskAssessment's own
@@ -485,6 +508,64 @@ class VisitFormSubmissionCoordinator @Inject constructor(
   }
 
   /**
+   * Task 2 (LMP/Reopen/Referral/Audit task list): uploads the captured sonography photo and
+   * submits `POST /lmp-change-requests`, once the ANC_VISIT submission above has already
+   * succeeded. Deliberately does nothing when [capture] is null — same "she has to have actually
+   * filled the branch" rule [maybeCreateReferral] applies to [ReferralCapture], not a decision this
+   * function makes on its own.
+   *
+   * Best-effort and non-blocking, exactly like [maybeCreateReferral]: a failure at either step
+   * (upload or the create call) must never flip an otherwise-successful visit submission to
+   * Failed/retryable. Unlike referral evidence (queued offline via
+   * [org.armman.sakhi.data.referral.ReferralEvidenceSyncExecutor] for later retry), a failure here
+   * is NOT retried automatically — there is no established offline queue for LMP correction
+   * submissions (mirrors [org.armman.sakhi.data.lmpchange.RemoteLmpChangeRepository]'s own
+   * documented "rare, online-only write" rationale). A Sakhi whose LMP correction silently failed
+   * to submit sees no different outcome than one who never attempted it — a known, accepted gap
+   * flagged here rather than solved by inventing a queue this CR doesn't call for.
+   *
+   * A duplicate call for the same visit (e.g. a resumed background sync retrying a submission
+   * whose LMP request already succeeded on a prior attempt) is safe: `POST /lmp-change-requests`
+   * is idempotent on [LmpChangeCapture]'s own client-minted key, minted fresh per call here rather
+   * than threaded through from the draft the way [localSubmissionUuid] is — see this function's own
+   * "not retried automatically" note above for why that gap doesn't matter in practice today (the
+   * immediate online path is the only caller that ever supplies a non-null [capture]).
+   */
+  private suspend fun maybeCreateLmpChangeRequest(
+    beneficiaryId: String,
+    capture: LmpChangeCapture?,
+  ) {
+    if (capture == null) return
+
+    val outcome = try {
+      val file = java.io.File(capture.sonographyImageFilePath)
+      if (!file.exists()) {
+        Result.failure(IllegalStateException("sonography image file missing: ${capture.sonographyImageFilePath}"))
+      } else {
+        lmpChangeRepository.uploadSonographyImage(file).mapCatching { assetId ->
+          lmpChangeRepository.submitLmpChangeRequest(
+            beneficiaryId = beneficiaryId,
+            newLmpDate = capture.newLmpDate,
+            sonographyImageAssetId = assetId,
+            localRequestUuid = UUID.randomUUID().toString(),
+          )
+        }
+      }
+    } catch (e: CancellationException) {
+      // Not a failure: the scope is going away. Rethrown so structured concurrency still holds.
+      throw e
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+
+    outcome.onFailure { error ->
+      Log.w(TAG, "maybeCreateLmpChangeRequest(beneficiaryId=$beneficiaryId) failed — visit submission still succeeded", error)
+    }.onSuccess {
+      Log.i(TAG, "maybeCreateLmpChangeRequest(beneficiaryId=$beneficiaryId): submitted")
+    }
+  }
+
+  /**
    * CR-Referral-01: creates exactly one referral for this visit, using the SERVER's own
    * authoritative `isReferralTrigger` flags from the just-completed `POST /risk-assessments` call
    * (not the on-device GoRules result — the server re-evaluates from raw answers independently,
@@ -543,7 +624,7 @@ class VisitFormSubmissionCoordinator @Inject constructor(
       when (outcome) {
         is CreateReferralOutcome.Created -> {
           Log.i(TAG, "maybeCreateReferral(visitId=$visitId): created referral ${outcome.referral.referralId}")
-          cacheReferralLink(localScheduleUuid, outcome.referral, referralCapture.referralVisitName)
+          cacheReferralLink(localScheduleUuid, beneficiaryId, outcome.referral, referralCapture.referralVisitName)
         }
         is CreateReferralOutcome.AlreadyExists -> {
           // Idempotent per backend's #197 fix: this visit already had a referral (e.g. a resumed
@@ -551,7 +632,7 @@ class VisitFormSubmissionCoordinator @Inject constructor(
           // attempt) — the existing one is returned untouched, not a new one, so this is the
           // one-referral-per-visit rule working correctly, not a warning-worthy condition.
           Log.i(TAG, "maybeCreateReferral(visitId=$visitId): referral already existed (${outcome.referral.referralId}), one-per-visit held")
-          cacheReferralLink(localScheduleUuid, outcome.referral, referralCapture.referralVisitName)
+          cacheReferralLink(localScheduleUuid, beneficiaryId, outcome.referral, referralCapture.referralVisitName)
         }
       }
     }
@@ -564,12 +645,21 @@ class VisitFormSubmissionCoordinator @Inject constructor(
    * otherwise-successful visit submission to Failed/retryable, so it is swallowed the same way
    * [maybeCreateReferral]'s own network call is.
    *
+   * [beneficiaryId] is stamped onto the cached row (CR-Referral-01, in-visit autopopulation fix)
+   * purely so [ReferralLinkDao.countByBeneficiaryId] can later count this beneficiary's referrals
+   * for the in-visit capture step's own "RV{n+1}" auto-numbering — not used for anything else here.
+   *
    * [referralVisitName] comes from the just-submitted [ReferralCapture], NOT [referral] itself —
    * `POST /referrals`'s response has no such field (it's a request-only, backend-unaware concept,
    * same as [ReferralCapture.referralVisitName]'s doc explains) — see [ReferralLinkEntity
    * .referralVisitName]'s own doc for who reads it back.
    */
-  private suspend fun cacheReferralLink(localScheduleUuid: String, referral: Referral, referralVisitName: String?) {
+  private suspend fun cacheReferralLink(
+    localScheduleUuid: String,
+    beneficiaryId: String,
+    referral: Referral,
+    referralVisitName: String?,
+  ) {
     runCatching {
       referralLinkDao.upsert(
         ReferralLinkEntity(
@@ -583,6 +673,7 @@ class VisitFormSubmissionCoordinator @Inject constructor(
           facilityName = referral.facilityName,
           facilityType = referral.facilityType.name,
           referralVisitName = referralVisitName.orEmpty(),
+          beneficiaryId = beneficiaryId,
         ),
       )
     }.onFailure { error ->

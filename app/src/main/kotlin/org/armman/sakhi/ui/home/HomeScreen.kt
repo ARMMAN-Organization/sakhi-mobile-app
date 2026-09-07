@@ -28,6 +28,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.armman.sakhi.R
 import org.armman.sakhi.ui.components.AppLogo
 import org.armman.sakhi.ui.components.ConfirmationDialog
+import org.armman.sakhi.ui.components.NotificationBannerStack
 import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG200
@@ -51,12 +52,14 @@ fun HomeScreen(
   onSeeVisitTracker: () -> Unit = {},
   onProfile: () -> Unit = {},
   onRegisterNew: () -> Unit = {},
+  onFillReferralForm: (beneficiaryId: String, referralId: String) -> Unit = { _, _ -> },
   viewModel: HomeViewModel = hiltViewModel(),
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
   val uploadModalState by viewModel.uploadModalState.collectAsStateWithLifecycle()
   val pendingUploadCount by viewModel.pendingUploadCount.collectAsStateWithLifecycle()
   val duplicateReview by viewModel.duplicateReview.collectAsStateWithLifecycle()
+  val notifications by viewModel.notifications.collectAsStateWithLifecycle()
 
   // Reruns on every fresh entry into composition, including a pop-back from "Start Visit Form"
   // after registering a new beneficiary — so the dashboard just changed by that registration
@@ -67,10 +70,15 @@ fun HomeScreen(
   // Offline Data Upload tap (bharath, 2026-08-08) - see HomeViewModel.onDataUploadClicked's doc.
   val context = LocalContext.current
   val offlineUploadMessage = stringResource(R.string.home_data_upload_offline)
+  val referralFollowUpNotFoundMessage = stringResource(R.string.notification_referral_followup_not_found)
   LaunchedEffect(viewModel) {
     viewModel.events.collect { event ->
       when (event) {
         HomeEvent.OfflineUploadBlocked -> Toast.makeText(context, offlineUploadMessage, Toast.LENGTH_SHORT).show()
+        is HomeEvent.NavigateToReferralFollowUp ->
+          onFillReferralForm(event.beneficiaryId, event.referralId)
+        HomeEvent.ReferralFollowUpNotFound ->
+          Toast.makeText(context, referralFollowUpNotFoundMessage, Toast.LENGTH_SHORT).show()
       }
     }
   }
@@ -84,17 +92,29 @@ fun HomeScreen(
         shape = RoundedCornerShape(topStart = Dimens.SheetRadius, topEnd = Dimens.SheetRadius),
         modifier = Modifier.fillMaxSize(),
       ) {
-        when (val state = uiState) {
-          is HomeUiState.Loading -> HomeLoading()
-          is HomeUiState.Error -> HomeError(onRetry = viewModel::loadSummary)
-          is HomeUiState.Success -> HomeContent(
-            summary = state.summary,
-            pendingUploadCount = pendingUploadCount,
-            onAllBeneficiaries = onAllBeneficiaries,
-            onSeeVisitTracker = onSeeVisitTracker,
-            onRegisterNew = onRegisterNew,
-            onDataUploadClick = viewModel::onDataUploadClicked,
+        Column(modifier = Modifier.fillMaxSize()) {
+          // Stacks above every dashboard state (loading/error/success) per the design's fixed
+          // banner placement — a Sakhi waiting on a slow load or looking at an error still needs
+          // to see an active escalation notification.
+          NotificationBannerStack(
+            notifications = notifications,
+            onDismiss = viewModel::onDismissNotification,
+            onCtaClick = viewModel::onFillReferralFormClicked,
           )
+          Box(modifier = Modifier.weight(1f)) {
+            when (val state = uiState) {
+              is HomeUiState.Loading -> HomeLoading()
+              is HomeUiState.Error -> HomeError(onRetry = viewModel::loadSummary)
+              is HomeUiState.Success -> HomeContent(
+                summary = state.summary,
+                pendingUploadCount = pendingUploadCount,
+                onAllBeneficiaries = onAllBeneficiaries,
+                onSeeVisitTracker = onSeeVisitTracker,
+                onRegisterNew = onRegisterNew,
+                onDataUploadClick = viewModel::onDataUploadClicked,
+              )
+            }
+          }
         }
       }
     }

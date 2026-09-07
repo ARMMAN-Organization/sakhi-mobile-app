@@ -9,6 +9,7 @@ import org.armman.sakhi.data.childregistration.ChildFormDraftRepository
 import org.armman.sakhi.data.childregistration.ChildFormSubmitResult
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
+import org.armman.sakhi.data.forms.EditableSubmissionInfo
 import org.armman.sakhi.data.forms.DynamicFormSubmitResult
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormUploadRecord
@@ -132,6 +133,10 @@ class CombinedUploadRecordsSourceTest {
     override suspend fun getUploadRecords(): List<FormUploadRecord> = records.value
 
     override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = records
+
+    override suspend fun getEditableSubmission(remoteBeneficiaryId: String): EditableSubmissionInfo? = null
+
+    override suspend fun applyFieldEdits(localBeneficiaryId: String, edits: Map<String, String>) = Unit
   }
 
   private class FakeChildRepository(
@@ -158,6 +163,10 @@ class CombinedUploadRecordsSourceTest {
     override suspend fun getUploadRecords(): List<FormUploadRecord> = records.value
 
     override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = records
+
+    override suspend fun getEditableSubmission(remoteBeneficiaryId: String): EditableSubmissionInfo? = null
+
+    override suspend fun applyFieldEdits(localBeneficiaryId: String, edits: Map<String, String>) = Unit
   }
 
   /** Only [observeUploadRecords] matters here; the write path is covered by
@@ -173,10 +182,13 @@ class CombinedUploadRecordsSourceTest {
       visitDate: LocalDate,
       riskResult: org.armman.sakhi.data.rules.RiskGradingResult?,
       referralCapture: org.armman.sakhi.data.referral.ReferralCapture?,
+      lmpChangeCapture: org.armman.sakhi.data.lmpchange.LmpChangeCapture?,
     ): VisitFormSubmitResult = VisitFormSubmitResult.Synced()
 
     override suspend fun getUploadRecords(): List<FormUploadRecord> = records.value
 
     override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = records
+
+    override suspend fun getAnswers(localScheduleUuid: String): FormAnswers? = null
   }
 }

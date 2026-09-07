@@ -45,8 +45,11 @@ import org.armman.sakhi.ui.beneficiaryprofile.components.IdentityCard
 import org.armman.sakhi.ui.beneficiaryprofile.components.LastVisitStatsCard
 import org.armman.sakhi.ui.beneficiaryprofile.components.VisitHistoryCard
 import org.armman.sakhi.ui.components.BackHeader
+import org.armman.sakhi.ui.components.FullScreenLoadingOverlay
 import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.components.SecondaryButton
+import org.armman.sakhi.ui.components.StatusBanner
+import org.armman.sakhi.ui.components.StatusBannerVariant
 import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG400
 import org.armman.sakhi.ui.theme.NeutralG50
@@ -96,6 +99,11 @@ fun BeneficiaryProfileScreen(
    * [sessionUuid] [DeliveryButtonState.ChildRegistrationPending] carries — see that state's own doc.
    * Default no-op keeps existing previews/tests that don't care about this working unchanged. */
   onContinueChildRegistration: (beneficiaryId: String, sessionUuid: String) -> Unit = { _, _ -> },
+  /** CR-Registration-Edit Phase 1: IdentityCard's Edit pill — opens
+   * [org.armman.sakhi.ui.beneficiaryprofile.BeneficiaryFieldEditScreen] for this beneficiary's
+   * MOTHER_REGISTRATION/CHILD_REGISTRATION fields. Default no-op keeps existing previews/tests
+   * that don't care about this working unchanged. */
+  onEditIdentity: (beneficiaryId: String, type: BeneficiaryType) -> Unit = { _, _ -> },
   viewModel: BeneficiaryProfileViewModel = hiltViewModel(),
 ) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -150,6 +158,8 @@ fun BeneficiaryProfileScreen(
               onComingSoon = { onComingSoon() },
               canStartVisit = state.canStartVisit,
               hasPendingReopenRequest = state.hasPendingReopenRequest,
+              hasRejectedReopenRequest = state.hasRejectedReopenRequest,
+              hasRejectedLmpChangeRequest = state.hasRejectedLmpChangeRequest,
               isReopenEligible = state.isReopenEligible,
               deliveryButtonState = state.deliveryButtonState,
               onStartVisit = { visit -> onStartVisit(profile.id, visit) },
@@ -163,11 +173,13 @@ fun BeneficiaryProfileScreen(
               onContinueChildRegistration = { sessionUuid ->
                 onContinueChildRegistration(profile.id, sessionUuid)
               },
+              onEditIdentity = { onEditIdentity(profile.id, profile.type) },
             )
           }
         }
       }
     }
+    FullScreenLoadingOverlay(visible = state.isSubmittingReopen)
   }
 }
 
@@ -177,6 +189,8 @@ private fun ProfileContent(
   isTablet: Boolean,
   canStartVisit: Boolean,
   hasPendingReopenRequest: Boolean,
+  hasRejectedReopenRequest: Boolean,
+  hasRejectedLmpChangeRequest: Boolean,
   isReopenEligible: Boolean,
   deliveryButtonState: DeliveryButtonState,
   onComingSoon: () -> Unit,
@@ -187,6 +201,7 @@ private fun ProfileContent(
   onStartDelivery: (sessionUuid: String) -> Unit,
   onResumeDeliveryVisit: (localScheduleUuid: String, label: String) -> Unit,
   onContinueChildRegistration: (sessionUuid: String) -> Unit,
+  onEditIdentity: () -> Unit,
 ) {
   Column(modifier = Modifier.fillMaxSize()) {
     // Scrollable body; the Delivery/Closure footer stays pinned below it.
@@ -196,7 +211,19 @@ private fun ProfileContent(
         .verticalScroll(rememberScrollState())
         .padding(Dimens.ItemSpacing),
     ) {
-      IdentityCard(profile = profile, isTablet = isTablet, onEdit = onComingSoon)
+      IdentityCard(profile = profile, isTablet = isTablet, onEdit = onEditIdentity)
+      // Task 4 (LMP/Reopen/Referral/Audit task list): a persistent banner, not a one-time Toast --
+      // detected on every profile load, so it must stay visible for as long as the server still
+      // reports the rejection, same rationale as the Reopen-rejection banner in Footer below.
+      // MOTHER-only (LMP is never asked of an infant profile), and independent of
+      // ACTIVE/CLOSED status -- unlike Reopen, an LMP correction has no status gating of its own.
+      if (profile.type == BeneficiaryType.MOTHER && hasRejectedLmpChangeRequest) {
+        StatusBanner(
+          message = "Your LMP correction request was rejected. Please check with your Supervisor.",
+          variant = StatusBannerVariant.Error,
+          modifier = Modifier.fillMaxWidth().padding(top = Dimens.ItemSpacing),
+        )
+      }
       LastVisitStatsCard(
         stats = profile.lastVisitStats,
         isTablet = isTablet,
@@ -254,6 +281,7 @@ private fun ProfileContent(
       status = profile.status,
       visits = profile.visits,
       hasPendingReopenRequest = hasPendingReopenRequest,
+      hasRejectedReopenRequest = hasRejectedReopenRequest,
       isReopenEligible = isReopenEligible,
       deliveryButtonState = deliveryButtonState,
       onComingSoon = onComingSoon,
@@ -300,6 +328,11 @@ private fun ProfileContent(
  * calls [onReopen] directly. This is a judgment call flagged for product/design review: it means
  * a Reopen is no longer captured as an ad-hoc form submission/draft at all, only as a
  * `POST /reopen-requests` row.
+ *
+ * Task-6 (rejection half): when [hasRejectedReopenRequest] is true, a [StatusBanner] renders above
+ * the Reopen button telling the Sakhi her previous request was rejected -- the Reopen button
+ * itself is untouched (still driven by [isReopenEligible]/[hasPendingReopenRequest] exactly as
+ * before), since a rejection doesn't change eligibility, it just means she may want to try again.
  */
 @Composable
 private fun Footer(
@@ -307,6 +340,7 @@ private fun Footer(
   status: BeneficiaryStatus,
   visits: List<ProfileVisit>,
   hasPendingReopenRequest: Boolean,
+  hasRejectedReopenRequest: Boolean,
   isReopenEligible: Boolean,
   deliveryButtonState: DeliveryButtonState,
   onComingSoon: () -> Unit,
@@ -393,6 +427,21 @@ private fun Footer(
     // closure — see BeneficiaryProfileViewModel.isReopenEligible's own doc for the exact rule and
     // its "unknown reason defaults to eligible" caveat.
     if (isReopenEligible) {
+      // Task-6 (rejection half): a persistent banner, not a one-time Toast -- this is detected on
+      // every profile load (same as hasPendingReopenRequest/hasApprovedReopenRequest), so it must
+      // stay visible for as long as the server still reports the rejection, rather than firing
+      // once and being lost if the Sakhi navigates away before seeing it.
+      if (hasRejectedReopenRequest) {
+        StatusBanner(
+          message = "Your reopen request was rejected. You can submit a new request.",
+          variant = StatusBannerVariant.Error,
+          modifier = Modifier.fillMaxWidth().padding(
+            start = Dimens.ItemSpacing,
+            end = Dimens.ItemSpacing,
+            bottom = Dimens.ItemSpacing,
+          ),
+        )
+      }
       Row(
         horizontalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
         modifier = Modifier.fillMaxWidth().padding(

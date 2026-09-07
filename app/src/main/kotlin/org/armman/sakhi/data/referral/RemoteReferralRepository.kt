@@ -71,6 +71,10 @@ class RemoteReferralRepository @Inject constructor(
   override suspend fun getCachedReferralVisitName(referralId: String): String? =
     referralLinkDao.getByReferralId(referralId)?.referralVisitName?.takeIf { it.isNotBlank() }
 
+  /** See [ReferralRepository.countReferralsForBeneficiary]'s doc — pure local-cache read. */
+  override suspend fun countReferralsForBeneficiary(beneficiaryId: String): Int =
+    referralLinkDao.countByBeneficiaryId(beneficiaryId)
+
   override suspend fun getPendingFollowUps(): List<ReferralFollowUp> = mutex.withLock {
     val fetched = fetchFollowUps()
     if (fetched != null) {
@@ -250,6 +254,34 @@ class RemoteReferralRepository @Inject constructor(
     mediaData.id ?: throw IllegalStateException("POST /media succeeded but returned no media id")
   }
 
+  /** See [ReferralRepository.refreshReferralStatuses]'s doc. Best-effort like every other poll
+   * in this app: a network failure, an unauthorized response, or a malformed body all surface as
+   * [Result.failure] here (never a thrown exception past this function), leaving every cached row
+   * exactly as it was — callers already wrap this in `runCatching { }.getOrDefault(...)`, same as
+   * [org.armman.sakhi.ui.beneficiaryprofile.BeneficiaryProfileViewModel]'s other polls, so this
+   * still returns a real [Result] rather than swallowing failures itself, for symmetry with
+   * [createReferral]/[submitFollowUp]/[convertToAccompanied] above. */
+  override suspend fun refreshReferralStatuses(beneficiaryId: String): Result<Unit> = runCatching {
+    val response = referralApi.getReferrals(beneficiaryId)
+    if (!response.isSuccessful) {
+      val apiError = ApiErrorParser.parse(response.errorBody()?.string())
+      throw IllegalStateException(apiError.message ?: "GET /referrals failed: HTTP ${response.code()}")
+    }
+    val items = response.body()?.data?.items.orEmpty()
+    for (item in items) {
+      val referralId = item.id?.takeIf { it.isNotBlank() } ?: continue
+      val cached = referralLinkDao.getByReferralId(referralId) ?: continue
+      referralLinkDao.upsert(
+        cached.copy(
+          status = item.status.toReferralStatus().name,
+          decidedByUserId = item.decidedByUserId,
+          decidedAt = item.decidedAt,
+          decisionNotes = item.decisionNotes,
+        ),
+      )
+    }
+  }
+
   private fun ReferralDataDto.toDomain() = Referral(
     referralId = id.orEmpty(),
     visitId = visitId,
@@ -262,6 +294,9 @@ class RemoteReferralRepository @Inject constructor(
     triggeringConditionIds = triggerConditionListJson.orEmpty(),
     createdAt = createdAt,
     validTill = validTill,
+    decidedByUserId = decidedByUserId,
+    decidedAt = decidedAt,
+    decisionNotes = decisionNotes,
   )
 
   private suspend fun fetchFollowUps(): List<ReferralFollowUp>? {

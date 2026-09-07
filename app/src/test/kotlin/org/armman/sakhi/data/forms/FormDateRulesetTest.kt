@@ -498,14 +498,14 @@ class FormDateRulesetTest {
   private val anc1Date = FormDateRuleset.ANC1_DATE_QUESTION_CODE
 
   @Test
-  fun `AD-1 bounds run from the day after LMP to registration date plus 5 days`() {
+  fun `AD-1 bounds run from the day after LMP to today`() {
     val lmp = registrationDate.minusDays(60)
     val bounds = requireNotNull(
       FormDateRuleset.boundsFor(anc1Date, answers(LMP_DATE_QUESTION_CODE to lmp.toString()), registrationDate),
     )
 
     assertEquals(lmp.plusDays(1), bounds.min)
-    assertEquals(registrationDate.plusDays(FormDateRuleset.ANC1_DATE_MAX_DAYS_AFTER_REGISTRATION), bounds.max)
+    assertEquals(registrationDate, bounds.max)
   }
 
   @Test
@@ -513,7 +513,17 @@ class FormDateRulesetTest {
     val bounds = requireNotNull(FormDateRuleset.boundsFor(anc1Date, FormAnswers(), registrationDate))
 
     assertNull(bounds.min)
-    assertEquals(registrationDate.plusDays(FormDateRuleset.ANC1_DATE_MAX_DAYS_AFTER_REGISTRATION), bounds.max)
+    assertEquals(registrationDate, bounds.max)
+  }
+
+  @Test
+  fun `AD-1b bug fix - the picker no longer opens 5 days into the future`() {
+    // Reported bug: max = registrationDate.plusDays(5) let the calendar (and a manually-entered
+    // value) accept a date up to 5 days from now. "No future date" now wins outright.
+    val bounds = requireNotNull(FormDateRuleset.boundsFor(anc1Date, FormAnswers(), registrationDate))
+
+    assertEquals(registrationDate, bounds.max)
+    assertTrue(registrationDate.plusDays(5).isAfter(requireNotNull(bounds.max)))
   }
 
   @Test
@@ -530,14 +540,13 @@ class FormDateRulesetTest {
   }
 
   @Test
-  fun `AD-4 registration date plus 5 days is accepted, plus 6 days is rejected`() {
+  fun `AD-4 bug fix - today is accepted, tomorrow is rejected (the 5-day future grace is gone)`() {
     val lmp = registrationDate.minusDays(60)
-    val atBound = registrationDate.plusDays(FormDateRuleset.ANC1_DATE_MAX_DAYS_AFTER_REGISTRATION)
 
-    assertNull(violationForAnc1(lmp, atBound))
+    assertNull(violationForAnc1(lmp, registrationDate))
     assertEquals(
       FormDateRuleset.Violation.ANC1_DATE_TOO_LATE,
-      violationForAnc1(lmp, atBound.plusDays(1)),
+      violationForAnc1(lmp, registrationDate.plusDays(1)),
     )
   }
 
@@ -632,10 +641,32 @@ class FormDateRulesetTest {
       ),
     )
 
-    assertEquals(
-      answeredRegistration.minusDays(FormDateRuleset.LMP_MIN_DAYS_BEFORE_REGISTRATION),
-      bounds.max,
+    assertEquals(answeredRegistration, bounds.max)
+  }
+
+  @Test
+  fun `LMP-1 bug fix - the picker ceiling is today, not today minus the 31-day recency floor`() {
+    // Reported bug: the calendar's max-selectable date was ~31 days before today (the
+    // LMP_MIN_DAYS_BEFORE_REGISTRATION recency rule applied at the picker level), so nothing
+    // between ~a month ago and today could be picked. The recency rule is still enforced (see
+    // `lmp one day past the near window bound is rejected` below) — just as a post-pick
+    // validation message, not a picker-level block.
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(LMP_DATE_QUESTION_CODE, FormAnswers(), registrationDate),
     )
+
+    assertEquals(registrationDate, bounds.max)
+  }
+
+  @Test
+  fun `LMP-2 bug fix - a date within the 31-day recency window is selectable but still flagged on pick`() {
+    val nearToday = registrationDate.minusDays(5)
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(LMP_DATE_QUESTION_CODE, FormAnswers(), registrationDate),
+    )
+
+    assertFalse(nearToday.isAfter(requireNotNull(bounds.max)))
+    assertEquals(FormDateRuleset.Violation.LMP_TOO_RECENT, violationForLmp(nearToday))
   }
 
   // --- Non-violations and unruled fields -------------------------------------------------------
@@ -836,17 +867,20 @@ class FormDateRulesetTest {
   // --- Referral form: filled date / decided visit date ------------------------------------------
 
   @Test
-  fun `referral form filled date is capped at today, with no lower bound`() {
+  fun `referral form filled date is floored and capped at today, accepting only todays date`() {
+    // Bug fix (2026-09-04): spec row 1 says "Should accept only today's date," but this used to
+    // have no lower bound at all (matching the backend's looser notFuture-only dateRule), letting
+    // a Sakhi manually backdate it after the today-prefill. Now client-side floored at today too.
     val bounds = requireNotNull(
       FormDateRuleset.boundsFor(FormDateRuleset.REFERRAL_FORM_FILLED_DATE_QUESTION_CODE, FormAnswers(), registrationDate),
     )
-    assertNull(bounds.min)
+    assertEquals(registrationDate, bounds.min)
     assertEquals(registrationDate, bounds.max)
   }
 
   @Test
-  fun `decided visit date floors at the answered referral form filled date, with no upper bound`() {
-    val filledDate = registrationDate.minusDays(1)
+  fun `decided visit date floors at the answered referral form filled date when that is today or later`() {
+    val filledDate = registrationDate.plusDays(2)
     val bounds = requireNotNull(
       FormDateRuleset.boundsFor(
         FormDateRuleset.DECIDED_VISIT_DATE_QUESTION_CODE,
@@ -862,6 +896,23 @@ class FormDateRulesetTest {
   fun `decided visit date falls back to today when referral form filled date is unanswered`() {
     val bounds = requireNotNull(
       FormDateRuleset.boundsFor(FormDateRuleset.DECIDED_VISIT_DATE_QUESTION_CODE, FormAnswers(), registrationDate),
+    )
+    assertEquals(registrationDate, bounds.min)
+    assertNull(bounds.max)
+  }
+
+  @Test
+  fun `decided visit date never floors before today even if referral form filled date was backdated`() {
+    // Bug fix (2026-09-04): referral_form_filled_date has no lower bound of its own, so a Sakhi
+    // can backdate it. decided_visit_date must never inherit a past-date floor from it — spec row
+    // 8 requires "todays date or future date" unconditionally.
+    val backdatedFilledDate = registrationDate.minusDays(1)
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(
+        FormDateRuleset.DECIDED_VISIT_DATE_QUESTION_CODE,
+        answers(FormDateRuleset.REFERRAL_FORM_FILLED_DATE_QUESTION_CODE to backdatedFilledDate.toString()),
+        registrationDate,
+      ),
     )
     assertEquals(registrationDate, bounds.min)
     assertNull(bounds.max)

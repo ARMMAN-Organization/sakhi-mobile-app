@@ -25,11 +25,14 @@ import org.armman.sakhi.data.visitform.FakeVisitFormSyncScheduler
 import org.armman.sakhi.data.adhocform.FakeAdHocFormSyncScheduler
 import org.armman.sakhi.data.forms.FakeDynamicFormSyncScheduler
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
+import org.armman.sakhi.data.forms.EditableSubmissionInfo
 import org.armman.sakhi.data.forms.DynamicFormSubmitResult
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormUploadRecord
+import org.armman.sakhi.data.notification.FakeNotificationRepository
 import org.armman.sakhi.data.sync.ManualSyncTrigger
 import org.armman.sakhi.data.sync.UploadRecordsSource
+import org.armman.sakhi.data.visitform.FakeReferralRepository
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -149,6 +152,10 @@ class HomeViewModelTest {
     override suspend fun getUploadRecords(): List<FormUploadRecord> = emptyList()
 
     override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = flowOf(emptyList())
+
+    override suspend fun getEditableSubmission(remoteBeneficiaryId: String): EditableSubmissionInfo? = null
+
+    override suspend fun applyFieldEdits(localBeneficiaryId: String, edits: Map<String, String>) = Unit
   }
 
   private lateinit var repository: FakeDashboardRepository
@@ -162,6 +169,8 @@ class HomeViewModelTest {
   private lateinit var adHocFormScheduler: FakeAdHocFormSyncScheduler
   private lateinit var manualSyncTrigger: ManualSyncTrigger
   private lateinit var connectivityChecker: FakeConnectivityChecker
+  private lateinit var notificationRepository: FakeNotificationRepository
+  private lateinit var referralRepository: FakeReferralRepository
 
   @Before
   fun setUp() {
@@ -187,6 +196,8 @@ class HomeViewModelTest {
       org.armman.sakhi.data.referral.FakeReferralEvidenceSyncScheduler(),
     )
     connectivityChecker = FakeConnectivityChecker()
+    notificationRepository = FakeNotificationRepository()
+    referralRepository = FakeReferralRepository()
   }
 
   @After
@@ -195,7 +206,15 @@ class HomeViewModelTest {
   }
 
   private fun viewModel() =
-    HomeViewModel(repository, uploadRecordsSource, manualSyncTrigger, draftRepository, connectivityChecker)
+    HomeViewModel(
+      repository,
+      uploadRecordsSource,
+      manualSyncTrigger,
+      draftRepository,
+      connectivityChecker,
+      notificationRepository,
+      referralRepository,
+    )
 
   /** Keeps the WhileSubscribed StateFlows active for the duration of a test so their derived values
    * are computed (mirrors the screen collecting them). */

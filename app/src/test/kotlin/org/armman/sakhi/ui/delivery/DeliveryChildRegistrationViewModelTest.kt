@@ -49,6 +49,7 @@ import org.armman.sakhi.data.motherlink.MotherPrefillQuestionCodes
 import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
 import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
 import org.armman.sakhi.data.schedule.VisitCodeType
+import org.armman.sakhi.data.schedule.VisitScheduleStatus
 import org.armman.sakhi.data.schedule.schedule
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -522,6 +523,40 @@ class DeliveryChildRegistrationViewModelTest {
     val submitted = viewModel.events.first() as DeliveryChildRegistrationEvent.Submitted
     assertFalse(submitted.hasMoreChildren)
     assertEquals("pp1-schedule", submitted.pp1LocalScheduleUuid)
+  }
+
+  @Test
+  fun `onSubmit Synced with every child registered but PP1 already completed does not hand off into PP1`() = runTest {
+    // Bug fix (2026-09-02): the Sakhi already opened PP1 from "See Visits" and submitted it before
+    // finishing this child's own form — the schedule row is COMPLETED. findPp1ScheduleUuid must
+    // not hand that already-done visit back to the screen for auto-navigation, or PP1 reopens as a
+    // blank form even though it was already submitted.
+    deliverySessionRepository.save(session(child1BeneficiaryId = "child-1", nextChildIndexToRegister = 0))
+    formsRepository.version = versionWith(fields = emptyList())
+    deliveryChildRegistrationDraftRepository.resultToReturn = DeliveryChildRegistrationSubmitResult.Synced
+    visitScheduleRepository.saveGenerated(
+      listOf(
+        schedule(
+          "pp1-schedule",
+          localBeneficiaryId = "mother-1",
+          visitCode = "PP1",
+          visitType = VisitCodeType.PP,
+          sequenceNo = 1,
+          status = VisitScheduleStatus.COMPLETED,
+        ),
+      ),
+    )
+    val viewModel = buildViewModel()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    deliverySessionRepository.save(session(step = DeliverySessionStep.PP1, child1BeneficiaryId = "child-1", nextChildIndexToRegister = 1))
+
+    viewModel.onSubmit()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    val submitted = viewModel.events.first() as DeliveryChildRegistrationEvent.Submitted
+    assertFalse(submitted.hasMoreChildren)
+    assertNull(submitted.pp1LocalScheduleUuid)
   }
 
   @Test

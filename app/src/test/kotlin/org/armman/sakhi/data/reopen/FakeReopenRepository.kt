@@ -2,12 +2,15 @@ package org.armman.sakhi.data.reopen
 
 /** In-memory fake — records every [submitReopenRequest] call for assertions and lets a test
  * configure either an [exceptionToThrow] to simulate a failed `POST /reopen-requests` call,
- * [pendingBeneficiaryIds] to control [hasPendingReopenRequest]'s answer, or
- * [approvedBeneficiaryIds] to control [hasApprovedReopenRequest]'s answer (CR-Closure-04). */
+ * [pendingBeneficiaryIds] to control [hasPendingReopenRequest]'s answer,
+ * [approvedBeneficiaryIds] to control [hasApprovedReopenRequest]'s answer (CR-Closure-04), or
+ * [rejectedBeneficiaryIds] to control [hasRejectedReopenRequest]'s answer (task-6 rejection half).
+ */
 class FakeReopenRepository(
   var exceptionToThrow: ReopenSubmissionException? = null,
   var pendingBeneficiaryIds: Set<String> = emptySet(),
   var approvedBeneficiaryIds: Set<String> = emptySet(),
+  var rejectedBeneficiaryIds: Set<String> = emptySet(),
 ) : ReopenRepository {
 
   data class RecordedRequest(
@@ -33,4 +36,7 @@ class FakeReopenRepository(
 
   override suspend fun hasApprovedReopenRequest(beneficiaryId: String): Boolean =
     beneficiaryId in approvedBeneficiaryIds
+
+  override suspend fun hasRejectedReopenRequest(beneficiaryId: String): Boolean =
+    beneficiaryId in rejectedBeneficiaryIds
 }

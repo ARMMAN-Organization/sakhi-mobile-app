@@ -41,6 +41,7 @@ import org.armman.sakhi.data.forms.RegistrationDatePrefill
 import org.armman.sakhi.data.lookup.LookupRepository
 import org.armman.sakhi.data.schedule.VisitCodeType
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
+import org.armman.sakhi.data.schedule.VisitScheduleStatus
 import java.time.LocalDate
 import java.util.UUID
 import javax.inject.Inject
@@ -535,12 +536,25 @@ class DeliveryChildRegistrationViewModel @Inject constructor(
     else -> null
   }
 
-  /** The just-generated PP1 row for the mother, if any — same best-effort contract as
-   * [DeliverySessionViewModel.findPp1ScheduleUuid]. */
+  /** The mother's PP1 row, if it still needs the Sakhi's input — same best-effort contract as
+   * [DeliverySessionViewModel.findPp1ScheduleUuid].
+   *
+   * Bug fix (2026-09-02): excludes an already-[VisitScheduleStatus.COMPLETED] PP1 row. Without
+   * this, a Sakhi who opened PP1 straight from "See Visits" and submitted it *before* finishing
+   * the child's registration (a valid, if out-of-sequence, path — PP1 is generated and startable
+   * the moment the delivery form syncs, independently of this session's own step machine) would
+   * be auto-navigated straight back into that same PP1 visit the moment child registration
+   * finished — landing on a blank [org.armman.sakhi.ui.visitform.DynamicVisitFormScreen] that
+   * looks like PP1 "started over", even though [org.armman.sakhi.data.schedule
+   * .VisitScheduleEntity.status] was already correctly COMPLETED. Returning null here instead
+   * makes [handleSynced] fall back to the normal "no PP1 to hand off to" outcome, same as if PP1
+   * had never been generated at all. */
   private suspend fun findPp1ScheduleUuid(): String? =
     runCatching {
       visitScheduleRepository.getActiveForBeneficiary(motherLocalBeneficiaryId)
-        .firstOrNull { it.visitType == VisitCodeType.PP && it.sequenceNo == 1 }
+        .firstOrNull {
+          it.visitType == VisitCodeType.PP && it.sequenceNo == 1 && it.status != VisitScheduleStatus.COMPLETED
+        }
         ?.localScheduleUuid
     }.getOrNull()
 

@@ -31,6 +31,7 @@ import org.armman.sakhi.data.forms.FormsRepository
 import org.armman.sakhi.data.lookup.LookupRepository
 import org.armman.sakhi.data.schedule.VisitCodeType
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
+import org.armman.sakhi.data.schedule.VisitScheduleStatus
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -348,14 +349,23 @@ class DeliverySessionViewModel @Inject constructor(
   private fun resolveDeliveryFormFilledOn(answers: FormAnswers, deliveryDate: LocalDate): LocalDate =
     answers.valueOf(DeliveryQuestionCodes.DELIVERY_FORM_FILLED_ON)?.let(LocalDate::parse) ?: deliveryDate
 
-  /** The just-generated PP1 row for this mother, if any. Best-effort: a lookup failure or a
-   * genuinely absent row (shouldn't happen — see [DeliverySessionEvent.Submitted]'s doc) just
+  /** The mother's PP1 row, if it still needs the Sakhi's input. Best-effort: a lookup failure or
+   * a genuinely absent row (shouldn't happen — see [DeliverySessionEvent.Submitted]'s doc) just
    * means the screen falls back to "Delivery recorded" and returns to the profile instead of
-   * auto-navigating into PP1. */
+   * auto-navigating into PP1.
+   *
+   * Bug fix (2026-09-02): also excludes an already-[VisitScheduleStatus.COMPLETED] PP1 row — same
+   * fix and same rationale as [DeliveryChildRegistrationViewModel.findPp1ScheduleUuid]. This
+   * screen only calls this immediately after the DELIVERY_VISIT form itself submits (no live
+   * birth, so there is no child-registration detour), so a completed PP1 can only happen here on a
+   * resumed/retried session — but the guard belongs on both call sites for the same invariant:
+   * never auto-navigate into a PP1 the Sakhi has already submitted. */
   private suspend fun findPp1ScheduleUuid(): String? =
     runCatching {
       visitScheduleRepository.getActiveForBeneficiary(beneficiaryId)
-        .firstOrNull { it.visitType == VisitCodeType.PP && it.sequenceNo == 1 }
+        .firstOrNull {
+          it.visitType == VisitCodeType.PP && it.sequenceNo == 1 && it.status != VisitScheduleStatus.COMPLETED
+        }
         ?.localScheduleUuid
     }.getOrNull()
 

@@ -6,6 +6,7 @@ import retrofit2.http.GET
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 /** One entry of `GET /sakhi/{sakhiId}/referrals/pending-followup`'s `data.items` array. */
 data class ReferralFollowUpDto(
@@ -66,6 +67,24 @@ data class ReferralDataDto(
   val status: String?,
   val validTill: String?,
   val createdAt: String?,
+  /** Task 8 — present once a Supervisor has decided a follow-up (REFILL or LAPSE); null before
+   * that. Only ever populated on `GET /referrals` responses in practice (create/convert both run
+   * before any Supervisor decision exists) — see [Referral.decidedByUserId]'s doc. */
+  val decidedByUserId: String? = null,
+  val decidedAt: String? = null,
+  val decisionNotes: String? = null,
+)
+
+/** `GET /referrals?beneficiaryId=`'s `data` object — Task 8, backend-confirmed unblocked
+ * 2026-08-31 (the endpoint previously had no beneficiary filter at all). */
+data class ReferralListDataDto(
+  val items: List<ReferralDataDto>?,
+)
+
+data class ReferralListResponseDto(
+  val success: Boolean,
+  val message: String?,
+  val data: ReferralListDataDto?,
 )
 
 data class CreateReferralResponseDto(
@@ -207,6 +226,20 @@ interface ReferralApi {
    * Accompanied. */
   @PATCH("referrals/{referralId}/convert")
   suspend fun convertToAccompanied(@Path("referralId") referralId: String): Response<CreateReferralResponseDto>
+
+  /**
+   * Task 8 (LMP/Reopen/Referral/Audit task list) — backend-confirmed unblocked 2026-08-31: this
+   * list endpoint now accepts an optional `beneficiaryId` filter (previously none existed at all).
+   * Used to detect a Supervisor's follow-up decision (LAPSE via [ReferralDataDto.status], REFILL
+   * via [ReferralDataDto.decidedByUserId]/[decidedAt]/[decisionNotes]) that this app was never
+   * told about directly — see [RemoteReferralRepository.refreshReferralStatuses]'s doc.
+   *
+   * NOT yet confirmed: whether a SAKHI-role token is authorized to call this at all (the backend
+   * update only confirmed the filter param, not the role check) — see the backend-ask doc's open
+   * question. Treated as best-effort by every caller, same as the rest of this app's polls.
+   */
+  @GET("referrals")
+  suspend fun getReferrals(@Query("beneficiaryId") beneficiaryId: String): Response<ReferralListResponseDto>
 
   /**
    * CR-Referral-02 — Step 1 of the real, backend-confirmed presigned-URL upload flow

@@ -278,6 +278,113 @@ class FormMultiSelectExclusivityTest {
     )
   }
 
+  // ---- Bug fix (2026-09-02): 4 MOTHER_REGISTRATION multiselects with no exclusivity rule -----
+
+  private val longTermMedicines = MotherRegistrationQuestionCodes.LONG_TERM_MEDICINES
+  private val notTakingAnyLongTermMedication =
+    MotherRegistrationQuestionCodes.ValueCode.NOT_TAKING_ANY_LONG_TERM_MEDICATION
+  private val takingHivDrugs = "taking_hiv_drugs"
+
+  @Test
+  fun `Long-term medicines - checking a medicine disables Not taking any`() {
+    val selected = listOf(takingHivDrugs)
+
+    assertTrue(
+      FormMultiSelectExclusivity.isDisabled(longTermMedicines, notTakingAnyLongTermMedication, selected),
+    )
+  }
+
+  @Test
+  fun `Long-term medicines - checking Not taking any disables every medicine`() {
+    val selected = listOf(notTakingAnyLongTermMedication)
+
+    assertTrue(FormMultiSelectExclusivity.isDisabled(longTermMedicines, takingHivDrugs, selected))
+  }
+
+  @Test
+  fun `Long-term medicines - an already-checked option is never disabled`() {
+    val invalidCombo = listOf(notTakingAnyLongTermMedication, takingHivDrugs)
+
+    assertFalse(
+      FormMultiSelectExclusivity.isDisabled(longTermMedicines, notTakingAnyLongTermMedication, invalidCombo),
+    )
+    assertFalse(FormMultiSelectExclusivity.isDisabled(longTermMedicines, takingHivDrugs, invalidCombo))
+  }
+
+  private val substanceUse = MotherRegistrationQuestionCodes.SUBSTANCE_USE
+  private val substanceNone = MotherRegistrationQuestionCodes.ValueCode.SUBSTANCE_NONE
+  private val smokingTobacco = "smoking_tobacco_bidi_cigaretde"
+
+  @Test
+  fun `Substance use - reported bug - checking No disables Smoking tobacco and vice versa`() {
+    assertTrue(FormMultiSelectExclusivity.isDisabled(substanceUse, smokingTobacco, listOf(substanceNone)))
+    assertTrue(FormMultiSelectExclusivity.isDisabled(substanceUse, substanceNone, listOf(smokingTobacco)))
+  }
+
+  @Test
+  fun `Substance use - an already-checked option is never disabled`() {
+    val invalidCombo = listOf(substanceNone, smokingTobacco)
+
+    assertFalse(FormMultiSelectExclusivity.isDisabled(substanceUse, substanceNone, invalidCombo))
+    assertFalse(FormMultiSelectExclusivity.isDisabled(substanceUse, smokingTobacco, invalidCombo))
+  }
+
+  private val previousDeliveryComplications = MotherRegistrationQuestionCodes.PREVIOUS_DELIVERY_COMPLICATIONS
+  private val noComplications = MotherRegistrationQuestionCodes.ValueCode.NO_COMPLICATIONS
+  private val complicationDuringDelivery = MotherRegistrationQuestionCodes.ValueCode.COMPLICATION_DURING_DELIVERY
+
+  @Test
+  fun `Previous delivery complications - checking No complications disables every complication`() {
+    val selected = listOf(noComplications)
+
+    assertTrue(
+      FormMultiSelectExclusivity.isDisabled(previousDeliveryComplications, complicationDuringDelivery, selected),
+    )
+  }
+
+  @Test
+  fun `Previous delivery complications - checking a complication disables No complications`() {
+    val selected = listOf(complicationDuringDelivery)
+
+    assertTrue(
+      FormMultiSelectExclusivity.isDisabled(previousDeliveryComplications, noComplications, selected),
+    )
+  }
+
+  @Test
+  fun `Previous delivery complications - an already-checked option is never disabled`() {
+    val invalidCombo = listOf(noComplications, complicationDuringDelivery)
+
+    assertFalse(
+      FormMultiSelectExclusivity.isDisabled(previousDeliveryComplications, noComplications, invalidCombo),
+    )
+    assertFalse(
+      FormMultiSelectExclusivity.isDisabled(previousDeliveryComplications, complicationDuringDelivery, invalidCombo),
+    )
+  }
+
+  // Family planning method — question_code confirmed 2026-09-02 against a live
+  // GET /forms/ANC_VISIT/active-version (v9) response.
+  private val familyPlanningMethod = "contraceptive_family_planning_method_planned_after_delivery"
+  private val notUsingAnyContraceptiveMethod = "not_using_any_contraceptive_method"
+  private val condoms = "condoms"
+
+  @Test
+  fun `Family planning method - checking a method disables Not using any`() {
+    val selected = listOf(condoms)
+
+    assertTrue(
+      FormMultiSelectExclusivity.isDisabled(familyPlanningMethod, notUsingAnyContraceptiveMethod, selected),
+    )
+  }
+
+  @Test
+  fun `Family planning method - checking Not using any disables every method`() {
+    val selected = listOf(notUsingAnyContraceptiveMethod)
+
+    assertTrue(FormMultiSelectExclusivity.isDisabled(familyPlanningMethod, condoms, selected))
+  }
+
   private companion object {
     const val pp1ContraceptiveSideEffects = "contraceptive_side_effects"
     const val noneSideEffect = "none"

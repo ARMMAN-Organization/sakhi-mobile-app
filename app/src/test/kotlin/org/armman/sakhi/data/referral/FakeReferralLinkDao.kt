@@ -17,4 +17,7 @@ class FakeReferralLinkDao : ReferralLinkDao {
 
   override suspend fun getByReferralId(referralId: String): ReferralLinkEntity? =
     rows.values.firstOrNull { it.referralId == referralId }
+
+  override suspend fun countByBeneficiaryId(beneficiaryId: String): Int =
+    rows.values.count { it.beneficiaryId == beneficiaryId }
 }

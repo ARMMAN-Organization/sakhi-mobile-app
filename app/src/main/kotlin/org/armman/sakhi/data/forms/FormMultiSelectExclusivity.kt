@@ -99,6 +99,39 @@ object FormMultiSelectExclusivity {
     "episiotomy_or_csection_wound_issues" to setOf(
       "none_of_the_above",
     ),
+
+    // Bug fix (2026-09-02) — MOTHER_REGISTRATION row: "Are you currently taking any long-term
+    // medicines?" Confirmed against the live MOTHER_REGISTRATION schema (`api-calls-live.jsonl`):
+    // "not_taking_any_long_term_medication" is the only benign answer; checking it alongside a
+    // real medicine (e.g. "taking_hiv_drugs") was previously allowed since this field had no
+    // entry here at all.
+    MotherRegistrationQuestionCodes.LONG_TERM_MEDICINES to setOf(
+      MotherRegistrationQuestionCodes.ValueCode.NOT_TAKING_ANY_LONG_TERM_MEDICATION,
+    ),
+
+    // Bug fix (2026-09-02) — MOTHER_REGISTRATION Q61: "Have you used any of the following
+    // substances before or during this pregnancy?" Confirmed against the live schema — reported
+    // bug had "No" checked alongside "Smoking tobacco" simultaneously.
+    MotherRegistrationQuestionCodes.SUBSTANCE_USE to setOf(
+      MotherRegistrationQuestionCodes.ValueCode.SUBSTANCE_NONE,
+    ),
+
+    // Bug fix (2026-09-02) — MOTHER_REGISTRATION Q52: "Did you experience any complications
+    // during birth/delivery in previous pregnancies?" `no_complications` is the only benign
+    // answer among the four options (see MotherRegistrationQuestionCodes.ValueCode's own doc);
+    // checking it alongside a real complication was previously allowed.
+    MotherRegistrationQuestionCodes.PREVIOUS_DELIVERY_COMPLICATIONS to setOf(
+      MotherRegistrationQuestionCodes.ValueCode.NO_COMPLICATIONS,
+    ),
+
+    // Bug fix (2026-09-02) — "Which of the following contraceptive/family planning method does
+    // the woman plan to use after delivery?" (form-spec row 44, ANC visit form). Confirmed against
+    // a live `GET /forms/ANC_VISIT/active-version` (v9) response, 2026-09-02 — this field's real
+    // question_code turned out shorter than the CSV-label guess this entry originally shipped
+    // with; the guessed value_code ("not_using_any_contraceptive_method") was already correct.
+    "contraceptive_family_planning_method_planned_after_delivery" to setOf(
+      "not_using_any_contraceptive_method",
+    ),
   )
 
   /**

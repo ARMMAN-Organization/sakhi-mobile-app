@@ -10,6 +10,8 @@ import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.childregistration.ChildFormDraftEntity
 import org.armman.sakhi.data.childregistration.FakeChildFormDraftDao
+import org.armman.sakhi.data.lmpchange.FakeLmpChangeRepository
+import org.armman.sakhi.data.lmpchange.LmpChangeCapture
 import org.armman.sakhi.data.referral.FakeReferralLinkDao
 import org.armman.sakhi.data.riskassessment.FakeRiskAssessmentDao
 import org.armman.sakhi.data.delivery.DeliverySessionEntity
@@ -82,6 +84,7 @@ class VisitFormSubmissionCoordinatorTest {
   private lateinit var riskAssessmentDao: FakeRiskAssessmentDao
   private lateinit var riskAssessmentApi: FakeRiskAssessmentApi
   private lateinit var referralRepository: FakeReferralRepository
+  private lateinit var lmpChangeRepository: FakeLmpChangeRepository
   private lateinit var coordinator: VisitFormSubmissionCoordinator
 
   private val session = UserSession(
@@ -116,6 +119,7 @@ class VisitFormSubmissionCoordinatorTest {
     childFormDraftDao = FakeChildFormDraftDao()
     riskAssessmentApi = FakeRiskAssessmentApi()
     referralRepository = FakeReferralRepository()
+    lmpChangeRepository = FakeLmpChangeRepository()
     referralLinkDao = FakeReferralLinkDao()
     riskAssessmentDao = FakeRiskAssessmentDao()
     coordinator = VisitFormSubmissionCoordinator(
@@ -135,6 +139,7 @@ class VisitFormSubmissionCoordinatorTest {
       referralRepository = referralRepository,
       referralLinkDao = referralLinkDao,
       riskAssessmentDao = riskAssessmentDao,
+      lmpChangeRepository = lmpChangeRepository,
     )
   }
 
@@ -428,6 +433,7 @@ class VisitFormSubmissionCoordinatorTest {
       referralRepository = FakeReferralRepository(),
       referralLinkDao = referralLinkDao,
       riskAssessmentDao = riskAssessmentDao,
+      lmpChangeRepository = FakeLmpChangeRepository(),
     )
 
     val result = loggedOutCoordinator.submit(
@@ -1334,5 +1340,102 @@ class VisitFormSubmissionCoordinatorTest {
     val cachedFlags = riskAssessmentDao.getFlagsByLocalScheduleUuid("schedule-1")
     assertEquals(1, cachedFlags.size)
     assertEquals("cond-hypertension", cachedFlags.single().riskConditionId)
+  }
+
+  // Task 2 (LMP/Reopen/Referral/Audit task list)
+  @Test
+  fun `a filled sonography branch uploads the photo and submits the LMP change request`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    val sonographyFile = kotlin.io.path.createTempFile(suffix = ".jpg").toFile().apply { writeBytes(byteArrayOf(1, 2, 3)) }
+    lmpChangeRepository.uploadSonographyImageResult = Result.success("asset-1")
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      lmpChangeCapture = LmpChangeCapture(
+        newLmpDate = LocalDate.of(2026, 2, 1),
+        sonographyImageFilePath = sonographyFile.absolutePath,
+      ),
+    )
+
+    assertTrue(result.isSuccess)
+    assertEquals(listOf(sonographyFile), lmpChangeRepository.uploadedFiles)
+    val request = lmpChangeRepository.recordedRequests.single()
+    assertEquals("server-beneficiary-1", request.beneficiaryId)
+    assertEquals(LocalDate.of(2026, 2, 1), request.newLmpDate)
+    assertEquals("asset-1", request.sonographyImageAssetId)
+    sonographyFile.delete()
+  }
+
+  @Test
+  fun `a null lmpChangeCapture never calls the LMP change repository`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+
+    coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      lmpChangeCapture = null,
+    )
+
+    assertTrue(lmpChangeRepository.uploadedFiles.isEmpty())
+    assertTrue(lmpChangeRepository.recordedRequests.isEmpty())
+  }
+
+  @Test
+  fun `a failed sonography upload never fails the visit submission`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    val sonographyFile = kotlin.io.path.createTempFile(suffix = ".jpg").toFile().apply { writeBytes(byteArrayOf(1, 2, 3)) }
+    lmpChangeRepository.uploadSonographyImageResult = Result.failure(java.io.IOException("offline"))
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      lmpChangeCapture = LmpChangeCapture(
+        newLmpDate = LocalDate.of(2026, 2, 1),
+        sonographyImageFilePath = sonographyFile.absolutePath,
+      ),
+    )
+
+    assertTrue(result.isSuccess)
+    assertTrue(lmpChangeRepository.recordedRequests.isEmpty())
+    sonographyFile.delete()
+  }
+
+  @Test
+  fun `a missing sonography file never fails the visit submission`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      lmpChangeCapture = LmpChangeCapture(
+        newLmpDate = LocalDate.of(2026, 2, 1),
+        sonographyImageFilePath = "/no/such/file.jpg",
+      ),
+    )
+
+    assertTrue(result.isSuccess)
+    assertTrue(lmpChangeRepository.uploadedFiles.isEmpty())
+    assertTrue(lmpChangeRepository.recordedRequests.isEmpty())
   }
 }

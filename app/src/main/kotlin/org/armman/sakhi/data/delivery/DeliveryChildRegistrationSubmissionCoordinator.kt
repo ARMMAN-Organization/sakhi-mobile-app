@@ -16,9 +16,12 @@ import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormSubmissionApi
 import org.armman.sakhi.data.forms.SubmitErrorCopy
 import org.armman.sakhi.data.schedule.ScheduleContext
+import org.armman.sakhi.data.schedule.VisitCodeType
 import org.armman.sakhi.data.schedule.VisitScheduleCoordinator
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
+import org.armman.sakhi.data.schedule.VisitScheduleStatus
 import org.armman.sakhi.data.schedule.VisitScheduleSyncExecutor
+import org.armman.sakhi.data.schedule.sameSessionNnVisit
 import java.time.Instant
 import java.time.LocalDate
 import javax.inject.Inject
@@ -257,7 +260,23 @@ class DeliveryChildRegistrationSubmissionCoordinator @Inject constructor(
 
   /** Advances [session]'s step now that one more child is registered — takes the already-fetched
    * row (see [submit]) rather than re-reading it, since a re-read here could race a concurrent
-   * update and silently revert [nextChildIndexToRegister]. */
+   * update and silently revert [nextChildIndexToRegister].
+   *
+   * Bug fix (2026-09-02): when every child is now registered, this used to jump straight to
+   * [DeliverySessionStep.PP1] unconditionally — even when the Sakhi had already submitted PP1 out
+   * of sequence, straight from "See Visits", before finishing child registration (see
+   * [org.armman.sakhi.ui.delivery.DeliveryChildRegistrationViewModel.findPp1ScheduleUuid]'s own
+   * bug-fix doc for the full user-visible symptom this closes: PP1 auto-reopening as a blank form).
+   * [DeliverySessionStep]'s own doc says steps are "strictly forward-moving" and never regress a
+   * session to an earlier one — silently resetting an already-past-PP1 session back to PP1 broke
+   * that invariant, and left the session stuck at PP1 forever afterwards (nothing will ever submit
+   * that already-completed PP1 a second time, so
+   * [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator.advanceDeliverySessionIfDue]
+   * never gets a chance to move it on). [resolveStepAfterAllChildrenRegistered] now resolves the
+   * step the same way a normally-ordered session would have: only PP1 if it is genuinely still
+   * open; otherwise straight to NN/DONE, matching what [advanceDeliverySessionIfDue] itself would
+   * have computed at PP1-submission time.
+   */
   private suspend fun advanceSessionAfterChildRegistered(session: DeliverySessionEntity) {
     val totalChildren = listOfNotNull(
       session.child1BeneficiaryId,
@@ -266,13 +285,47 @@ class DeliveryChildRegistrationSubmissionCoordinator @Inject constructor(
     ).size
     val nextIndex = session.nextChildIndexToRegister + 1
     val allChildrenRegistered = nextIndex >= totalChildren
+    val newStep = if (allChildrenRegistered) {
+      resolveStepAfterAllChildrenRegistered(session)
+    } else {
+      DeliverySessionStep.CHILD_REGISTRATION
+    }
     deliverySessionRepository.save(
       session.copy(
-        step = if (allChildrenRegistered) DeliverySessionStep.PP1 else DeliverySessionStep.CHILD_REGISTRATION,
+        step = newStep,
         nextChildIndexToRegister = nextIndex,
         updatedAtEpochMillis = Instant.now().toEpochMilli(),
       ),
     )
+  }
+
+  /** The true next step once every child is registered — [DeliverySessionStep.PP1] only if the
+   * mother's PP1 visit is genuinely still open; [DeliverySessionStep.NN] if PP1 is already
+   * COMPLETED (out-of-sequence submission) and one of this delivery's registered children has a
+   * same-session NN visit still open ([sameSessionNnVisit] — the exact rule
+   * [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator]'s own PP1->NN transition
+   * uses, applied per-child here since NN is anchored to each child's own local beneficiary id,
+   * never the mother's — see [DeliveryChildRegistrationSubmissionCoordinator]'s own class doc);
+   * else [DeliverySessionStep.DONE]. Falls back to DONE (never guesses NN) when
+   * [DeliverySessionEntity.deliveryFormFilledOn] is null — same defensive stance
+   * [advanceDeliverySessionIfDue] takes for a pre-migration session row. */
+  private suspend fun resolveStepAfterAllChildrenRegistered(session: DeliverySessionEntity): DeliverySessionStep {
+    val pp1AlreadyCompleted = visitScheduleRepository.getActiveForBeneficiary(session.localBeneficiaryId)
+      .any { it.visitType == VisitCodeType.PP && it.sequenceNo == 1 && it.status == VisitScheduleStatus.COMPLETED }
+    if (!pp1AlreadyCompleted) return DeliverySessionStep.PP1
+
+    val deliveryFormFilledOn = session.deliveryFormFilledOn ?: return DeliverySessionStep.DONE
+    val childBeneficiaryIds = listOfNotNull(
+      session.child1BeneficiaryId,
+      session.child2BeneficiaryId,
+      session.child3BeneficiaryId,
+    )
+    val openNnVisits = childBeneficiaryIds.flatMap { visitScheduleRepository.getOpenByType(it, VisitCodeType.NN) }
+    return if (sameSessionNnVisit(openNnVisits, deliveryFormFilledOn) != null) {
+      DeliverySessionStep.NN
+    } else {
+      DeliverySessionStep.DONE
+    }
   }
 
   private companion object {

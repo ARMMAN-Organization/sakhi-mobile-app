@@ -9,6 +9,7 @@ import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.forms.SubmitErrorCopy
+import org.armman.sakhi.data.lmpchange.LmpChangeCapture
 import org.armman.sakhi.data.referral.ReferralCapture
 import org.armman.sakhi.data.rules.RiskGradingResult
 import java.time.Instant
@@ -46,8 +47,9 @@ class RoomVisitFormDraftRepository @Inject constructor(
     visitDate: LocalDate,
     riskResult: RiskGradingResult?,
     referralCapture: ReferralCapture?,
+    lmpChangeCapture: LmpChangeCapture?,
   ): VisitFormSubmitResult {
-    saveLocally(localScheduleUuid, formCode, formVersionId, answers, visitDate, riskResult, referralCapture)
+    saveLocally(localScheduleUuid, formCode, formVersionId, answers, visitDate, riskResult, referralCapture, lmpChangeCapture)
 
     // Offline: saved and queued for the Sakhi's next Data Upload tap. Nothing scheduled here —
     // same SRS §3A.1 manual-trigger rule every other queue in this app follows.
@@ -63,6 +65,20 @@ class RoomVisitFormDraftRepository @Inject constructor(
 
   override fun observeUploadRecords(): Flow<List<FormUploadRecord>> =
     dao.observeAll().map { entities -> entities.map { it.toUploadRecord() } }
+
+  // Bug fix (2026-09-04): same secureStore + visitFormDraftGson decode VisitFormSyncExecutor's own
+  // loadPayload() uses — deliberately not shared as a single function across the two classes
+  // (this repository writes the payload, the sync executor reads it for upload; a third small
+  // reader here doesn't justify inverting either class's dependency on the other just to share
+  // three lines). Returns null for a JSON parse failure the same way loadPayload() does: silently,
+  // not a crash — a carried-forward baseline is a nice-to-have, not something worth failing a
+  // visit form open over.
+  override suspend fun getAnswers(localScheduleUuid: String): FormAnswers? {
+    val json = secureStore.getString(visitFormDraftPayloadKey(localScheduleUuid)) ?: return null
+    return runCatching { visitFormDraftGson.fromJson(json, VisitFormDraftPayload::class.java) }
+      .getOrNull()
+      ?.answers
+  }
 
   private fun VisitFormDraftEntity.toUploadRecord() = FormUploadRecord(
     localBeneficiaryId = localScheduleUuid,
@@ -95,11 +111,17 @@ class RoomVisitFormDraftRepository @Inject constructor(
     visitDate: LocalDate,
     riskResult: RiskGradingResult?,
     referralCapture: ReferralCapture?,
+    lmpChangeCapture: LmpChangeCapture?,
   ) {
     // CR-035: unconditional — runs before the online/offline branch in submitDraft, so both the
     // online-success and offline-queued paths get a SAVED event.
     formAuditRepository.recordSaved(localScheduleUuid, formCode)
-    val payload = VisitFormDraftPayload(answers = answers, riskResult = riskResult, referralCapture = referralCapture)
+    val payload = VisitFormDraftPayload(
+      answers = answers,
+      riskResult = riskResult,
+      referralCapture = referralCapture,
+      lmpChangeCapture = lmpChangeCapture,
+    )
     secureStore.putString(visitFormDraftPayloadKey(localScheduleUuid), visitFormDraftGson.toJson(payload))
 
     val existing = dao.getByLocalScheduleUuid(localScheduleUuid)

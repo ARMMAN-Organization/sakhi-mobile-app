@@ -61,6 +61,11 @@ object MotherRegistrationQuestionCodes {
   const val SUBSTANCE_USE =
     "have_you_used_any_of_the_following_substances_before_or_during_this_pregnancy"
 
+  /** Long-term medicines currently being taken (multiselect). Added 2026-09-02 for
+   * [FormMultiSelectExclusivity]'s "Not taking any long-term medication" bug fix — verified
+   * against the live MOTHER_REGISTRATION schema (`api-calls-live.jsonl`). */
+  const val LONG_TERM_MEDICINES = "are_you_currently_taking_any_long_term_medicines"
+
   /**
    * `value_code`s the risk rules match on. Dynamic-form answers are these STRINGS — not the 1-based
    * Int indices the legacy static enrollment flow used ([org.armman.sakhi.ui.enrollment
@@ -99,6 +104,9 @@ object MotherRegistrationQuestionCodes {
     /** Q61 */
     const val SUBSTANCE_NONE = "no"
     const val SUBSTANCE_NOT_DISCLOSED = "don_t_know_not_willing_to_disclose"
+
+    /** [LONG_TERM_MEDICINES] — the only benign answer among that field's options. */
+    const val NOT_TAKING_ANY_LONG_TERM_MEDICATION = "not_taking_any_long_term_medication"
 
     /**
      * The "no condition"/"don't know" answers of Q43 and Q58. The two questions use DIFFERENT

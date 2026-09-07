@@ -78,4 +78,24 @@ interface DynamicFormDraftRepository {
    * status changes, so the Home upload modal and Data Upload badge reflect sync progress live
    * (including background [DynamicFormSyncWorker] runs) without the user reopening the screen. */
   fun observeUploadRecords(): Flow<List<FormUploadRecord>>
+
+  /**
+   * CR-Registration-Edit: looks up the local draft for [beneficiaryId] — the Beneficiary Profile
+   * screen's own id, which is the LOCAL beneficiaryId for a beneficiary enrolled on this device
+   * (the common case, whether synced yet or not) or the SERVER beneficiaryId for one this device
+   * never locally enrolled at all (see BeneficiaryProfileRepository.getBeneficiary's own doc for
+   * why the screen mixes the two). Tries [beneficiaryId] as a local id first, then as a remote id,
+   * so the Edit stub finds the right row either way. Null if neither lookup matches — the caller
+   * falls back to a "can't edit here" state.
+   */
+  suspend fun getEditableSubmission(beneficiaryId: String): EditableSubmissionInfo?
+
+  /**
+   * Merges [edits] into the locally stored answers for [localBeneficiaryId] after a successful
+   * `PATCH /form-submissions/:id/answers` — so the next time the Sakhi opens Edit, the fields show
+   * what she just saved, not the original registration answers. Never touches [syncStatus] or
+   * queues a re-upload: the edit already landed on the server directly, this is local-cache
+   * bookkeeping only.
+   */
+  suspend fun applyFieldEdits(localBeneficiaryId: String, edits: Map<String, String>)
 }

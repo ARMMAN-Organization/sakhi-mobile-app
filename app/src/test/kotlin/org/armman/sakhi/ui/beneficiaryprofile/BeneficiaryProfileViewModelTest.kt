@@ -18,12 +18,23 @@ import org.armman.sakhi.data.delivery.DeliverySessionEntity
 import org.armman.sakhi.data.delivery.DeliverySessionStep
 import org.armman.sakhi.data.delivery.FakeDeliverySessionDao
 import org.armman.sakhi.data.delivery.RoomDeliverySessionRepository
+import org.armman.sakhi.data.lmpchange.FakeLmpChangeRepository
+import org.armman.sakhi.data.lmpchange.LmpChangeRequestRowDto
+import org.armman.sakhi.data.lmpchange.LocalLmpChangeAppliedStore
 import org.armman.sakhi.data.reopen.FakeReopenRepository
+import org.armman.sakhi.data.visitform.FakeReferralRepository
 import org.armman.sakhi.data.reopen.ReopenRequestReason
 import org.armman.sakhi.data.reopen.ReopenSubmissionException
+import org.armman.sakhi.data.schedule.AncScheduleGenerator
+import org.armman.sakhi.data.schedule.CcvScheduleGenerator
 import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
+import org.armman.sakhi.data.schedule.HardcodedRuleSource
+import org.armman.sakhi.data.schedule.IncScheduleGenerator
+import org.armman.sakhi.data.schedule.NnScheduleGenerator
+import org.armman.sakhi.data.schedule.PpScheduleGenerator
 import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
 import org.armman.sakhi.data.schedule.VisitCodeType
+import org.armman.sakhi.data.schedule.VisitScheduleCoordinator
 import org.armman.sakhi.data.schedule.VisitScheduleStatus
 import org.armman.sakhi.data.schedule.schedule
 import org.armman.sakhi.data.visitform.VisitContext
@@ -38,6 +49,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.IOException
+import java.time.LocalDate
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class BeneficiaryProfileViewModelTest {
@@ -87,6 +99,11 @@ class BeneficiaryProfileViewModelTest {
   private lateinit var deliverySessionDao: FakeDeliverySessionDao
   private lateinit var deliverySessionRepository: RoomDeliverySessionRepository
   private lateinit var statusOverrideStore: LocalBeneficiaryStatusOverrideStore
+  private lateinit var lmpChangeRepository: FakeLmpChangeRepository
+  private lateinit var visitScheduleCoordinator: VisitScheduleCoordinator
+  private lateinit var scheduleRuleSource: HardcodedRuleSource
+  private lateinit var lmpChangeAppliedStore: LocalLmpChangeAppliedStore
+  private lateinit var referralRepository: FakeReferralRepository
 
   @Before
   fun setUp() {
@@ -99,6 +116,20 @@ class BeneficiaryProfileViewModelTest {
     deliverySessionDao = FakeDeliverySessionDao()
     deliverySessionRepository = RoomDeliverySessionRepository(deliverySessionDao)
     statusOverrideStore = LocalBeneficiaryStatusOverrideStore(FakeSecureKeyValueStore())
+    lmpChangeRepository = FakeLmpChangeRepository()
+    // Real coordinator/generators (mirrors VisitScheduleCoordinatorTest's own construction) --
+    // task 3 needs the actual regeneration behavior verified, not just that some call happened.
+    scheduleRuleSource = HardcodedRuleSource()
+    visitScheduleCoordinator = VisitScheduleCoordinator(
+      repository = visitScheduleRepository,
+      ancGenerator = AncScheduleGenerator(scheduleRuleSource),
+      ppGenerator = PpScheduleGenerator(scheduleRuleSource),
+      nnGenerator = NnScheduleGenerator(scheduleRuleSource),
+      incGenerator = IncScheduleGenerator(scheduleRuleSource),
+      ccvGenerator = CcvScheduleGenerator(scheduleRuleSource),
+    )
+    lmpChangeAppliedStore = LocalLmpChangeAppliedStore(FakeSecureKeyValueStore())
+    referralRepository = FakeReferralRepository()
   }
 
   @After
@@ -116,6 +147,11 @@ class BeneficiaryProfileViewModelTest {
         visitScheduleRepository,
         deliverySessionRepository,
         statusOverrideStore,
+        lmpChangeRepository,
+        visitScheduleCoordinator,
+        scheduleRuleSource,
+        lmpChangeAppliedStore,
+        referralRepository,
         SavedStateHandle(args),
       )
     dispatcher.scheduler.advanceUntilIdle()
@@ -467,6 +503,216 @@ class BeneficiaryProfileViewModelTest {
     // ACTIVE the whole time -- the approved-request check is CLOSED-gated, same as
     // hasPendingReopenRequest, so this must not trigger a second getBeneficiary() call.
     assertEquals(1, repository.callCount)
+  }
+
+  @Test
+  fun `loadProfile clears the local override when the approval is recorded under the resolved server beneficiary id`() = runTest {
+    // Bug fix (2026-09-04): on-device testing found the reopen-approval poll queried
+    // hasApprovedReopenRequest with the LOCAL beneficiaryId ("mother" here) instead of the
+    // resolved server id -- exactly like submitReopenRequest already resolves (see that test
+    // above) -- so a real approval (always keyed server-side) never matched and this beneficiary
+    // stayed CLOSED forever. Every other test above/below seeds approvedBeneficiaryIds with the
+    // bare local id and never calls seedServerBeneficiaryId, so they'd have passed identically
+    // with the old, buggy code (the missing schedule row just falls back to the local id) --
+    // this test is the one that actually exercises the local/server id split and would have
+    // failed before the fix.
+    seedServerBeneficiaryId("mother", "server-mother-1")
+    statusOverrideStore.setStatus("mother", BeneficiaryStatus.CLOSED)
+    statusOverrideStore.setClosureReason("mother", "MIGRATION")
+    repository.closureOverride = MOTHER.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = "MIGRATION")
+    reopenRepository.approvedBeneficiaryIds = setOf("server-mother-1")
+
+    createViewModel("mother")
+
+    assertNull(statusOverrideStore.getStatus("mother"))
+    assertNull(statusOverrideStore.getClosureReason("mother"))
+    assertEquals(2, repository.callCount)
+  }
+
+  @Test
+  fun `hasPendingReopenRequest is true when the pending request is recorded under the resolved server beneficiary id`() = runTest {
+    // Bug fix (2026-09-04): same local/server id split as the approved-request test above, for
+    // the pending check -- this is what made a just-submitted request's "Reopen pending review"
+    // button revert to plain "Reopen" on the next profile load (submitReopenRequest itself always
+    // used the resolved server id, but the follow-up hasPendingReopenRequest poll did not).
+    seedServerBeneficiaryId("mother", "server-mother-1")
+    repository.closureOverride = MOTHER.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = "MIGRATION")
+    reopenRepository.pendingBeneficiaryIds = setOf("server-mother-1")
+
+    val state = createViewModel("mother").uiState.value
+
+    assertTrue(state.hasPendingReopenRequest)
+  }
+
+  @Test
+  fun `hasRejectedReopenRequest is true when the rejected request is recorded under the resolved server beneficiary id`() = runTest {
+    // Bug fix (2026-09-04): same local/server id split, for the rejected check.
+    seedServerBeneficiaryId("mother", "server-mother-1")
+    repository.closureOverride = MOTHER.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = "MIGRATION")
+    reopenRepository.rejectedBeneficiaryIds = setOf("server-mother-1")
+
+    val state = createViewModel("mother").uiState.value
+
+    assertTrue(state.hasRejectedReopenRequest)
+  }
+
+  @Test
+  fun `hasRejectedReopenRequest is true when a CLOSED beneficiary has a rejected reopen request and none pending`() = runTest {
+    repository.closureOverride = MOTHER.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = "MIGRATION")
+    reopenRepository.rejectedBeneficiaryIds = setOf("mother")
+
+    val state = createViewModel("mother").uiState.value
+
+    assertTrue(state.hasRejectedReopenRequest)
+  }
+
+  @Test
+  fun `hasRejectedReopenRequest is false when no reopen request has been rejected`() = runTest {
+    repository.closureOverride = MOTHER.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = "MIGRATION")
+    reopenRepository.rejectedBeneficiaryIds = emptySet()
+
+    val state = createViewModel("mother").uiState.value
+
+    assertFalse(state.hasRejectedReopenRequest)
+  }
+
+  @Test
+  fun `hasRejectedReopenRequest is false when a fresh reopen request is already pending`() = runTest {
+    // A prior request was rejected, but the Sakhi has since submitted a new one that is now
+    // PENDING -- the pending-review copy should win, not a stale rejection banner.
+    repository.closureOverride = MOTHER.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = "MIGRATION")
+    reopenRepository.rejectedBeneficiaryIds = setOf("mother")
+    reopenRepository.pendingBeneficiaryIds = setOf("mother")
+
+    val state = createViewModel("mother").uiState.value
+
+    assertFalse(state.hasRejectedReopenRequest)
+    assertTrue(state.hasPendingReopenRequest)
+  }
+
+  @Test
+  fun `loadProfile never checks for a rejected reopen request when the beneficiary is ACTIVE`() = runTest {
+    reopenRepository.rejectedBeneficiaryIds = setOf("mother")
+
+    val state = createViewModel("mother").uiState.value
+
+    // ACTIVE the whole time -- the rejected-request check is CLOSED-gated, same as
+    // hasPendingReopenRequest/hasApprovedReopenRequest.
+    assertFalse(state.hasRejectedReopenRequest)
+  }
+
+  // ---- Task 3/4 (LMP/Reopen/Referral/Audit task list): LMP correction approval/rejection -------
+
+  private fun approvedLmpRow(newLmpDate: String, id: String = "lmp-req-1") = LmpChangeRequestRowDto(
+    id = id,
+    beneficiaryId = "mother",
+    oldLmpDate = "2025-12-01",
+    newLmpDate = newLmpDate,
+    sonographyImageAssetId = "asset-1",
+    requestedByUserId = "sakhi-1",
+    requestedAt = "2026-08-30T00:00:00Z",
+    supervisorStatus = "APPROVED",
+    decidedByUserId = "supervisor-1",
+    decidedAt = "2026-08-31T00:00:00Z",
+  )
+
+  @Test
+  fun `loadProfile regenerates the ANC schedule when an LMP change request is approved`() = runTest {
+    repository.closureOverride = MOTHER.copy(registrationDate = LocalDate.of(2026, 2, 1))
+    lmpChangeRepository.approvedRequestByBeneficiaryId = mapOf("mother" to approvedLmpRow("2026-02-01"))
+
+    createViewModel("mother")
+
+    val generated = visitScheduleRepository.getForBeneficiary("mother")
+    assertEquals(
+      "expected 10 ANC visits, got ${generated.size}: types=${generated.map { it.visitType }}, codes=${generated.map { it.visitCode }}",
+      10, generated.size,
+    )
+    assertTrue(generated.all { it.visitType == VisitCodeType.ANC })
+    assertEquals("lmp-req-1", lmpChangeAppliedStore.getAppliedRequestId("mother"))
+  }
+
+  @Test
+  fun `loadProfile does not regenerate the schedule again for an already-applied LMP approval`() = runTest {
+    repository.closureOverride = MOTHER.copy(registrationDate = LocalDate.of(2026, 1, 1))
+    lmpChangeRepository.approvedRequestByBeneficiaryId = mapOf("mother" to approvedLmpRow("2026-02-01"))
+    lmpChangeAppliedStore.setAppliedRequestId("mother", "lmp-req-1")
+
+    createViewModel("mother")
+
+    // Already applied -- must not have generated a second series (or any at all, since this test
+    // starts with no schedule to begin with; a re-application would still show up as a fresh 10).
+    assertTrue(visitScheduleRepository.getForBeneficiary("mother").isEmpty())
+  }
+
+  @Test
+  fun `loadProfile regenerates again when a NEWER LMP change request is approved after an earlier one was applied`() = runTest {
+    repository.closureOverride = MOTHER.copy(registrationDate = LocalDate.of(2026, 3, 1))
+    lmpChangeRepository.approvedRequestByBeneficiaryId =
+      mapOf("mother" to approvedLmpRow("2026-03-01", id = "lmp-req-2"))
+    lmpChangeAppliedStore.setAppliedRequestId("mother", "lmp-req-1")
+
+    createViewModel("mother")
+
+    assertEquals(10, visitScheduleRepository.getForBeneficiary("mother").size)
+    assertEquals("lmp-req-2", lmpChangeAppliedStore.getAppliedRequestId("mother"))
+  }
+
+  @Test
+  fun `loadProfile does not regenerate when no LMP change request is approved`() = runTest {
+    repository.closureOverride = MOTHER.copy(registrationDate = LocalDate.of(2026, 1, 1))
+
+    createViewModel("mother")
+
+    assertTrue(visitScheduleRepository.getForBeneficiary("mother").isEmpty())
+    assertNull(lmpChangeAppliedStore.getAppliedRequestId("mother"))
+  }
+
+  @Test
+  fun `hasRejectedLmpChangeRequest is true for a MOTHER with a rejected request and none pending`() = runTest {
+    lmpChangeRepository.rejectedBeneficiaryIds = setOf("mother")
+
+    val state = createViewModel("mother").uiState.value
+
+    assertTrue(state.hasRejectedLmpChangeRequest)
+  }
+
+  @Test
+  fun `hasRejectedLmpChangeRequest is false when a fresh LMP change request is already pending`() = runTest {
+    lmpChangeRepository.rejectedBeneficiaryIds = setOf("mother")
+    lmpChangeRepository.pendingBeneficiaryIds = setOf("mother")
+
+    val state = createViewModel("mother").uiState.value
+
+    assertFalse(state.hasRejectedLmpChangeRequest)
+  }
+
+  @Test
+  fun `LMP change checks are never made for a CHILD profile`() = runTest {
+    lmpChangeRepository.approvedRequestByBeneficiaryId = mapOf("child" to approvedLmpRow("2026-02-01"))
+    lmpChangeRepository.rejectedBeneficiaryIds = setOf("child")
+
+    val state = createViewModel("child").uiState.value
+
+    assertFalse(state.hasRejectedLmpChangeRequest)
+    assertTrue(visitScheduleRepository.getForBeneficiary("child").isEmpty())
+  }
+
+  @Test
+  fun `loadProfile refreshes referral statuses for this beneficiary`() = runTest {
+    createViewModel("mother")
+
+    assertEquals(listOf("mother"), referralRepository.refreshReferralStatusesCalls)
+  }
+
+  @Test
+  fun `loadProfile still succeeds when the referral status refresh fails`() = runTest {
+    referralRepository.refreshReferralStatusesResult = Result.failure(IOException("offline"))
+
+    val state = createViewModel("mother").uiState.value
+
+    assertFalse(state.hasError)
+    assertNotNull(state.profile)
   }
 
   private companion object {

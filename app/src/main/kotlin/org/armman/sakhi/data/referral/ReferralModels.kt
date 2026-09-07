@@ -134,6 +134,21 @@ data class Referral(
   val triggeringConditionIds: List<String>,
   val createdAt: String?,
   val validTill: String?,
+  /**
+   * Task 8 (LMP/Reopen/Referral/Audit task list) — the Supervisor's follow-up decision, present
+   * on `GET /referrals` once a Supervisor has acted (backend-confirmed 2026-08-31: a REFILL
+   * decision stamps these three fields while [status] itself stays [ReferralStatus.PENDING_FOLLOWUP]
+   * — REFILL is NOT a distinct [ReferralStatus] value, unlike LAPSED which IS). All three are null
+   * until a decision exists. Whether [decidedAt] is cleared once the Sakhi resubmits the follow-up
+   * form after a REFILL decision is NOT yet confirmed by backend — until it is, a caller must not
+   * build a "please refill" banner purely from "decidedAt is non-null", since that could loop
+   * forever after she has already resubmitted (see [RemoteReferralRepository.refreshReferralStatuses]'s
+   * doc for how this app handles that gap today: it stores these fields for later use but does not
+   * yet surface a REFILL-specific UI).
+   */
+  val decidedByUserId: String? = null,
+  val decidedAt: String? = null,
+  val decisionNotes: String? = null,
 )
 
 /** One `POST /referrals/{id}/follow-up` submission, as returned by the backend (backend-confirmed
@@ -200,6 +215,18 @@ interface ReferralRepository {
   suspend fun getCachedReferralVisitName(referralId: String): String?
 
   /**
+   * CR-Referral-01 (in-visit "Visit name"/"Referral visit name" autopopulation fix, 2026-09-03) —
+   * how many referrals this beneficiary already has cached on this device, so
+   * [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel]'s in-visit Referral capture step can
+   * prefill `referral_visit_name` as "RV{count+1}" before she's filled anything in — the exact
+   * same auto-numbering [org.armman.sakhi.ui.adhocform.AdHocFormViewModel] already does for the
+   * standalone ad-hoc Referral form, just sourced live here instead of via a separate draft-count
+   * repository. A pure local-cache read (via [ReferralLinkDao.countByBeneficiaryId]), no network
+   * call, same on-device-only scope as [getCachedReferralVisitName].
+   */
+  suspend fun countReferralsForBeneficiary(beneficiaryId: String): Int
+
+  /**
    * `POST /referrals` (backend-confirmed live 2026-08-27). One referral per [visitId] is
    * server-enforced and idempotent (issue #197 fix) — a duplicate attempt returns the existing
    * referral as [CreateReferralOutcome.AlreadyExists], never an exception.
@@ -262,4 +289,23 @@ interface ReferralRepository {
     file: java.io.File,
     submissionId: String? = null,
   ): Result<String>
+
+  /**
+   * Task 8 (LMP/Reopen/Referral/Audit task list) — refreshes every cached [ReferralLinkEntity] row
+   * for this beneficiary from `GET /referrals?beneficiaryId=` (backend-confirmed unblocked
+   * 2026-08-31), so a Supervisor's LAPSE decision (a real [ReferralStatus] transition) or REFILL
+   * decision (no status change, only [Referral.decidedByUserId]/[Referral.decidedAt]/
+   * [Referral.decisionNotes] newly populated) becomes visible on this device without her having to
+   * touch the referral herself. Only rows already cached (i.e. referrals THIS app created) are
+   * updated — a row's other cached fields (`facilityName`, `facilityType`, `referralVisitName`,
+   * `createdAtEpochMillis`) are preserved as-is, only `status`/`decidedByUserId`/`decidedAt`/
+   * `decisionNotes` move.
+   *
+   * NOTE: whether a SAKHI-role token is actually authorized to call this list endpoint (as opposed
+   * to only SUPERVISOR) is NOT yet confirmed by backend — see the backend-ask doc. Calling this
+   * with an unauthorized token is expected to fail cleanly (same best-effort
+   * `runCatching { }.getOrDefault(...)` handling every other poll in this app already uses), not
+   * crash the profile load.
+   */
+  suspend fun refreshReferralStatuses(beneficiaryId: String): Result<Unit>
 }

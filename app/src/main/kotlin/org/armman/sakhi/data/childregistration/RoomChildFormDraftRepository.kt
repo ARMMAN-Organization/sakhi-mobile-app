@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.map
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
+import org.armman.sakhi.data.forms.EditableSubmissionInfo
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.schedule.ChildEnrolmentScheduleTrigger
@@ -115,6 +116,37 @@ class RoomChildFormDraftRepository @Inject constructor(
 
   override fun observeUploadRecords(): Flow<List<FormUploadRecord>> =
     dao.observeAll().map { entities -> entities.map { it.toUploadRecord() } }
+
+  override suspend fun getEditableSubmission(beneficiaryId: String): EditableSubmissionInfo? {
+    // Mirrors org.armman.sakhi.data.forms.RoomDynamicFormDraftRepository's identical fix — see
+    // that one's doc for why local-id is tried first.
+    val draft = dao.getByLocalBeneficiaryId(beneficiaryId)
+      ?: dao.getByRemoteBeneficiaryId(beneficiaryId)
+      ?: return null
+    val answers = readPayload(draft.localBeneficiaryId)?.answers ?: FormAnswers()
+    return EditableSubmissionInfo(
+      localBeneficiaryId = draft.localBeneficiaryId,
+      formVersionId = draft.formVersionId,
+      remoteSubmissionId = draft.remoteSubmissionId,
+      answers = answers,
+    )
+  }
+
+  override suspend fun applyFieldEdits(localBeneficiaryId: String, edits: Map<String, String>) {
+    val payload = readPayload(localBeneficiaryId) ?: return
+    val updatedAnswers = edits.entries.fold(payload.answers) { answers, (fieldCode, value) ->
+      answers.withSingleValue(fieldCode, value)
+    }
+    secureStore.putString(
+      childFormDraftPayloadKey(localBeneficiaryId),
+      childFormDraftGson.toJson(payload.copy(answers = updatedAnswers)),
+    )
+  }
+
+  private fun readPayload(localBeneficiaryId: String): ChildFormDraftPayload? {
+    val json = secureStore.getString(childFormDraftPayloadKey(localBeneficiaryId)) ?: return null
+    return runCatching { childFormDraftGson.fromJson(json, ChildFormDraftPayload::class.java) }.getOrNull()
+  }
 
   private fun ChildFormDraftEntity.toUploadRecord() = FormUploadRecord(
     localBeneficiaryId = localBeneficiaryId,

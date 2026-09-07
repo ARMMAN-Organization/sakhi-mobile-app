@@ -87,6 +87,13 @@ object VisitFormQuestionCodes {
    * value, more accurate than [LMP] once present. */
   const val LMP_DATE_EDIT = "lmp_date_edit"
 
+  /** Q "Upload sonography report image" — the live schema renders this alongside [LMP_DATE_EDIT]
+   * (same `visibleWhen`, both mandatory once sonography = Yes), with no enforced ordering between
+   * them. [org.armman.sakhi.data.visitform.VisitFormComputedFieldEvaluator.isLmpDateEditLocked]
+   * uses this to lock [LMP_DATE_EDIT] until this image is actually captured — confirmed against the
+   * live `GET /forms/ANC_VISIT/active-version` response (bharath, 2026-09-01), not guessed. */
+  const val UPLOAD_SONOGRAPHY_REPORT_IMAGE = "upload_sonography_report_image"
+
   const val HEIGHT_CM = "height_of_the_woman_in_cm"
   const val WEIGHT_KG = "current_weight_of_the_woman_in_kg"
 

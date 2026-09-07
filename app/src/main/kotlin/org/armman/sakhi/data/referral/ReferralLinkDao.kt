@@ -29,4 +29,18 @@ interface ReferralLinkDao {
    */
   @Query("SELECT * FROM referral_links WHERE referralId = :referralId")
   suspend fun getByReferralId(referralId: String): ReferralLinkEntity?
+
+  /**
+   * CR-Referral-01 (in-visit "Visit name"/"Referral visit name" autopopulation fix) — backs
+   * [org.armman.sakhi.data.referral.ReferralRepository.countReferralsForBeneficiary], which
+   * [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel]'s in-visit Referral capture step
+   * uses to auto-number a new referral "RV{n+1}", mirroring the standalone ad-hoc Referral form's
+   * existing [org.armman.sakhi.ui.adhocform.AdHocFormViewModel] auto-numbering. Counts rows
+   * cached on THIS device only (same on-device-only scope every other query on this DAO has) —
+   * a Sakhi's referral history on a freshly re-installed app starts back at RV1, same tradeoff
+   * [org.armman.sakhi.data.adhocform.AdHocFormDraftRepository.countByFormCode] already accepts
+   * for the ad-hoc form's own auto-numbering.
+   */
+  @Query("SELECT COUNT(*) FROM referral_links WHERE beneficiaryId = :beneficiaryId")
+  suspend fun countByBeneficiaryId(beneficiaryId: String): Int
 }

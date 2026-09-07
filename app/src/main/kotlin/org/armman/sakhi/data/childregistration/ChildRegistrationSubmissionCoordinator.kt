@@ -49,6 +49,15 @@ sealed class ChildRegistrationSubmissionException(message: String) : Exception(m
     override val userMessage: String get() = SubmitErrorCopy.GENERIC
   }
 
+  /** Mirrors [NoBeneficiaryIdReturned] for the submission call — see
+   * [org.armman.sakhi.data.forms.DynamicFormSubmissionException.NoSubmissionIdReturned] for why
+   * this is worth failing loudly on rather than silently carrying a blank id
+   * (CR-Registration-Edit). */
+  data object NoSubmissionIdReturned :
+    ChildRegistrationSubmissionException("Form submitted but no submission id was returned in the response") {
+    override val userMessage: String get() = SubmitErrorCopy.GENERIC
+  }
+
   /**
    * [violations] carries the backend schema validator's messages (`form-validation.ts`), which a
    * `422` from this endpoint returns under `fieldErrors.violations` as an ARRAY — e.g.
@@ -96,13 +105,13 @@ class ChildRegistrationSubmissionCoordinator @Inject constructor(
     localSubmissionUuid: String,
     answers: FormAnswers,
     fallbackRegistrationDate: LocalDate,
-    // Returns the server-assigned beneficiary id on success — RoomChildFormDraftRepository's sync
-    // executor needs it to record ChildFormDraftEntity.remoteBeneficiaryId (mirrors
-    // DynamicFormSubmissionCoordinator.submit's identical contract for the mother flow). It used to
-    // be discarded entirely, which left every child draft's remoteBeneficiaryId permanently null —
-    // making a synced child indistinguishable from an unsynced one to anything trying to match a
-    // local row against the server's beneficiary list.
-  ): Result<String> = runCatching {
+    // Returns the server-assigned beneficiary id AND submission id on success —
+    // RoomChildFormDraftRepository's sync executor needs the beneficiary id to record
+    // ChildFormDraftEntity.remoteBeneficiaryId (mirrors DynamicFormSubmissionCoordinator.submit's
+    // identical contract for the mother flow); the submission id is what CR-Registration-Edit's
+    // PATCH /form-submissions/:id/answers targets. Both used to be discarded entirely, which left
+    // every child draft's remoteBeneficiaryId/remoteSubmissionId permanently null.
+  ): Result<ChildRegistrationSubmissionOutcome> = runCatching {
     val beneficiaryRequest = mapper.toCreateBeneficiaryRequest(localCaseUuid, answers, fallbackRegistrationDate)
       .getOrElse { throw ChildRegistrationSubmissionException.MappingFailed(it) }
 
@@ -148,6 +157,17 @@ class ChildRegistrationSubmissionCoordinator @Inject constructor(
       )
     }
 
-    serverBeneficiaryId
+    val serverSubmissionId = submissionResponse.body()?.data?.id
+      ?: throw ChildRegistrationSubmissionException.NoSubmissionIdReturned
+
+    ChildRegistrationSubmissionOutcome(beneficiaryId = serverBeneficiaryId, submissionId = serverSubmissionId)
   }
 }
+
+/** [ChildRegistrationSubmissionCoordinator.submit]'s success payload — mirrors
+ * [org.armman.sakhi.data.forms.DynamicFormSubmissionOutcome] for the mother flow
+ * (CR-Registration-Edit). */
+data class ChildRegistrationSubmissionOutcome(
+  val beneficiaryId: String,
+  val submissionId: String,
+)

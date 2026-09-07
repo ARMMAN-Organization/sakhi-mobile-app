@@ -190,6 +190,36 @@ class RoomDynamicFormDraftRepository @Inject constructor(
   override fun observeUploadRecords(): Flow<List<FormUploadRecord>> =
     dao.observeAll().map { entities -> entities.map { it.toUploadRecord() } }
 
+  override suspend fun getEditableSubmission(beneficiaryId: String): EditableSubmissionInfo? {
+    // CR-Registration-Edit bugfix: the id the Beneficiary Profile screen carries is NOT always the
+    // server id — BeneficiaryProfileRepository.getBeneficiary(id) tries `id` as a LOCAL
+    // beneficiaryId first (the common case: a beneficiary enrolled on this device, whether synced
+    // yet or not) and only falls back to treating it as the server id for a beneficiary this
+    // device never locally enrolled at all. Mirror that same order here, or the by-far-most-common
+    // case — editing someone you just registered on this phone — never finds her draft.
+    val draft = dao.getByLocalBeneficiaryId(beneficiaryId)
+      ?: dao.getByRemoteBeneficiaryId(beneficiaryId)
+      ?: return null
+    val answers = readPayload(draft.localBeneficiaryId)?.answers ?: FormAnswers()
+    return EditableSubmissionInfo(
+      localBeneficiaryId = draft.localBeneficiaryId,
+      formVersionId = draft.formVersionId,
+      remoteSubmissionId = draft.remoteSubmissionId,
+      answers = answers,
+    )
+  }
+
+  override suspend fun applyFieldEdits(localBeneficiaryId: String, edits: Map<String, String>) {
+    val payload = readPayload(localBeneficiaryId) ?: return
+    val updatedAnswers = edits.entries.fold(payload.answers) { answers, (fieldCode, value) ->
+      answers.withSingleValue(fieldCode, value)
+    }
+    secureStore.putString(
+      dynamicFormDraftPayloadKey(localBeneficiaryId),
+      dynamicFormDraftGson.toJson(payload.copy(answers = updatedAnswers)),
+    )
+  }
+
   /**
    * Reads the stored payload only for rows the backend rejected as duplicates, to surface an
    * unanswered new-pregnancy prompt on Home. Every other row skips the decrypt entirely — this maps

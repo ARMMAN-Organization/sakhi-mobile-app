@@ -26,6 +26,7 @@ class ReferralEvidenceSyncExecutorTest {
     val uploadCalls = mutableListOf<UploadCall>()
 
     override suspend fun getCachedReferralVisitName(referralId: String): String? = throw UnsupportedOperationException()
+    override suspend fun countReferralsForBeneficiary(beneficiaryId: String): Int = throw UnsupportedOperationException()
     override suspend fun getPendingFollowUps(): List<ReferralFollowUp> = throw UnsupportedOperationException()
     override suspend fun createReferral(
       visitId: String?,
@@ -57,6 +58,9 @@ class ReferralEvidenceSyncExecutorTest {
       uploadCalls += UploadCall(referralId, followupId, submissionId, evidenceType)
       return uploadResult(evidenceType, file)
     }
+
+    override suspend fun refreshReferralStatuses(beneficiaryId: String): Result<Unit> =
+      throw UnsupportedOperationException()
   }
 
   private lateinit var dao: FakeReferralEvidenceDao

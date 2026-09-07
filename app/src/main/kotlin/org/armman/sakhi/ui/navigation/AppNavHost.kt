@@ -40,6 +40,12 @@ object Routes {
    * selector, a standalone fork of the mother-registration flow. */
   const val CHILD_REGISTRATION = "enrollment/child-registration"
   const val PRE_VISIT_HEALTH_HISTORY = "previsit-health-history/{beneficiaryId}/{visitId}/{label}"
+  /** CR-Registration-Edit Phase 1: the Beneficiary Profile's Edit stub, scoped to
+   * MOTHER_REGISTRATION/CHILD_REGISTRATION only — see [org.armman.sakhi.data.forms
+   * .EditableFieldCodes]'s own doc for why every other form code has no screen here yet. [type] is
+   * [org.armman.sakhi.data.beneficiary.BeneficiaryType]'s name (`MOTHER`/`INFANT`), carried as a
+   * plain route param rather than re-derived, since the profile screen already knows it. */
+  const val EDIT_BENEFICIARY_FIELDS = "beneficiary/{beneficiaryId}/edit-fields/{type}"
   const val VISIT_FORM = "visit-form/{beneficiaryId}/{visitId}/{label}"
   /** CR-Referral-01/02: Referral Follow-up used to be this bespoke route; it now opens through
    * [AD_HOC_FORM] (`formCode = "REFERRAL_FOLLOWUP_VISIT"`, with `referralId` carried as that
@@ -97,6 +103,9 @@ object Routes {
   /** Builds the route for the Pre-Visit Health History screen (FR-S-4.6). */
   fun preVisitHealthHistory(beneficiaryId: String, visitId: String, label: String) =
     "previsit-health-history/${Uri.encode(beneficiaryId)}/${Uri.encode(visitId)}/${Uri.encode(label)}"
+
+  fun editBeneficiaryFields(beneficiaryId: String, type: org.armman.sakhi.data.beneficiary.BeneficiaryType) =
+    "beneficiary/${Uri.encode(beneficiaryId)}/edit-fields/${Uri.encode(type.name)}"
 
   /** Builds the route for a single visit's Visit Form. */
   fun visitForm(beneficiaryId: String, visitId: String, label: String) =
@@ -178,6 +187,15 @@ fun AppNavHost() {
         onSeeVisitTracker = { navController.navigate(Routes.VISIT_TRACKER) },
         onProfile = { navController.navigate(Routes.PROFILE) },
         onRegisterNew = { navController.navigate(Routes.ENROLLMENT) },
+        // Notification banner's "Fill Referral Form" CTA (SRS FR-S-7.2 row 2) — same
+        // Routes.adHocForm(beneficiaryId, FORM_CODE_REFERRAL_FOLLOWUP, referralId=) call as
+        // BeneficiaryProfileScreen's onReferralFollowUp below; HomeViewModel already resolved
+        // beneficiaryId from the notification's referral-only linkedEntityId before this fires.
+        onFillReferralForm = { beneficiaryId, referralId ->
+          navController.navigate(
+            Routes.adHocForm(beneficiaryId, FORM_CODE_REFERRAL_FOLLOWUP, referralId = referralId),
+          )
+        },
       )
     }
     composable(Routes.PROFILE) {
@@ -328,6 +346,23 @@ fun AppNavHost() {
         onContinueChildRegistration = { beneficiaryId, sessionUuid ->
           navController.navigate(Routes.deliveryChildRegistration(beneficiaryId, sessionUuid))
         },
+        // CR-Registration-Edit Phase 1: IdentityCard's own Edit pill, no longer the shared
+        // onComingSoon toast every other not-yet-built action on this screen still uses.
+        onEditIdentity = { beneficiaryId, type ->
+          navController.navigate(Routes.editBeneficiaryFields(beneficiaryId, type))
+        },
+      )
+    }
+    composable(
+      route = Routes.EDIT_BENEFICIARY_FIELDS,
+      arguments = listOf(
+        navArgument("beneficiaryId") { type = NavType.StringType },
+        navArgument("type") { type = NavType.StringType },
+      ),
+    ) {
+      org.armman.sakhi.ui.beneficiaryprofile.BeneficiaryFieldEditScreen(
+        onBack = { navController.popBackStack() },
+        onSaved = { navController.popBackStack() },
       )
     }
     composable(

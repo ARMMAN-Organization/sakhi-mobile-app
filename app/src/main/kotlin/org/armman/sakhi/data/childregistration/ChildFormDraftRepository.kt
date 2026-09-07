@@ -1,6 +1,7 @@
 package org.armman.sakhi.data.childregistration
 
 import kotlinx.coroutines.flow.Flow
+import org.armman.sakhi.data.forms.EditableSubmissionInfo
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormUploadRecord
 import java.time.LocalDate
@@ -52,4 +53,13 @@ interface ChildFormDraftRepository {
    * sync run. Merged with the other queues by
    * [org.armman.sakhi.data.sync.UploadRecordsSource]. */
   fun observeUploadRecords(): Flow<List<FormUploadRecord>>
+
+  /** Mirrors [org.armman.sakhi.data.forms.DynamicFormDraftRepository.getEditableSubmission] for
+   * the child flow (CR-Registration-Edit) — including trying [beneficiaryId] as a local id before
+   * a remote one. */
+  suspend fun getEditableSubmission(beneficiaryId: String): EditableSubmissionInfo?
+
+  /** Mirrors [org.armman.sakhi.data.forms.DynamicFormDraftRepository.applyFieldEdits] for the
+   * child flow (CR-Registration-Edit). */
+  suspend fun applyFieldEdits(localBeneficiaryId: String, edits: Map<String, String>)
 }

@@ -1,8 +1,11 @@
 package org.armman.sakhi.data.visitform
 
 import kotlinx.coroutines.delay
+import org.armman.sakhi.data.beneficiary.BeneficiaryType
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfile
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfileRepository
+import org.armman.sakhi.data.schedule.VisitCodeType
+import org.armman.sakhi.data.schedule.VisitScheduleRepository
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -16,6 +19,10 @@ import javax.inject.Singleton
 @Singleton
 class StaticVisitFormRepository @Inject constructor(
   private val beneficiaryProfileRepository: BeneficiaryProfileRepository,
+  /** Bug fix (2026-09-04): source of the beneficiary's completed-visit history — see
+   * [firstAncVisitWeightKg]'s doc for why this class needs it now. */
+  private val visitScheduleRepository: VisitScheduleRepository,
+  private val visitFormDraftRepository: VisitFormDraftRepository,
 ) : VisitFormRepository {
 
   /**
@@ -31,7 +38,7 @@ class StaticVisitFormRepository @Inject constructor(
     // Propagates NoSuchElementException for a genuinely unknown id (neither seeded nor a real
     // enrolment), same contract as before — only the "no canned context" case now has a fallback.
     val profile = beneficiaryProfileRepository.getBeneficiary(beneficiaryId)
-    val base = RECORDS[beneficiaryId] ?: syntheticContext(profile)
+    val base = RECORDS[beneficiaryId] ?: syntheticContext(profile, beneficiaryId, visitId)
     // CR-016c: Summary banner chips come from the beneficiary's own recorded
     // diagnoses — sourced here (not duplicated as a separate fetch in the
     // ViewModel) since Visit Form's context already owns "carried-forward data".
@@ -49,7 +56,7 @@ class StaticVisitFormRepository @Inject constructor(
    * writes it); falls back to today only if that's missing or unparseable — a stub limitation,
    * not expected once CR-026 replaces this class with the real API.
    */
-  private fun syntheticContext(profile: BeneficiaryProfile) = VisitContext(
+  private suspend fun syntheticContext(profile: BeneficiaryProfile, beneficiaryId: String, visitId: String) = VisitContext(
     visitTypeLabel = "ANC1",
     // Bugfix: this used to be hardcoded blank for every real (non-seeded-demo) beneficiary, so
     // an RCH number entered at MOTHER_REGISTRATION never carried forward onto ANC1. Read from the
@@ -63,20 +70,52 @@ class StaticVisitFormRepository @Inject constructor(
     previousHb = null,
     advisedDeliveryPlace = null,
     sickleCell = null,
-    registrationWeightKg = registrationWeightKgFrom(profile),
+    registrationWeightKg = firstAncVisitWeightKg(profile, beneficiaryId, visitId),
   )
 
   /**
-   * [BeneficiaryProfile.weight] is formatted for display (`"62.5 kg"`, see
-   * [org.armman.sakhi.data.beneficiaryprofile.ScheduleBackedBeneficiaryProfileRepository
-   * .toProfile]) — strip the unit and parse back to a number for
-   * [VisitContext.registrationWeightKg]. Null for a beneficiary whose registration didn't record
-   * a weight (blank string) or whatever CHILD's own [BeneficiaryProfile.weight] means (not
-   * applicable here — [VisitFormComputedFieldEvaluator]'s weight-gain calc only runs for the
-   * mother/ANC_VISIT flow).
+   * Bug fix (2026-09-04): reported bug — ANC_VISIT's "Gestational weight gain" always showed the
+   * "Auto-calculated" placeholder, never an actual Normal/Severe value. Root cause: this used to
+   * read [BeneficiaryProfile.weight], which is sourced from MOTHER_REGISTRATION's answers — but
+   * checked against the live spec (`Registration_PW_D`, all 65 rows), MOTHER_REGISTRATION never
+   * asks for the woman's weight at all. That question only exists on ANC_VISIT itself (spec row
+   * 13, "Current weight of the woman in kg"), captured at her FIRST ANC visit and carried forward
+   * from there — same "open only in first visit, auto-populate in the rest" convention as
+   * Height/BMI (spec rows 12/14). So [BeneficiaryProfile.weight] was always blank for every real
+   * (non-seeded-demo) beneficiary, and [VisitFormComputedFieldEvaluator.gestationalWeightGain]'s
+   * `registrationWeightKg ?: return null` guard fired every single time.
+   *
+   * Reads the beneficiary's own answered [VisitFormQuestionCodes.WEIGHT_KG] back out of her first
+   * COMPLETED ANC visit ([VisitCodeType.ANC], `sequenceNo == 1`) via [visitScheduleRepository] +
+   * [visitFormDraftRepository] — the same two stores [org.armman.sakhi.ui.visitform
+   * .DynamicVisitFormViewModel] itself writes to on submit, so no new persistence had to be added.
+   * Null (falls back to the "Auto-calculated" placeholder, same as before this fix) whenever:
+   *  - she has no completed first ANC visit yet (opening ANC1 itself — nothing to carry forward,
+   *    matches this constant's own KDoc: weight gain isn't meaningful before a baseline exists),
+   *  - that visit was recorded on a different device (this device never saved its local draft —
+   *    see [VisitFormDraftRepository.getAnswers]'s own doc for why this is a real, not-yet-closed
+   *    gap; CR-026 replacing this whole stub with a real backend fetch resolves it for good), or
+   *  - she left the weight question blank on that visit (shouldn't happen — it's mandatory per
+   *    spec — but this must not crash on a beneficiary enrolled before that was enforced).
+   *
+   * [visitId] excludes the CURRENT visit from counting as its own baseline — relevant when this IS
+   * her first ANC visit: [org.armman.sakhi.data.schedule.VisitScheduleEntity.status] only flips to
+   * COMPLETED on submit, so in practice an in-progress ANC1 would never match anyway, but the
+   * explicit check keeps this correct even if that ordering ever changes.
    */
-  private fun registrationWeightKgFrom(profile: BeneficiaryProfile): Double? =
-    profile.weight?.removeSuffix("kg")?.trim()?.toDoubleOrNull()
+  private suspend fun firstAncVisitWeightKg(
+    profile: BeneficiaryProfile,
+    beneficiaryId: String,
+    visitId: String,
+  ): Double? {
+    if (profile.type != BeneficiaryType.MOTHER) return null
+    val firstAnc = visitScheduleRepository.getForBeneficiary(beneficiaryId)
+      .firstOrNull { it.visitType == VisitCodeType.ANC && it.sequenceNo == 1 }
+      ?.takeIf { it.localScheduleUuid != visitId }
+      ?: return null
+    val answers = visitFormDraftRepository.getAnswers(firstAnc.localScheduleUuid) ?: return null
+    return answers.valueOf(VisitFormQuestionCodes.WEIGHT_KG)?.toDoubleOrNull()
+  }
 
   private companion object {
     const val NETWORK_LATENCY_MS = 500L

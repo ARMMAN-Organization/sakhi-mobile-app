@@ -230,6 +230,13 @@ fun DynamicFormField(
    * but shows the plain value with no "Auto-calculated" placeholder (bharath, 2026-08-08). Empty
    * for every caller except the Visit Form. */
   readOnlyQuestionCodes: Set<String> = emptySet(),
+  /** Explanatory text shown in place of a blank value for a field locked via
+   * [readOnlyQuestionCodes] — e.g. the Visit Form's LMP correction date, locked with "Upload
+   * sonography photo to enter date" until the sonography image field has an answer (Task 1,
+   * LMP/Reopen/Referral/Audit task list). A field with a real value ignores this map entirely —
+   * see the read-only branch below. Keyed by question code so one host screen can lock several
+   * fields with different reasons; empty for every caller except the Visit Form. */
+  readOnlyHintQuestionCodes: Map<String, String> = emptyMap(),
   /** The hosting form's `form_code` (e.g. `"POSTPARTUM_VISIT"`), forwarded to
    * [FormMultiSelectExclusivity.isDisabled] so a form-scoped exclusive-option rule (a
    * `question_code` another form's schema reuses for an unrelated field) only applies here, not
@@ -326,6 +333,7 @@ fun DynamicFormField(
       onCaptureImage = onCaptureImage,
       serverErrorText = errorText,
       readOnlyQuestionCodes = readOnlyQuestionCodes,
+      readOnlyHintQuestionCodes = readOnlyHintQuestionCodes,
       formCode = formCode,
       fieldBackground = riskStyle?.surface,
     )
@@ -455,6 +463,7 @@ private fun DynamicFormFieldBody(
   onCaptureImage: () -> Unit,
   serverErrorText: String?,
   readOnlyQuestionCodes: Set<String> = emptySet(),
+  readOnlyHintQuestionCodes: Map<String, String> = emptyMap(),
   formCode: String? = null,
   // See AppTextInputField's `fieldBackground` doc (FormFields.kt) — threaded down to whichever
   // widget this field's inputType renders. Read-only/computed/media/image branches don't accept
@@ -466,8 +475,12 @@ private fun DynamicFormFieldBody(
   if (field.questionCode in readOnlyQuestionCodes) {
     // Locked by the host screen, not by the schema — see DynamicFormField's readOnlyQuestionCodes
     // doc. No "Auto-calculated" fallback: an empty value here means missing data, not a pending
-    // calculation.
-    AppReadOnlyField(label = field.label, value = singleValue)
+    // calculation — but a blank value can still show an explanatory hint (readOnlyHintQuestionCodes)
+    // instead of a bare empty box, e.g. "Upload sonography photo to enter date".
+    AppReadOnlyField(
+      label = field.label,
+      value = singleValue.ifBlank { readOnlyHintQuestionCodes[field.questionCode].orEmpty() },
+    )
     return
   }
   if (!ageFromDobEditable &&

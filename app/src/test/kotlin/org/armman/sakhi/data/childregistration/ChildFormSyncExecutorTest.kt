@@ -147,6 +147,8 @@ class ChildFormSyncExecutorTest {
     // now returns it (Result<String>, was Result<Unit>) precisely so this can be persisted and
     // later used by the offline-first beneficiary list to match a synced child against her remote row.
     assertEquals("server-beneficiary-1", dao.getByLocalBeneficiaryId("local-1")?.remoteBeneficiaryId)
+    // CR-Registration-Edit: the submission id must survive too.
+    assertEquals("server-sub-1", dao.getByLocalBeneficiaryId("local-1")?.remoteSubmissionId)
   }
 
   @Test

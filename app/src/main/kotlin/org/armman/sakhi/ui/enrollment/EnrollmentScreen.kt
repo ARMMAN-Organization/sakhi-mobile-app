@@ -42,6 +42,7 @@ import kotlinx.coroutines.delay
 import org.armman.sakhi.R
 import org.armman.sakhi.ui.components.AppTabRow
 import org.armman.sakhi.ui.components.BackHeader
+import org.armman.sakhi.ui.components.FullScreenLoadingOverlay
 import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.components.SecondaryButton
 import org.armman.sakhi.ui.enrollment.components.BeneficiaryTypeOption
@@ -152,6 +153,7 @@ fun EnrollmentScreen(
       if (showSavedToast) {
         SavedToast(modifier = Modifier.align(Alignment.BottomCenter))
       }
+      FullScreenLoadingOverlay(visible = state.isSubmitting)
     }
   }
 
@@ -460,6 +462,7 @@ private fun StepFooter(
             text = stringResource(R.string.enrollment_submit),
             onClick = viewModel::submit,
             enabled = state.canSubmit,
+            loading = state.isSubmitting,
             height = Dimens.SmallButtonHeight,
             fullWidth = false,
           )

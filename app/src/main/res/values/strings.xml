@@ -31,6 +31,9 @@
   <string name="home_upload_status_syncing">Syncing…</string>
   <string name="home_upload_status_needs_attention">Needs attention</string>
   <string name="home_upload_modal_close_content_description">Close</string>
+  <string name="notification_dismiss_content_description">Dismiss</string>
+  <string name="notification_cta_fill_referral_form">Fill Referral Form</string>
+  <string name="notification_referral_followup_not_found">Could not find that referral. Please check My Beneficiaries.</string>
   <string name="home_all_beneficiaries">All Beneficiaries</string>
   <string name="home_register_new">Register New</string>
   <string name="home_error_load">We couldn\'t load your dashboard. Please try again.</string>

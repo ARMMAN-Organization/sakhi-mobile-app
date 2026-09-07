@@ -18,6 +18,11 @@ interface ChildFormDraftDao {
   @Query("SELECT * FROM child_registration_drafts WHERE localBeneficiaryId = :localBeneficiaryId")
   suspend fun getByLocalBeneficiaryId(localBeneficiaryId: String): ChildFormDraftEntity?
 
+  /** Mirrors [org.armman.sakhi.data.forms.DynamicFormDraftDao.getByRemoteBeneficiaryId] for the
+   * child flow (CR-Registration-Edit). */
+  @Query("SELECT * FROM child_registration_drafts WHERE remoteBeneficiaryId = :remoteBeneficiaryId")
+  suspend fun getByRemoteBeneficiaryId(remoteBeneficiaryId: String): ChildFormDraftEntity?
+
   /** Same semantics as `DynamicFormDraftDao.getPendingSync` — never-synced or previously-failed,
    * skipping ones held for duplicate confirmation. */
   @Query(

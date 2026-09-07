@@ -199,6 +199,9 @@ class DynamicFormSyncExecutorTest {
     // The server-assigned id must survive onto the draft — the offline-first beneficiary list
     // (Phase 2) matches a local-synced row against its remote counterpart using this field.
     assertEquals("server-beneficiary-1", dao.getByLocalBeneficiaryId("local-1")?.remoteBeneficiaryId)
+    // CR-Registration-Edit: the submission id must survive too — PATCH /form-submissions/:id/
+    // answers has nothing to target without it.
+    assertEquals("server-sub-1", dao.getByLocalBeneficiaryId("local-1")?.remoteSubmissionId)
   }
 
   @Test
@@ -250,6 +253,21 @@ class DynamicFormSyncExecutorTest {
     val entity = requireNotNull(dao.getByLocalBeneficiaryId("local-1"))
     assertEquals(EnrollmentSyncStatus.FAILED, entity.syncStatus)
     assertEquals(1, entity.retryCount)
+  }
+
+  @Test
+  fun `runOne on success marks the draft SYNCED and records both server ids`() = runTest {
+    seedPendingDraft()
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    val result = executor.runOne("local-1")
+
+    assertEquals(DynamicFormSyncItemResult.Synced, result)
+    val entity = requireNotNull(dao.getByLocalBeneficiaryId("local-1"))
+    assertEquals(EnrollmentSyncStatus.SYNCED, entity.syncStatus)
+    assertEquals("server-beneficiary-1", entity.remoteBeneficiaryId)
+    assertEquals("server-sub-1", entity.remoteSubmissionId)
   }
 
   @Test

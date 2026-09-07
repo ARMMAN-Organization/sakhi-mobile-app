@@ -867,4 +867,86 @@ class RoomDynamicFormDraftRepositoryTest {
     assertEquals(EnrollmentSyncStatus.DUPLICATE_CONFLICT, record.syncStatus)
     assertNull(record.pendingNewPregnancyBeneficiaryId)
   }
+
+  // --- getEditableSubmission / applyFieldEdits (CR-Registration-Edit) --------------------------
+
+  @Test
+  fun `getEditableSubmission finds a synced draft by its server beneficiary id`() = runTest {
+    connectivityChecker.online = true
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+    submit()
+
+    val editable = repository.getEditableSubmission("server-beneficiary-1")
+
+    assertNotNull(editable)
+    assertEquals("local-1", editable?.localBeneficiaryId)
+    assertEquals("server-sub-1", editable?.remoteSubmissionId)
+    assertEquals("version-1", editable?.formVersionId)
+    assertEquals("Test", editable?.answers?.valueOf("first_name"))
+  }
+
+  @Test
+  fun `getEditableSubmission returns null for a beneficiary with no local draft`() = runTest {
+    assertNull(repository.getEditableSubmission("unknown-server-id"))
+  }
+
+  @Test
+  fun `getEditableSubmission also finds a draft by its LOCAL beneficiary id`() = runTest {
+    // Regression: BeneficiaryProfileScreen's own id is the LOCAL beneficiaryId for anyone enrolled
+    // on this device (see BeneficiaryProfileRepository.getBeneficiary's doc) — the by-far-most-
+    // common case, and the one that must not require waiting for a remote id at all.
+    connectivityChecker.online = true
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+    submit()
+
+    val editable = repository.getEditableSubmission("local-1")
+
+    assertNotNull(editable)
+    assertEquals("local-1", editable?.localBeneficiaryId)
+    assertEquals("server-sub-1", editable?.remoteSubmissionId)
+  }
+
+  @Test
+  fun `getEditableSubmission returns a null remoteSubmissionId for a draft synced before it was captured`() = runTest {
+    // A draft that synced on an older build (before this field was added) — has a
+    // remoteBeneficiaryId but no remoteSubmissionId. Must not crash, and must let the caller show
+    // its own "can't edit yet" state.
+    connectivityChecker.online = false
+    repository.saveDraft("local-1", "MOTHER_REGISTRATION", "version-1", "submission-uuid-1", answers, LocalDate.now())
+    dao.upsert(
+      requireNotNull(dao.getByLocalBeneficiaryId("local-1")).copy(
+        syncStatus = EnrollmentSyncStatus.SYNCED,
+        remoteBeneficiaryId = "server-beneficiary-1",
+        remoteSubmissionId = null,
+      ),
+    )
+
+    val editable = repository.getEditableSubmission("server-beneficiary-1")
+
+    assertNotNull(editable)
+    assertNull(editable?.remoteSubmissionId)
+  }
+
+  @Test
+  fun `applyFieldEdits merges edited values into the locally stored answers`() = runTest {
+    connectivityChecker.online = true
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+    submit()
+
+    repository.applyFieldEdits("local-1", mapOf("mobile_number" to "9999999999"))
+
+    val payload = storedPayload()
+    assertEquals("9999999999", payload.answers.valueOf("mobile_number"))
+    // Untouched fields survive the merge.
+    assertEquals("Test", payload.answers.valueOf("first_name"))
+  }
+
+  @Test
+  fun `applyFieldEdits is a no-op when there is no local payload for the id`() = runTest {
+    // Must not throw — nothing to merge into.
+    repository.applyFieldEdits("no-such-local-id", mapOf("mobile_number" to "9999999999"))
+  }
 }

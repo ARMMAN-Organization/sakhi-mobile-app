@@ -162,6 +162,22 @@ import org.armman.sakhi.data.referral.ReferralEvidenceMediaEntity
  *    [MIGRATION_20_21] — one `ALTER TABLE`, one NOT NULL TEXT column defaulting to `''` (same
  *    blank-not-null convention as v18's two columns). No automated migration test (same
  *    convention as v4-v20).
+ *  - v22: adds `decidedByUserId`/`decidedAt`/`decisionNotes` to the existing `referral_links`
+ *    table (Task 8, LMP/Reopen/Referral/Audit task list) — mirrors a Supervisor's REFILL decision
+ *    on a referral follow-up, refreshed from `GET /referrals?beneficiaryId=` (see
+ *    [org.armman.sakhi.data.referral.RemoteReferralRepository.refreshReferralStatuses]'s doc).
+ *    Additive [MIGRATION_21_22] — three `ALTER TABLE`s, all nullable TEXT columns (unlike prior
+ *    referral_links columns, these have no safe non-null default — "no decision yet" is a real
+ *    null, not blank string). No automated migration test (same convention as v4-v21).
+
+ *  - v23: adds `beneficiaryId` to the existing `referral_links` table (CR-Referral-01, in-visit
+ *    "Visit name"/"Referral visit name" autopopulation fix) — lets [ReferralLinkDao
+ *    .countByBeneficiaryId] count a beneficiary's past referrals on this device so
+ *    [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel]'s in-visit Referral capture step
+ *    can label a new one "RV{n+1}", the same auto-numbering the standalone ad-hoc Referral form
+ *    already does. Additive [MIGRATION_22_23] — one `ALTER TABLE`, one NOT NULL TEXT column
+ *    defaulting to `''` (same blank-not-null convention as v18/v21). No automated migration test
+ *    (same convention as v4-v22).
  */
 @Database(
   entities = [
@@ -181,7 +197,7 @@ import org.armman.sakhi.data.referral.ReferralEvidenceMediaEntity
     EnrollmentRiskBaselineEntity::class,
     ReferralEvidenceMediaEntity::class,
   ],
-  version = 21,
+  version = 23,
   exportSchema = true,
 )
 @TypeConverters(ScheduleTypeConverters::class)
@@ -665,6 +681,31 @@ abstract class SakhiDatabase : RoomDatabase() {
     val MIGRATION_20_21: Migration = object : Migration(20, 21) {
       override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE `referral_links` ADD COLUMN `referralVisitName` TEXT NOT NULL DEFAULT ''")
+      }
+    }
+
+    /**
+     * v21 -> v22: adds the Task 8 Supervisor-decision columns to `referral_links` — see the class
+     * doc's v22 entry. All three nullable, no DEFAULT clause (SQLite defaults an added nullable
+     * column with no explicit default to NULL, which is exactly "no decision yet").
+     */
+    val MIGRATION_21_22: Migration = object : Migration(21, 22) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `referral_links` ADD COLUMN `decidedByUserId` TEXT")
+        db.execSQL("ALTER TABLE `referral_links` ADD COLUMN `decidedAt` TEXT")
+        db.execSQL("ALTER TABLE `referral_links` ADD COLUMN `decisionNotes` TEXT")
+      }
+    }
+
+    /**
+     * v22 -> v23: adds `beneficiaryId` to the existing `referral_links` table — see the class
+     * doc's v23 entry. Every existing row upgrades with `''`, same acceptable-blank convention as
+     * v18/v21 (no real users on the app yet); a referral cached before this migration just never
+     * counts toward any beneficiary's RV-numbering total.
+     */
+    val MIGRATION_22_23: Migration = object : Migration(22, 23) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `referral_links` ADD COLUMN `beneficiaryId` TEXT NOT NULL DEFAULT ''")
       }
     }
 

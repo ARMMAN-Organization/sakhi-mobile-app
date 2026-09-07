@@ -1,5 +1,6 @@
 package org.armman.sakhi.ui.beneficiaryprofile
 
+import java.time.LocalDate
 import java.util.UUID
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -22,10 +23,16 @@ import org.armman.sakhi.data.delivery.DeliverySessionEntity
 import org.armman.sakhi.data.delivery.DeliverySessionRepository
 import org.armman.sakhi.data.delivery.DeliverySessionStep
 import org.armman.sakhi.data.forms.SubmitErrorCopy
+import org.armman.sakhi.data.lmpchange.LmpChangeRepository
+import org.armman.sakhi.data.lmpchange.LocalLmpChangeAppliedStore
+import org.armman.sakhi.data.referral.ReferralRepository
 import org.armman.sakhi.data.reopen.ReopenRepository
 import org.armman.sakhi.data.reopen.ReopenRequestReason
 import org.armman.sakhi.data.reopen.ReopenSubmissionException
+import org.armman.sakhi.data.schedule.ScheduleContext
+import org.armman.sakhi.data.schedule.ScheduleRuleSource
 import org.armman.sakhi.data.schedule.VisitCodeType
+import org.armman.sakhi.data.schedule.VisitScheduleCoordinator
 import org.armman.sakhi.data.schedule.VisitScheduleEntity
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
 import org.armman.sakhi.data.schedule.VisitScheduleStatus
@@ -101,6 +108,21 @@ data class BeneficiaryProfileUiState(
    * tappable Reopen button in that case. Best-effort, same as [canStartVisit]: a fetch failure
    * just leaves this false rather than failing the whole profile load. */
   val hasPendingReopenRequest: Boolean = false,
+  /** Task-6 (rejection half): true when [profile] is CLOSED and at least one reopen request for
+   * this beneficiary already has `supervisorStatus == "REJECTED"` and none is currently PENDING —
+   * the Footer shows a "reopen request was rejected" banner above the (now-tappable-again) Reopen
+   * button in that case. A rejection does not change [BeneficiaryProfile.status] server-side (she
+   * stays CLOSED — only APPROVED reactivates her), so this is purely a notification signal, not a
+   * status change like [hasApprovedReopenRequest]'s poll. Best-effort, same as
+   * [hasPendingReopenRequest]: a fetch failure just leaves this false rather than failing the
+   * whole profile load. */
+  val hasRejectedReopenRequest: Boolean = false,
+  /** Task 4 (LMP/Reopen/Referral/Audit task list): true when this MOTHER has at least one LMP
+   * change request whose `supervisorStatus` is `"REJECTED"` and none is currently PENDING — the
+   * profile shows a "LMP correction request was rejected" banner in that case. Mirrors
+   * [hasRejectedReopenRequest] exactly, just for the LMP flow instead of Reopen. Best-effort: a
+   * fetch failure just leaves this false rather than failing the whole profile load. */
+  val hasRejectedLmpChangeRequest: Boolean = false,
   /**
    * CR-Closure-02: true when [profile] is CLOSED and its [BeneficiaryProfile.closureReasonCode]
    * is not one of the death/miscarriage/abortion reasons the SRS Beneficiary Reopen form excludes
@@ -149,6 +171,13 @@ class BeneficiaryProfileViewModel @Inject constructor(
   private val visitScheduleRepository: VisitScheduleRepository,
   private val deliverySessionRepository: DeliverySessionRepository,
   private val statusOverrideStore: LocalBeneficiaryStatusOverrideStore,
+  /** Tasks 3/4 (LMP/Reopen/Referral/Audit task list). */
+  private val lmpChangeRepository: LmpChangeRepository,
+  private val visitScheduleCoordinator: VisitScheduleCoordinator,
+  private val scheduleRuleSource: ScheduleRuleSource,
+  private val lmpChangeAppliedStore: LocalLmpChangeAppliedStore,
+  /** Task 8 (LMP/Reopen/Referral/Audit task list). */
+  private val referralRepository: ReferralRepository,
   savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -179,7 +208,33 @@ class BeneficiaryProfileViewModel @Inject constructor(
       try {
         // A blank id means the screen was opened without its nav argument.
         require(beneficiaryId.isNotBlank()) { "Missing beneficiary id" }
+        // Task 8 (LMP/Reopen/Referral/Audit task list): pull any Supervisor follow-up decision
+        // (LAPSE/REFILL) made since this device last saw this beneficiary's referrals, BEFORE the
+        // profile fetch below — repository.getBeneficiary reads the cached referral_links rows
+        // synchronously to build each visit card's referral chip
+        // (see ProfileVisitMapper.toProfileVisits), so refreshing first is what makes a Supervisor's
+        // decision show up on this same load rather than only after a second reload. Best-effort,
+        // same as every other poll in this function: see ReferralRepository.refreshReferralStatuses's
+        // doc for the still-open SAKHI-role and resubmission-semantics caveats.
+        runCatching { referralRepository.refreshReferralStatuses(beneficiaryId) }
         var profile = repository.getBeneficiary(beneficiaryId)
+        // Bug fix (2026-09-04): every reopen-request lookup below (hasApprovedReopenRequest here,
+        // hasPendingReopenRequest/hasRejectedReopenRequest further down) used to query with
+        // `beneficiaryId` directly — the nav arg, which is a LOCAL uuid for a beneficiary sourced
+        // from LocalEnrolmentBeneficiarySource (the common case: a beneficiary this device
+        // enrolled). The backend's reopen-requests endpoints are keyed by the SERVER beneficiary
+        // id, same as the LMP-change endpoints below and same as submitReopenRequest already
+        // resolves correctly — so every GET 404'd with "Beneficiary case not found" (confirmed
+        // on-device via the api-calls.jsonl log), and being best-effort
+        // (runCatching { }.getOrDefault(false)), that 404 silently became "false": a Sakhi could
+        // never see her request as pending, approved, or rejected — only ever the pre-request
+        // "Reopen" state — no matter what the supervisor did. Resolved here the same way
+        // submitReopenRequest already does, once, and reused for every reopen check below (also
+        // replaces the old separate lmpServerBeneficiaryId resolution further down — same value,
+        // same reasoning, no need to compute it twice).
+        val serverBeneficiaryId = runCatching {
+          visitScheduleRepository.getForBeneficiary(beneficiaryId).firstNotNullOfOrNull { it.serverBeneficiaryId }
+        }.getOrNull() ?: beneficiaryId
         // CR-Closure-04 (CR-Closure-01 item #10): the backend has no webhook for a reopen
         // decision (confirmed 2026-08-31) — this poll is what stands in for one. Only worth
         // asking when CLOSED; an ACTIVE/JOURNEY_COMPLETE beneficiary can't have an approved
@@ -188,7 +243,7 @@ class BeneficiaryProfileViewModel @Inject constructor(
         // (this function also runs on every screen re-entry, not just init — see this function's
         // own doc above).
         if (profile.status == BeneficiaryStatus.CLOSED) {
-          val approved = runCatching { reopenRepository.hasApprovedReopenRequest(beneficiaryId) }
+          val approved = runCatching { reopenRepository.hasApprovedReopenRequest(serverBeneficiaryId) }
             .getOrDefault(false)
           if (approved) {
             // The backend contract says APPROVED already reactivated the beneficiary and resumed
@@ -201,6 +256,50 @@ class BeneficiaryProfileViewModel @Inject constructor(
             // — so this call is a harmless no-op for that case.
             statusOverrideStore.clearOverride(beneficiaryId)
             profile = repository.getBeneficiary(beneficiaryId)
+          }
+        }
+        // Task 3 (LMP/Reopen/Referral/Audit task list): poll for an approved LMP correction and
+        // regenerate the ANC schedule exactly once per approved request — see
+        // LocalLmpChangeAppliedStore's own doc for why the idempotency guard is required here
+        // (unlike the reopen-approval poll above, onLmpOrEddApproved is NOT safe to call on every
+        // profile load; it unconditionally supersedes the beneficiary's open visits). Only a
+        // MOTHER can have an LMP on file at all. Best-effort end to end: any failure anywhere in
+        // this block just leaves the schedule as it was, retried on the next profile load, same
+        // as every other poll in this function.
+        // The LMP-change-request endpoints are keyed by the SERVER beneficiary id, not the local
+        // enrolment id `beneficiaryId` usually is for an on-device beneficiary (see
+        // ScheduleBackedBeneficiaryProfileRepository.getBeneficiary's own doc: `profile.id` is the
+        // local id in the common case). Without this, every lmpChangeRepository call below 404s
+        // silently (runCatching swallows it) and an approved LMP correction never regenerates the
+        // schedule. Reuses [serverBeneficiaryId] resolved above (same lookup, same reasoning —
+        // no need to resolve it twice).
+        if (profile.type == BeneficiaryType.MOTHER) {
+          val approvedLmpChange = runCatching { lmpChangeRepository.approvedLmpChangeRequest(serverBeneficiaryId) }
+            .getOrNull()
+          val approvedRequestId = approvedLmpChange?.id
+          val approvedNewLmpDate = approvedLmpChange?.newLmpDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+          val registrationDate = profile.registrationDate
+          if (approvedRequestId != null && approvedNewLmpDate != null && registrationDate != null &&
+            lmpChangeAppliedStore.getAppliedRequestId(beneficiaryId) != approvedRequestId
+          ) {
+            val regenerated = runCatching {
+              visitScheduleCoordinator.onLmpOrEddApproved(
+                ScheduleContext(
+                  localBeneficiaryId = beneficiaryId,
+                  registrationDate = registrationDate,
+                  lmp = approvedNewLmpDate,
+                  edd = approvedNewLmpDate.plusDays(scheduleRuleSource.eddOffsetDays().toLong()),
+                ),
+              )
+            }.isSuccess
+            if (regenerated) {
+              // Marked applied BEFORE the re-fetch below, not after — a crash/process-death right
+              // here must not leave this request perpetually un-applied (the schedule is already
+              // correctly regenerated by this point; only the profile's own display data hasn't
+              // been re-read yet, which the very next profile load will simply do again).
+              lmpChangeAppliedStore.setAppliedRequestId(beneficiaryId, approvedRequestId)
+              profile = repository.getBeneficiary(beneficiaryId)
+            }
           }
         }
         // Failing this check must not fail the whole screen — the profile is still worth showing
@@ -223,18 +322,43 @@ class BeneficiaryProfileViewModel @Inject constructor(
         // Only worth asking for a CLOSED beneficiary — an ACTIVE/JOURNEY_COMPLETE one can't have a
         // pending reopen request. Best-effort: see hasPendingReopenRequest's own doc.
         val hasPendingReopenRequest = if (profile.status == BeneficiaryStatus.CLOSED) {
-          runCatching { reopenRepository.hasPendingReopenRequest(beneficiaryId) }.getOrDefault(false)
+          runCatching { reopenRepository.hasPendingReopenRequest(serverBeneficiaryId) }.getOrDefault(false)
+        } else {
+          false
+        }
+        // Task-6 (rejection half): only meaningful for a CLOSED beneficiary with no request still
+        // PENDING — if a fresh request is already in flight, that one deserves the "pending
+        // review" copy, not a stale rejection banner from a prior request. Best-effort, same
+        // rationale as hasPendingReopenRequest above.
+        val hasRejectedReopenRequest = if (profile.status == BeneficiaryStatus.CLOSED && !hasPendingReopenRequest) {
+          runCatching { reopenRepository.hasRejectedReopenRequest(serverBeneficiaryId) }.getOrDefault(false)
         } else {
           false
         }
         val isReopenEligible = profile.status == BeneficiaryStatus.CLOSED &&
           profile.closureReasonCode !in NON_REOPENABLE_CLOSURE_REASONS
+        // Task 4: only meaningful for a MOTHER with no LMP change request still PENDING — a
+        // fresh resubmission in flight deserves no banner at all yet, not a stale rejection
+        // banner from a prior request. Same rationale as hasRejectedReopenRequest above.
+        val hasRejectedLmpChangeRequest = if (profile.type == BeneficiaryType.MOTHER) {
+          val pending = runCatching { lmpChangeRepository.hasPendingLmpChangeRequest(serverBeneficiaryId) }
+            .getOrDefault(false)
+          if (pending) {
+            false
+          } else {
+            runCatching { lmpChangeRepository.hasRejectedLmpChangeRequest(serverBeneficiaryId) }.getOrDefault(false)
+          }
+        } else {
+          false
+        }
         _uiState.update {
           it.copy(
             isLoading = false,
             profile = profile,
             canStartVisit = canStartVisit,
             hasPendingReopenRequest = hasPendingReopenRequest,
+            hasRejectedReopenRequest = hasRejectedReopenRequest,
+            hasRejectedLmpChangeRequest = hasRejectedLmpChangeRequest,
             isReopenEligible = isReopenEligible,
             hasDeliveryRecorded = hasDeliveryRecorded,
             deliveryButtonState = deliveryButtonState,

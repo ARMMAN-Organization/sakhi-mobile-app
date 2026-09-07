@@ -53,4 +53,25 @@ data class ReferralLinkEntity(
    * blank-default-on-migration convention as [facilityName]/[facilityType] — a row cached before
    * this column existed just reads back empty rather than crashing Room's NOT NULL constraint. */
   val referralVisitName: String = "",
+  /**
+   * Task 8 (LMP/Reopen/Referral/Audit task list) — mirrors [Referral.decidedByUserId]/
+   * [Referral.decidedAt]/[Referral.decisionNotes], written by
+   * [org.armman.sakhi.data.referral.RemoteReferralRepository.refreshReferralStatuses] once a
+   * Supervisor's REFILL decision is observed on `GET /referrals`. Null on every row until then —
+   * including every row cached before this migration, and every row for a referral no Supervisor
+   * has acted on yet. Not yet surfaced in any UI (see [Referral.decidedByUserId]'s doc for why:
+   * the resubmission-clearing semantics aren't confirmed) — stored now so that UI can be added
+   * later without another migration.
+   */
+  val decidedByUserId: String? = null,
+  val decidedAt: String? = null,
+  val decisionNotes: String? = null,
+  /** CR-Referral-01 (in-visit "Visit name"/"Referral visit name" autopopulation fix) -- the
+   * beneficiary this referral was created for, so [ReferralLinkDao.countByBeneficiaryId] can
+   * count how many referrals she already has on this device and label the next one "RV{n+1}" in
+   * [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel]'s in-visit Referral capture step.
+   * Blank-default-on-migration, same convention as every other column added to this table after
+   * v1 -- a row cached before this migration just doesn't count toward any beneficiary's total
+   * (acceptable: no real users on the app yet). */
+  val beneficiaryId: String = "",
 )

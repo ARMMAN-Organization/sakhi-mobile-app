@@ -30,6 +30,9 @@
   <string name="home_upload_status_syncing">सिंक होत आहे…</string>
   <string name="home_upload_status_needs_attention">लक्ष देणे आवश्यक</string>
   <string name="home_upload_modal_close_content_description">बंद करा</string>
+  <string name="notification_dismiss_content_description">डिसमिस करा</string>
+  <string name="notification_cta_fill_referral_form">रेफरल फॉर्म भरा</string>
+  <string name="notification_referral_followup_not_found">तो रेफरल सापडला नाही. कृपया माझे लाभार्थी तपासा.</string>
   <string name="home_all_beneficiaries">सर्व लाभार्थी</string>
   <string name="home_register_new">नवीन नोंदणी</string>
   <string name="home_error_load">डॅशबोर्ड लोड होऊ शकला नाही. कृपया पुन्हा प्रयत्न करा.</string>

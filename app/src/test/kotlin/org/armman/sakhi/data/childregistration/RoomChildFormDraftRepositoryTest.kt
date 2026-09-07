@@ -158,4 +158,67 @@ class RoomChildFormDraftRepositoryTest {
     assertEquals(ChildFormSubmitResult.QueuedOffline, result)
     assertTrue(scheduleRepository.getActiveForBeneficiary("child-2").isEmpty())
   }
+
+  // --- getEditableSubmission / applyFieldEdits (CR-Registration-Edit) --------------------------
+
+  private suspend fun seedSyncedDraft(
+    localBeneficiaryId: String = "child-1",
+    remoteBeneficiaryId: String = "server-beneficiary-1",
+    remoteSubmissionId: String? = "server-sub-1",
+  ) {
+    repository.submitDraft(
+      localBeneficiaryId = localBeneficiaryId,
+      formCode = "CHILD_REGISTRATION",
+      formVersionId = "version-1",
+      localSubmissionUuid = "submission-$localBeneficiaryId",
+      answers = answers,
+      registrationDate = LocalDate.of(2026, 7, 20),
+    )
+    dao.upsert(
+      requireNotNull(dao.getByLocalBeneficiaryId(localBeneficiaryId)).copy(
+        syncStatus = org.armman.sakhi.data.enrollment.EnrollmentSyncStatus.SYNCED,
+        remoteBeneficiaryId = remoteBeneficiaryId,
+        remoteSubmissionId = remoteSubmissionId,
+      ),
+    )
+  }
+
+  @Test
+  fun `getEditableSubmission finds a synced draft by its server beneficiary id`() = runTest {
+    seedSyncedDraft()
+
+    val editable = repository.getEditableSubmission("server-beneficiary-1")
+
+    assertEquals("child-1", editable?.localBeneficiaryId)
+    assertEquals("server-sub-1", editable?.remoteSubmissionId)
+    assertEquals("Aarav Sharma", editable?.answers?.valueOf("name_of_the_child"))
+  }
+
+  @Test
+  fun `getEditableSubmission returns null for a beneficiary with no local draft`() = runTest {
+    org.junit.Assert.assertNull(repository.getEditableSubmission("unknown-server-id"))
+  }
+
+  @Test
+  fun `getEditableSubmission also finds a draft by its LOCAL beneficiary id`() = runTest {
+    // Regression: BeneficiaryProfileScreen's own id is the LOCAL beneficiaryId for anyone enrolled
+    // on this device — see the mother-flow repository test's identical case for the full doc.
+    seedSyncedDraft()
+
+    val editable = repository.getEditableSubmission("child-1")
+
+    assertEquals("child-1", editable?.localBeneficiaryId)
+    assertEquals("server-sub-1", editable?.remoteSubmissionId)
+  }
+
+  @Test
+  fun `applyFieldEdits merges edited values into the locally stored answers`() = runTest {
+    seedSyncedDraft()
+
+    repository.applyFieldEdits("child-1", mapOf("mobile_number" to "9999999999"))
+
+    val editable = repository.getEditableSubmission("server-beneficiary-1")
+    assertEquals("9999999999", editable?.answers?.valueOf("mobile_number"))
+    assertEquals("Aarav Sharma", editable?.answers?.valueOf("name_of_the_child"))
+  }
 }

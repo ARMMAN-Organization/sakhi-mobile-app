@@ -104,16 +104,20 @@ class DynamicFormSyncExecutor @Inject constructor(
           duplicateAcknowledgement = payload.duplicateAcknowledgement,
         )
         result.fold(
-          onSuccess = { serverBeneficiaryId ->
+          onSuccess = { outcome ->
             dao.upsert(
               draft.copy(
                 syncStatus = EnrollmentSyncStatus.SYNCED,
                 lastAttemptAtEpochMillis = Instant.now().toEpochMilli(),
                 lastErrorMessage = null,
-                remoteBeneficiaryId = serverBeneficiaryId,
+                remoteBeneficiaryId = outcome.beneficiaryId,
+                // CR-Registration-Edit: this used to be discarded — without it PATCH
+                // /form-submissions/:id/answers has no id to target and a synced beneficiary stays
+                // permanently un-editable.
+                remoteSubmissionId = outcome.submissionId,
               ),
             )
-            linkScheduleToServerBeneficiary(draft.localBeneficiaryId, serverBeneficiaryId)
+            linkScheduleToServerBeneficiary(draft.localBeneficiaryId, outcome.beneficiaryId)
             // Closes the cross-queue race documented on ManualSyncTrigger: the visit_schedules
             // WorkManager job is independent and unordered, so if it already ran (and found nothing
             // eligible) before this beneficiary was linked, nothing would ever re-check it within the
@@ -211,16 +215,17 @@ class DynamicFormSyncExecutor @Inject constructor(
         duplicateAcknowledgement = payload.duplicateAcknowledgement,
       )
       result.fold(
-        onSuccess = { serverBeneficiaryId ->
+        onSuccess = { outcome ->
           dao.upsert(
             draft.copy(
               syncStatus = EnrollmentSyncStatus.SYNCED,
               lastAttemptAtEpochMillis = Instant.now().toEpochMilli(),
               lastErrorMessage = null,
-              remoteBeneficiaryId = serverBeneficiaryId,
+              remoteBeneficiaryId = outcome.beneficiaryId,
+              remoteSubmissionId = outcome.submissionId,
             ),
           )
-          linkScheduleToServerBeneficiary(draft.localBeneficiaryId, serverBeneficiaryId)
+          linkScheduleToServerBeneficiary(draft.localBeneficiaryId, outcome.beneficiaryId)
           // Closes the cross-queue race documented on ManualSyncTrigger: the visit_schedules
           // WorkManager job is independent and unordered, so if it already ran (and found nothing
           // eligible) before this beneficiary was linked, nothing would ever re-check it within the

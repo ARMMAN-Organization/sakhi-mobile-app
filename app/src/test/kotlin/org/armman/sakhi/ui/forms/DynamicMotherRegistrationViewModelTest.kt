@@ -14,6 +14,7 @@ import kotlinx.coroutines.test.setMain
 import org.armman.sakhi.data.forms.DOB_QUESTION_CODE
 import org.armman.sakhi.data.enrollment.DuplicateOutcome
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
+import org.armman.sakhi.data.forms.EditableSubmissionInfo
 import org.armman.sakhi.data.forms.DynamicFormSubmitResult
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormCrossFieldRule
@@ -124,6 +125,10 @@ class DynamicMotherRegistrationViewModelTest {
     override suspend fun getUploadRecords(): List<FormUploadRecord> = emptyList()
 
     override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = flowOf(emptyList())
+
+    override suspend fun getEditableSubmission(remoteBeneficiaryId: String): EditableSubmissionInfo? = null
+
+    override suspend fun applyFieldEdits(localBeneficiaryId: String, edits: Map<String, String>) = Unit
   }
 
   private val dispatcher = StandardTestDispatcher()

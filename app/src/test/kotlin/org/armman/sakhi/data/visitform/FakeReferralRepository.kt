@@ -40,6 +40,19 @@ class FakeReferralRepository : ReferralRepository {
 
   override suspend fun getCachedReferralVisitName(referralId: String): String? = cachedReferralVisitName
 
+  /** Configurable -- [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModelTest] sets this to
+   * cover the in-visit Referral capture step's "RV{n+1}" auto-numbering. Defaults to 0 (a fresh
+   * beneficiary with no prior referrals) so every other test using this fake keeps behaving
+   * exactly as before this method existed. */
+  var referralCountToReturn: Int = 0
+
+  val countReferralsForBeneficiaryCalls = mutableListOf<String>()
+
+  override suspend fun countReferralsForBeneficiary(beneficiaryId: String): Int {
+    countReferralsForBeneficiaryCalls += beneficiaryId
+    return referralCountToReturn
+  }
+
   override suspend fun getPendingFollowUps(): List<ReferralFollowUp> =
     throw UnsupportedOperationException("not used by these tests")
 
@@ -99,4 +112,17 @@ class FakeReferralRepository : ReferralRepository {
     file: java.io.File,
     submissionId: String?,
   ): Result<String> = throw UnsupportedOperationException("not used by these tests")
+
+  /** Configurable — [org.armman.sakhi.ui.beneficiaryprofile.BeneficiaryProfileViewModelTest]
+   * covers Task 8's LAPSE/REFILL refresh via this fake. Defaults to success/no-op so every other
+   * test using this fake (which never configures it) keeps behaving exactly as before this method
+   * existed. */
+  var refreshReferralStatusesResult: Result<Unit> = Result.success(Unit)
+
+  val refreshReferralStatusesCalls = mutableListOf<String>()
+
+  override suspend fun refreshReferralStatuses(beneficiaryId: String): Result<Unit> {
+    refreshReferralStatusesCalls += beneficiaryId
+    return refreshReferralStatusesResult
+  }
 }

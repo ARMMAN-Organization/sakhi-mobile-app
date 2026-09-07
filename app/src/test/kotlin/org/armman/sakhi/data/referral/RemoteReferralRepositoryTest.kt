@@ -36,11 +36,13 @@ class RemoteReferralRepositoryTest {
     var convertResponse: (() -> Response<CreateReferralResponseDto>)? = null,
     var uploadUrlResponse: (() -> Response<MediaUploadUrlResponseDto>)? = null,
     var finalizeResponse: (() -> Response<FinalizeMediaResponseDto>)? = null,
+    var getReferralsResponse: (() -> Response<ReferralListResponseDto>)? = null,
   ) : ReferralApi {
     var lastCreateRequest: CreateReferralRequestDto? = null
     var lastFollowUpRequest: SubmitReferralFollowUpRequestDto? = null
     var lastUploadUrlRequest: RequestMediaUploadUrlDto? = null
     var lastFinalizeRequest: FinalizeMediaRequestDto? = null
+    var lastGetReferralsBeneficiaryId: String? = null
 
     override suspend fun getPendingFollowUps(sakhiId: String): Response<ReferralFollowUpListResponseDto> {
       assertEquals("sakhi-1", sakhiId)
@@ -71,6 +73,11 @@ class RemoteReferralRepositoryTest {
     override suspend fun finalizeMedia(request: FinalizeMediaRequestDto): Response<FinalizeMediaResponseDto> {
       lastFinalizeRequest = request
       return finalizeResponse?.invoke() ?: throw IOException("offline")
+    }
+
+    override suspend fun getReferrals(beneficiaryId: String): Response<ReferralListResponseDto> {
+      lastGetReferralsBeneficiaryId = beneficiaryId
+      return getReferralsResponse?.invoke() ?: throw IOException("offline")
     }
   }
 
@@ -116,10 +123,11 @@ class RemoteReferralRepositoryTest {
     api: ReferralApi,
     store: FakeSecureKeyValueStore = FakeSecureKeyValueStore(),
     lookupRepository: FakeLookupRepository = lookupRepository(),
+    linkDao: FakeReferralLinkDao = FakeReferralLinkDao(),
   ): RemoteReferralRepository {
     val sessionStore = SessionStore(FakeSecureKeyValueStore())
     sessionStore.saveSession(session())
-    return RemoteReferralRepository(api, sessionStore, store, lookupRepository, OkHttpClient(), FakeReferralLinkDao())
+    return RemoteReferralRepository(api, sessionStore, store, lookupRepository, OkHttpClient(), linkDao)
   }
 
   private fun capture(
@@ -593,4 +601,121 @@ class RemoteReferralRepositoryTest {
     assertTrue(result.isFailure)
     tempFile.delete()
   }
+
+  @Test
+  fun `refreshReferralStatuses updates a cached row's status and decision fields`() = runTest {
+    val linkDao = FakeReferralLinkDao()
+    linkDao.upsert(
+      cachedLink(
+        localScheduleUuid = "schedule-1",
+        referralId = "ref-1",
+        status = ReferralStatus.PENDING_FOLLOWUP.name,
+      ),
+    )
+    val api = FakeReferralApi(
+      getReferralsResponse = {
+        Response.success(
+          ReferralListResponseDto(
+            true,
+            null,
+            ReferralListDataDto(
+              items = listOf(
+                referralDataDto(id = "ref-1", status = "LAPSED"),
+              ),
+            ),
+          ),
+        )
+      },
+    )
+
+    val result = repo(api, linkDao = linkDao).refreshReferralStatuses("ben-1")
+
+    assertTrue(result.isSuccess)
+    assertEquals("ben-1", api.lastGetReferralsBeneficiaryId)
+    val updated = linkDao.getByReferralId("ref-1")
+    assertEquals(ReferralStatus.LAPSED.name, updated?.status)
+    // Fields the list response doesn't carry stay exactly as cached — only status/decision moved.
+    assertEquals("Civil Hospital", updated?.facilityName)
+  }
+
+  @Test
+  fun `refreshReferralStatuses captures a REFILL decision without changing status`() = runTest {
+    val linkDao = FakeReferralLinkDao()
+    linkDao.upsert(
+      cachedLink(
+        localScheduleUuid = "schedule-1",
+        referralId = "ref-1",
+        status = ReferralStatus.PENDING_FOLLOWUP.name,
+      ),
+    )
+    val api = FakeReferralApi(
+      getReferralsResponse = {
+        Response.success(
+          ReferralListResponseDto(
+            true,
+            null,
+            ReferralListDataDto(
+              items = listOf(
+                referralDataDto(id = "ref-1", status = "PENDING_FOLLOWUP").copy(
+                  decidedByUserId = "supervisor-1",
+                  decidedAt = "2026-09-01T10:00:00.000Z",
+                  decisionNotes = "Please refill and resubmit",
+                ),
+              ),
+            ),
+          ),
+        )
+      },
+    )
+
+    repo(api, linkDao = linkDao).refreshReferralStatuses("ben-1")
+
+    val updated = linkDao.getByReferralId("ref-1")
+    assertEquals(ReferralStatus.PENDING_FOLLOWUP.name, updated?.status)
+    assertEquals("supervisor-1", updated?.decidedByUserId)
+    assertEquals("2026-09-01T10:00:00.000Z", updated?.decidedAt)
+    assertEquals("Please refill and resubmit", updated?.decisionNotes)
+  }
+
+  @Test
+  fun `refreshReferralStatuses ignores a server referral this device never created`() = runTest {
+    val linkDao = FakeReferralLinkDao()
+    val api = FakeReferralApi(
+      getReferralsResponse = {
+        Response.success(ReferralListResponseDto(true, null, ReferralListDataDto(items = listOf(referralDataDto(id = "ref-unknown")))))
+      },
+    )
+
+    val result = repo(api, linkDao = linkDao).refreshReferralStatuses("ben-1")
+
+    assertTrue(result.isSuccess)
+    assertEquals(null, linkDao.getByReferralId("ref-unknown"))
+  }
+
+  @Test
+  fun `refreshReferralStatuses surfaces a network failure as Result failure and leaves cache untouched`() = runTest {
+    val linkDao = FakeReferralLinkDao()
+    linkDao.upsert(cachedLink(localScheduleUuid = "schedule-1", referralId = "ref-1", status = ReferralStatus.PENDING_FOLLOWUP.name))
+
+    val result = repo(FakeReferralApi(), linkDao = linkDao).refreshReferralStatuses("ben-1")
+
+    assertTrue(result.isFailure)
+    assertEquals(ReferralStatus.PENDING_FOLLOWUP.name, linkDao.getByReferralId("ref-1")?.status)
+  }
+
+  private fun cachedLink(
+    localScheduleUuid: String,
+    referralId: String,
+    status: String,
+  ) = ReferralLinkEntity(
+    localScheduleUuid = localScheduleUuid,
+    referralId = referralId,
+    visitId = "visit-1",
+    status = status,
+    referralTypeLookupValueId = "lookup-standard-1",
+    validTill = "2026-09-03T00:00:00.000Z",
+    createdAtEpochMillis = 0L,
+    facilityName = "Civil Hospital",
+    facilityType = "PHC",
+  )
 }

@@ -2,6 +2,7 @@ package org.armman.sakhi.data.forms
 
 import retrofit2.Response
 import retrofit2.http.Body
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 
@@ -89,4 +90,44 @@ interface FormSubmissionApi {
     @Path("formCode") formCode: String,
     @Body request: CreateSubmissionRequestDto,
   ): Response<CreateSubmissionResponseDto>
+
+  /**
+   * CR-Registration-Edit: post-submission field correction (task 10/11 of the LMP/Reopen/
+   * Referral/Audit gap analysis). Backend contract confirmed 2026-09-02: `edits` is 1-20
+   * `{fieldCode, value}` pairs, all-or-nothing (a single bad fieldCode 400s/422s the whole call,
+   * nothing is partially applied), and clearing a field to empty is not supported — `value` is
+   * never sent as a bare null. Success returns the full updated form submission (same shape as a
+   * GET), which this app doesn't need to re-parse: it already knows what it just sent, so
+   * [FieldEditsApi] only checks [Response.isSuccessful] and reads the error body on failure. See
+   * [org.armman.sakhi.data.forms.FieldEditsRepository] for how the two documented error shapes
+   * (`400 VALIDATION_ERROR` unknown fieldCode vs. `422 UNPROCESSABLE` not-editable fieldCode) are
+   * told apart.
+   */
+  @PATCH("form-submissions/{submissionId}/answers")
+  suspend fun updateAnswers(
+    @Path("submissionId") submissionId: String,
+    @Body request: UpdateFormSubmissionAnswersRequestDto,
+  ): Response<UpdateFormSubmissionAnswersResponseDto>
 }
+
+/** One `{fieldCode, value}` edit. [value] is `Any` (never null — see [FormSubmissionApi
+ * .updateAnswers]'s own doc) since the allowlisted fields span string/number answers; Gson
+ * serializes a raw [String] the same as every other question answer already flowing through
+ * [CreateSubmissionRequestDto.formData]. */
+data class FieldEditDto(
+  val fieldCode: String,
+  val value: Any,
+)
+
+data class UpdateFormSubmissionAnswersRequestDto(
+  val edits: List<FieldEditDto>,
+)
+
+/** Success envelope for `PATCH /form-submissions/:id/answers`. [data] is the full updated
+ * submission (same shape a GET would return) — deliberately untyped (`Any?`) here since no caller
+ * needs to read it back; see [FormSubmissionApi.updateAnswers]'s own doc for why. */
+data class UpdateFormSubmissionAnswersResponseDto(
+  val success: Boolean,
+  val message: String?,
+  val data: Any? = null,
+)

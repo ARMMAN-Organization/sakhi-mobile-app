@@ -127,4 +127,30 @@ object VisitFormComputedFieldEvaluator {
 
     return if (actualGainKg < expectedMinGainKg - WEIGHT_GAIN_TOLERANCE_KG) VALUE_SEVERE else VALUE_NORMAL
   }
+
+  /**
+   * Whether [org.armman.sakhi.data.visitform.VisitFormQuestionCodes.LMP_DATE_EDIT] should render
+   * read-only (locked) even though the schema's own `visibleWhen` already shows it.
+   *
+   * The live schema renders [org.armman.sakhi.data.visitform.VisitFormQuestionCodes.LMP_DATE_EDIT]
+   * and [org.armman.sakhi.data.visitform.VisitFormQuestionCodes.UPLOAD_SONOGRAPHY_REPORT_IMAGE] on
+   * the same `visibleWhen` condition (sonography = Yes), both mandatory, with no ordering between
+   * them enforced by the schema itself. Product/meeting-notes intent (2026-03-24) is that the
+   * corrected LMP date should only be enterable once the sonography photo backing it exists — a
+   * Sakhi shouldn't be able to type a date with no evidence yet to support it. This is a
+   * host-screen lock layered on top of the schema's visibility (via
+   * [org.armman.sakhi.ui.forms.DynamicFormField]'s `readOnlyQuestionCodes`), not a change to
+   * [org.armman.sakhi.data.forms.FormVisibilityEvaluator] itself — that evaluator is deliberately
+   * mirrored against the backend's own `isVisible` so app-hidden and backend-excluded stay in sync;
+   * this lock is purely an app-side UX guard on a field the backend already considers visible.
+   *
+   * Locked (true) whenever [org.armman.sakhi.data.visitform.VisitFormQuestionCodes
+   * .UPLOAD_SONOGRAPHY_REPORT_IMAGE] has no answer yet. Callers are expected to only consult this
+   * for a field already known to be visible (i.e. sonography = Yes) — this function doesn't
+   * re-check that condition itself, since [org.armman.sakhi.ui.visitform.DynamicVisitFormScreen]
+   * only iterates fields [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel.visibleFields]
+   * already filtered to visible.
+   */
+  fun isLmpDateEditLocked(answers: FormAnswers): Boolean =
+    answers.valueOf(VisitFormQuestionCodes.UPLOAD_SONOGRAPHY_REPORT_IMAGE).isNullOrBlank()
 }

@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.armman.sakhi.data.childregistration.ChildFormDraftRepository
+import org.armman.sakhi.data.forms.EditableSubmissionInfo
 import org.armman.sakhi.data.childregistration.ChildFormSubmitResult
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormCrossFieldRule
@@ -110,6 +111,10 @@ class DynamicChildRegistrationViewModelTest {
     override suspend fun getUploadRecords(): List<FormUploadRecord> = emptyList()
 
     override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = flowOf(emptyList())
+
+    override suspend fun getEditableSubmission(remoteBeneficiaryId: String): EditableSubmissionInfo? = null
+
+    override suspend fun applyFieldEdits(localBeneficiaryId: String, edits: Map<String, String>) = Unit
   }
 
   private val dispatcher = StandardTestDispatcher()

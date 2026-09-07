@@ -111,6 +111,21 @@
 # on Start Visit (works fine in debug, fails in release) — confirmed 2026-08-25.
 -keep class org.armman.sakhi.data.previsithealth.** { *; }
 
+# lmpchange: LmpChangeApi (POST/GET lmp-change-requests) + LmpChangeRequestDto/
+# LmpChangeRequestRowDto/LmpChangeRequestResponseDto/LmpChangeRequestListResponseDto, reached
+# only via Retrofit's erased Response<T> generic — same reflection hazard as every other data/*
+# package above (reopen, closure, referral, etc.), missed when the LMP Change feature was added
+# because the earlier audits (2026-08-19, 2026-08-25) predate it. Release-only regression: an LMP
+# date-change request submits (uploadSonographyImage/createLmpChangeRequest run and can even
+# return 2xx) but the supervisor never sees it approve/reject-able, because
+# VisitFormSubmissionCoordinator.maybeCreateLmpChangeRequest treats any exception here as
+# best-effort and only logs a warning (Log.w, "visit submission still succeeded") — so R8
+# stripping/renaming this package's fields in a release build (isMinifyEnabled = true; debug has
+# isMinifyEnabled = false) fails Gson (de)serialization silently instead of crashing, exactly like
+# the dashboard/previsithealth bugs above, just swallowed one layer deeper here (confirmed
+# 2026-09-04, LMP-date-change "approval not going to the supervisor" report).
+-keep class org.armman.sakhi.data.lmpchange.** { *; }
+
 # Retrofit's own recommended R8 rules. Retrofit builds each call's generic return type
 # (Response<LoginResponseDto>) from the service interface method's signature/annotations at
 # runtime; stripping those causes GsonConverterFactory to hand back the wrong type and

@@ -17,6 +17,13 @@ private const val KEY_REMOTE_BENEFICIARY_CACHE_PREFIX = "remote_beneficiary_list
 private const val CASE_TYPE_CHILD = "CHILD"
 private const val STATUS_JOURNEY_COMPLETE = "JOURNEY_COMPLETE"
 private const val STATUS_CLOSED = "CLOSED"
+/** Backend-confirmed 2026-09-04: `GET /beneficiaries` keeps returning a transferred beneficiary
+ * to her OLD Sakhi with this status -- nothing is dropped/rescoped server-side, and the
+ * repository only filters by status when a caller explicitly passes `?status=` (which My
+ * Beneficiaries never does -- see this repository's own doc for why it deliberately calls
+ * [org.armman.sakhi.data.motherlink.BeneficiaryApi.listAll] unfiltered). So the app is the one
+ * that has to remove her -- see [BeneficiaryListItemDto.toRemoteBeneficiary]'s doc. */
+private const val STATUS_TRANSFERRED = "TRANSFERRED"
 private const val UNNAMED_REMOTE = "Unnamed beneficiary"
 private const val PADA_UNRESOLVED = "—"
 private const val VISIT_UNAVAILABLE = "—"
@@ -118,13 +125,17 @@ class RemoteBeneficiaryRepository @Inject constructor(
   }
 
   /**
-   * Null for a row that cannot become a [Beneficiary] at all — missing id. Everything else degrades
-   * gracefully (a blank name renders as a placeholder, an unresolved pada as a dash) rather than
-   * dropping the row, matching [LocalEnrolmentBeneficiarySource]'s best-effort philosophy: a
-   * partially-readable server row is still worth showing.
+   * Null for a row that cannot become a [Beneficiary] at all — missing id, or a beneficiary who
+   * has been transferred to another Sakhi (spec: "Beneficiary removed from Sakhi's My
+   * Beneficiaries list on Transfer" -- see [STATUS_TRANSFERRED]'s doc for why the app has to drop
+   * this row itself rather than relying on the server to stop returning it). Everything else
+   * degrades gracefully (a blank name renders as a placeholder, an unresolved pada as a dash)
+   * rather than dropping the row, matching [LocalEnrolmentBeneficiarySource]'s best-effort
+   * philosophy: a partially-readable server row is still worth showing.
    */
   private fun BeneficiaryListItemDto.toRemoteBeneficiary(today: LocalDate): Beneficiary? {
     val remoteId = id?.takeIf { it.isNotBlank() } ?: return null
+    if (currentStatus.equals(STATUS_TRANSFERRED, ignoreCase = true)) return null
     val status = currentStatus.toBeneficiaryStatus()
     val parsedRegistrationDate = registrationDate.toLocalDateOrNull()
 
@@ -167,11 +178,11 @@ class RemoteBeneficiaryRepository @Inject constructor(
   private fun String?.toBeneficiaryStatus(): BeneficiaryStatus = when (this?.uppercase()) {
     STATUS_JOURNEY_COMPLETE -> BeneficiaryStatus.JOURNEY_COMPLETE
     STATUS_CLOSED -> BeneficiaryStatus.CLOSED
-    // ACTIVE, TRANSFERRED, REOPEN_REQUESTED, and anything unrecognised all read as still-open from
-    // the Sakhi's perspective — none of them mean "done" or "closed" the way the app's own
-    // BeneficiaryStatus models it. FLAGGED: collapsing TRANSFERRED/REOPEN_REQUESTED into ACTIVE is a
-    // placeholder until My Beneficiaries has its own states for them; a Sakhi should eventually be
-    // able to tell a transferred case apart from a normally-active one.
+    // TRANSFERRED never reaches here -- toRemoteBeneficiary drops that row before calling this
+    // (see its own doc). ACTIVE, REOPEN_REQUESTED, and anything unrecognised all read as
+    // still-open from the Sakhi's perspective -- neither means "done" or "closed" the way the
+    // app's own BeneficiaryStatus models it. FLAGGED: collapsing REOPEN_REQUESTED into ACTIVE is
+    // still a placeholder until My Beneficiaries has its own state for it.
     else -> BeneficiaryStatus.ACTIVE
   }
 

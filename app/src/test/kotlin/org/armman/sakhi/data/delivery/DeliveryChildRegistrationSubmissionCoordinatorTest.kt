@@ -22,9 +22,13 @@ import org.armman.sakhi.data.schedule.HardcodedRuleSource
 import org.armman.sakhi.data.schedule.IncScheduleGenerator
 import org.armman.sakhi.data.schedule.NnScheduleGenerator
 import org.armman.sakhi.data.schedule.PpScheduleGenerator
+import org.armman.sakhi.data.schedule.AnchorType
+import org.armman.sakhi.data.schedule.EscalationPolicy
 import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
 import org.armman.sakhi.data.schedule.VisitCodeType
 import org.armman.sakhi.data.schedule.VisitScheduleCoordinator
+import org.armman.sakhi.data.schedule.VisitScheduleEntity
+import org.armman.sakhi.data.schedule.VisitScheduleStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -197,6 +201,69 @@ class DeliveryChildRegistrationSubmissionCoordinatorTest {
     assertEquals(DeliverySessionStep.PP1, row.step)
     assertEquals(2, row.nextChildIndexToRegister)
   }
+
+  // ---- Bug fix (2026-09-02): PP1 submitted out of sequence, before child registration ----------
+
+  @Test
+  fun `submit() does not regress to PP1 when the Sakhi already completed PP1 out of sequence`() = runTest {
+    val deliveryFormFilledOn = LocalDate.of(2026, 6, 1)
+    seedSession(child1 = "child-a", deliveryFormFilledOn = deliveryFormFilledOn)
+    // The Sakhi opened PP1 straight from "See Visits" and submitted it before finishing the
+    // child's own form — VisitFormSubmissionCoordinator.submit already flipped this row to
+    // COMPLETED, same as it would for any other visit.
+    visitScheduleRepository.saveGenerated(listOf(pp1Row(status = VisitScheduleStatus.COMPLETED)))
+    formSubmissionApi.response = successResponse()
+
+    submit(serverBeneficiaryId = "child-a")
+
+    val row = deliverySessionRepository.getBySessionUuid("session-1")!!
+    // No same-session NN row exists for this child, so the session resolves straight to DONE —
+    // never back to PP1, which would have left it stuck (nothing will ever submit that already-
+    // completed PP1 a second time to advance it further).
+    assertEquals(DeliverySessionStep.DONE, row.step)
+  }
+
+  @Test
+  fun `submit() resolves to NN when PP1 is already done and a same-session NN visit is open`() = runTest {
+    val deliveryFormFilledOn = LocalDate.of(2026, 6, 1)
+    seedSession(child1 = "child-a", deliveryFormFilledOn = deliveryFormFilledOn)
+    visitScheduleRepository.saveGenerated(listOf(pp1Row(status = VisitScheduleStatus.COMPLETED)))
+    formSubmissionApi.response = successResponse()
+
+    // submit() itself generates this child's own NN/INC schedule (anchored to "child-a"), and
+    // NnScheduleGenerator's Scenario A clamps NN1's scheduledDate to the delivery-form-filled
+    // date — so the freshly generated NN1 row already qualifies as the same-session visit without
+    // any extra seeding here.
+    submit(
+      serverBeneficiaryId = "child-a",
+      answersOverride = FormAnswers(
+        singleValues = mapOf(
+          "name_of_the_child" to "Test Baby",
+          ChildRegistrationQuestionCodes.DATE_OF_BIRTH_OF_INFANT to deliveryFormFilledOn.toString(),
+        ),
+      ),
+    )
+
+    val row = deliverySessionRepository.getBySessionUuid("session-1")!!
+    assertEquals(DeliverySessionStep.NN, row.step)
+  }
+
+  private fun pp1Row(status: VisitScheduleStatus) = VisitScheduleEntity(
+    localScheduleUuid = "pp1-schedule-1",
+    localBeneficiaryId = "mother-1",
+    visitCode = "PP1",
+    visitType = VisitCodeType.PP,
+    sequenceNo = 1,
+    scheduledDate = LocalDate.of(2026, 6, 1),
+    windowStartDate = LocalDate.of(2026, 6, 1),
+    windowEndDate = LocalDate.of(2026, 6, 8),
+    anchorType = AnchorType.DELIVERY_DATE,
+    anchorDate = LocalDate.of(2026, 6, 1),
+    status = status,
+    generatedByRuleVersion = "v1",
+    escalationPolicy = EscalationPolicy.IMMEDIATE,
+    createdAtEpochMillis = 1_000L,
+  )
 
   @Test
   fun `submit() success records a SUBMITTED audit event`() = runTest {

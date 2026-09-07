@@ -142,4 +142,31 @@ class VisitFormComputedFieldEvaluatorTest {
 
     assertNull(result)
   }
+
+  @Test
+  fun `isLmpDateEditLocked is true when the sonography image has not been captured yet`() {
+    val answers = FormAnswers(singleValues = mapOf(VisitFormQuestionCodes.LMP_DATE_EDIT to "2026-01-01"))
+
+    assertEquals(true, VisitFormComputedFieldEvaluator.isLmpDateEditLocked(answers))
+  }
+
+  @Test
+  fun `isLmpDateEditLocked is true when the sonography image answer is blank`() {
+    val answers = FormAnswers(
+      singleValues = mapOf(VisitFormQuestionCodes.UPLOAD_SONOGRAPHY_REPORT_IMAGE to ""),
+    )
+
+    assertEquals(true, VisitFormComputedFieldEvaluator.isLmpDateEditLocked(answers))
+  }
+
+  @Test
+  fun `isLmpDateEditLocked is false once the sonography image has been captured`() {
+    val answers = FormAnswers(
+      singleValues = mapOf(
+        VisitFormQuestionCodes.UPLOAD_SONOGRAPHY_REPORT_IMAGE to "content://media/sonography.jpg",
+      ),
+    )
+
+    assertEquals(false, VisitFormComputedFieldEvaluator.isLmpDateEditLocked(answers))
+  }
 }

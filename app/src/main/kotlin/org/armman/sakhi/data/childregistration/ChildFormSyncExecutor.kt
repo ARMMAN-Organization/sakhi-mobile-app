@@ -76,16 +76,17 @@ class ChildFormSyncExecutor @Inject constructor(
           fallbackRegistrationDate = parseRegistrationDate(payload.registrationDateIso),
         )
         result.fold(
-          onSuccess = { serverBeneficiaryId ->
+          onSuccess = { outcome ->
             dao.upsert(
               draft.copy(
                 syncStatus = EnrollmentSyncStatus.SYNCED,
                 lastAttemptAtEpochMillis = Instant.now().toEpochMilli(),
                 lastErrorMessage = null,
-                remoteBeneficiaryId = serverBeneficiaryId,
+                remoteBeneficiaryId = outcome.beneficiaryId,
+                remoteSubmissionId = outcome.submissionId,
               ),
             )
-            linkScheduleToServerBeneficiary(draft.localBeneficiaryId, serverBeneficiaryId)
+            linkScheduleToServerBeneficiary(draft.localBeneficiaryId, outcome.beneficiaryId)
           },
           onFailure = { error ->
             when {
@@ -160,16 +161,17 @@ class ChildFormSyncExecutor @Inject constructor(
         fallbackRegistrationDate = parseRegistrationDate(payload.registrationDateIso),
       )
       result.fold(
-        onSuccess = { serverBeneficiaryId ->
+        onSuccess = { outcome ->
           dao.upsert(
             draft.copy(
               syncStatus = EnrollmentSyncStatus.SYNCED,
               lastAttemptAtEpochMillis = Instant.now().toEpochMilli(),
               lastErrorMessage = null,
-              remoteBeneficiaryId = serverBeneficiaryId,
+              remoteBeneficiaryId = outcome.beneficiaryId,
+              remoteSubmissionId = outcome.submissionId,
             ),
           )
-          linkScheduleToServerBeneficiary(draft.localBeneficiaryId, serverBeneficiaryId)
+          linkScheduleToServerBeneficiary(draft.localBeneficiaryId, outcome.beneficiaryId)
           ChildFormSyncItemResult.Synced
         },
         onFailure = { error ->

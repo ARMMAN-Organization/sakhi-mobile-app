@@ -188,7 +188,6 @@ class RemoteBeneficiaryRepositoryTest {
         ok(
           row(id = "a", currentStatus = "JOURNEY_COMPLETE"),
           row(id = "b", currentStatus = "CLOSED"),
-          row(id = "c", currentStatus = "TRANSFERRED"),
           row(id = "d", currentStatus = "REOPEN_REQUESTED"),
           row(id = "e", currentStatus = "something-unrecognised"),
         )
@@ -199,9 +198,31 @@ class RemoteBeneficiaryRepositoryTest {
 
     assertEquals(BeneficiaryStatus.JOURNEY_COMPLETE, byId?.get("a")?.status)
     assertEquals(BeneficiaryStatus.CLOSED, byId?.get("b")?.status)
-    assertEquals(BeneficiaryStatus.ACTIVE, byId?.get("c")?.status)
     assertEquals(BeneficiaryStatus.ACTIVE, byId?.get("d")?.status)
     assertEquals(BeneficiaryStatus.ACTIVE, byId?.get("e")?.status)
+  }
+
+  @Test
+  fun `drops a TRANSFERRED row entirely -- she's moved to another Sakhi's caseload`() = runTest {
+    val api = FakeBeneficiaryApi(
+      listAllResponse = {
+        ok(
+          row(id = "a", currentStatus = "ACTIVE"),
+          row(id = "b", currentStatus = "TRANSFERRED"),
+        )
+      },
+    )
+
+    val result = repo(api).fetchRemoteBeneficiaries(today)
+
+    assertEquals(listOf("a"), result?.map { it.id })
+  }
+
+  @Test
+  fun `a TRANSFERRED status is matched case-insensitively, same as every other status here`() = runTest {
+    val api = FakeBeneficiaryApi(listAllResponse = { ok(row(currentStatus = "transferred")) })
+
+    assertEquals(emptyList<Beneficiary>(), repo(api).fetchRemoteBeneficiaries(today))
   }
 
   @Test

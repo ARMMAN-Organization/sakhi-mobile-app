@@ -41,6 +41,7 @@ import org.armman.sakhi.data.visitform.VisitFormDraftRepository
 import org.armman.sakhi.data.visitform.VisitFormQuestionCodes
 import org.armman.sakhi.data.visitform.VisitFormRepository
 import org.armman.sakhi.data.visitform.VisitFormSubmitResult
+import org.armman.sakhi.data.visitform.FakeReferralRepository
 import java.time.LocalDate
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -184,10 +185,12 @@ class DynamicVisitFormViewModelTest {
       visitDate: java.time.LocalDate,
       riskResult: org.armman.sakhi.data.rules.RiskGradingResult?,
       referralCapture: org.armman.sakhi.data.referral.ReferralCapture?,
+      lmpChangeCapture: org.armman.sakhi.data.lmpchange.LmpChangeCapture?,
     ): VisitFormSubmitResult = throw NotImplementedError("not exercised by these tests")
 
     override suspend fun getUploadRecords(): List<FormUploadRecord> = emptyList()
     override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = MutableStateFlow(emptyList())
+    override suspend fun getAnswers(localScheduleUuid: String): FormAnswers? = null
   }
 
   /** CR-Referral-01 Pass 4: records every [submitDraft] call (in particular the [referralCapture]
@@ -199,6 +202,7 @@ class DynamicVisitFormViewModelTest {
       val formCode: String,
       val riskResult: org.armman.sakhi.data.rules.RiskGradingResult?,
       val referralCapture: org.armman.sakhi.data.referral.ReferralCapture?,
+      val lmpChangeCapture: org.armman.sakhi.data.lmpchange.LmpChangeCapture?,
     )
 
     val calls = mutableListOf<Call>()
@@ -212,13 +216,15 @@ class DynamicVisitFormViewModelTest {
       visitDate: java.time.LocalDate,
       riskResult: org.armman.sakhi.data.rules.RiskGradingResult?,
       referralCapture: org.armman.sakhi.data.referral.ReferralCapture?,
+      lmpChangeCapture: org.armman.sakhi.data.lmpchange.LmpChangeCapture?,
     ): VisitFormSubmitResult {
-      calls += Call(localScheduleUuid, formCode, riskResult, referralCapture)
+      calls += Call(localScheduleUuid, formCode, riskResult, referralCapture, lmpChangeCapture)
       return result
     }
 
     override suspend fun getUploadRecords(): List<FormUploadRecord> = emptyList()
     override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = MutableStateFlow(emptyList())
+    override suspend fun getAnswers(localScheduleUuid: String): FormAnswers? = null
   }
 
   /** CR-M3-06: minimal fake — none of the existing tests in this file exercise health-education
@@ -441,6 +447,7 @@ class DynamicVisitFormViewModelTest {
     // needs to be constructible, not scripted.
     ppScheduleGenerator: org.armman.sakhi.data.schedule.PpScheduleGenerator =
       org.armman.sakhi.data.schedule.PpScheduleGenerator(org.armman.sakhi.data.schedule.HardcodedRuleSource()),
+    referralRepository: FakeReferralRepository = FakeReferralRepository(),
   ) =
     DynamicVisitFormViewModel(
       formsRepository = formsRepository,
@@ -458,6 +465,7 @@ class DynamicVisitFormViewModelTest {
       ),
       healthEducationRepository = healthEducationRepository,
       ppScheduleGenerator = ppScheduleGenerator,
+      referralRepository = referralRepository,
       savedStateHandle = SavedStateHandle(
         mapOf(
           "beneficiaryId" to beneficiaryId,
@@ -1056,6 +1064,68 @@ class DynamicVisitFormViewModelTest {
     assertFalse(viewModel.uiState.value.showReferralCaptureStep)
     assertEquals(1, draftRepository.calls.size)
     assertNull(draftRepository.calls.single().referralCapture)
+  }
+
+  // Task 2 (LMP/Reopen/Referral/Audit task list)
+  @Test
+  fun `onFinish passes an lmpChangeCapture when the sonography branch is filled`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    val draftRepository = RecordingVisitFormDraftRepository()
+
+    val viewModel = buildViewModel(
+      visitFormDraftRepository = draftRepository,
+      goRulesRiskAdapter = nonTriggeringGoRulesAdapter(),
+    )
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.setAnswer(VisitFormQuestionCodes.LMP_DATE_EDIT, "2026-02-01")
+    viewModel.setCapturedImagePath(VisitFormQuestionCodes.UPLOAD_SONOGRAPHY_REPORT_IMAGE, "/tmp/sonography.jpg")
+
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    val capture = draftRepository.calls.single().lmpChangeCapture
+    assertEquals(LocalDate.of(2026, 2, 1), capture?.newLmpDate)
+    assertEquals("/tmp/sonography.jpg", capture?.sonographyImageFilePath)
+  }
+
+  @Test
+  fun `onFinish passes no lmpChangeCapture when the sonography branch is untouched`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    val draftRepository = RecordingVisitFormDraftRepository()
+
+    val viewModel = buildViewModel(
+      visitFormDraftRepository = draftRepository,
+      goRulesRiskAdapter = nonTriggeringGoRulesAdapter(),
+    )
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertNull(draftRepository.calls.single().lmpChangeCapture)
+  }
+
+  @Test
+  fun `onFinish passes no lmpChangeCapture when the LMP date is filled but no photo was captured`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    val draftRepository = RecordingVisitFormDraftRepository()
+
+    val viewModel = buildViewModel(
+      visitFormDraftRepository = draftRepository,
+      goRulesRiskAdapter = nonTriggeringGoRulesAdapter(),
+    )
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.setAnswer(VisitFormQuestionCodes.LMP_DATE_EDIT, "2026-02-01")
+
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertNull(draftRepository.calls.single().lmpChangeCapture)
   }
 
   @Test

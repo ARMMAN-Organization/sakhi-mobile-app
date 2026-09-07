@@ -15,6 +15,14 @@ interface DynamicFormDraftDao {
   @Query("SELECT * FROM dynamic_form_drafts WHERE localBeneficiaryId = :localBeneficiaryId")
   suspend fun getByLocalBeneficiaryId(localBeneficiaryId: String): DynamicFormDraftEntity?
 
+  /** CR-Registration-Edit: the Beneficiary Profile only ever knows the server-assigned
+   * beneficiaryId, never the local draft's own [DynamicFormDraftEntity.localBeneficiaryId] — this
+   * is how the Edit stub finds its way back to the draft row (and the [DynamicFormDraftEntity
+   * .remoteSubmissionId] on it) for a beneficiary that has already synced. Null for anyone not yet
+   * synced, exactly like [DynamicFormDraftEntity.remoteBeneficiaryId] itself. */
+  @Query("SELECT * FROM dynamic_form_drafts WHERE remoteBeneficiaryId = :remoteBeneficiaryId")
+  suspend fun getByRemoteBeneficiaryId(remoteBeneficiaryId: String): DynamicFormDraftEntity?
+
   /** Same semantics as `EnrollmentDraftDao.getPendingSync` — never-synced or previously-failed,
    * skipping ones held for duplicate confirmation. */
   @Query(

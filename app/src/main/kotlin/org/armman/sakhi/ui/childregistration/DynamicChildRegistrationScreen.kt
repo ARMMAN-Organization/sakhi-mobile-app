@@ -51,6 +51,7 @@ import org.armman.sakhi.data.forms.FormFieldSchema
 import org.armman.sakhi.data.motherlink.MotherPrefillQuestionCodes
 import org.armman.sakhi.ui.components.AppTabRow
 import org.armman.sakhi.ui.components.BackHeader
+import org.armman.sakhi.ui.components.FullScreenLoadingOverlay
 import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.components.SecondaryButton
 import org.armman.sakhi.ui.components.StatusBanner
@@ -196,6 +197,7 @@ fun DynamicChildRegistrationScreen(
       ) { data ->
         StatusBanner(message = data.visuals.message, variant = StatusBannerVariant.Error)
       }
+      FullScreenLoadingOverlay(visible = state.submissionState is SubmissionState.Saving)
     }
   }
 }

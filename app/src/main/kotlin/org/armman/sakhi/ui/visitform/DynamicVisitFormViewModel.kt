@@ -35,6 +35,7 @@ import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.FormVisibilityEvaluator
 import org.armman.sakhi.data.forms.FormsRepository
 import org.armman.sakhi.data.forms.VisitCodeFormResolver
+import org.armman.sakhi.data.referral.ReferralRepository
 import org.armman.sakhi.data.schedule.PpScheduleGenerator
 import org.armman.sakhi.data.schedule.ScheduleContext
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
@@ -61,6 +62,7 @@ import org.armman.sakhi.data.rules.GoRulesRiskAdapter
 import org.armman.sakhi.data.rules.RiskConditionIds
 import org.armman.sakhi.data.rules.RiskGrade
 import org.armman.sakhi.data.referral.ReferralCapture
+import org.armman.sakhi.data.lmpchange.LmpChangeCapture
 import org.armman.sakhi.data.referral.ReferralType
 import org.armman.sakhi.data.rules.RiskGradingResult
 import java.time.LocalDate
@@ -114,6 +116,14 @@ data class DynamicVisitFormUiState(
    * [org.armman.sakhi.ui.forms.DynamicFormUiState], see that class's doc. */
   val mediaCompleted: Set<String> = emptySet(),
   val capturedImages: Map<String, String> = emptyMap(),
+  /** Task 2 (LMP/Reopen/Referral/Audit task list): the real on-disk absolute path per captured
+   * image question code -- [capturedImages] holds the `content://` URI (needed for preview), which
+   * is opaque outside this app and unsuitable for the raw-bytes upload
+   * [DynamicVisitFormViewModel.lmpChangeCaptureOrNull] needs. Same "coordinator never resolves a
+   * URI itself" split
+   * [org.armman.sakhi.data.adhocform.AdHocFormSubmissionCoordinator.queueReferralFollowUpEvidence]'s
+   * own doc already establishes for referral evidence. */
+  val capturedImagePaths: Map<String, String> = emptyMap(),
   /** FR-S-4.4 scaffold, now wired for the mother (ANC_VISIT) flow only — see
    * [DynamicVisitFormViewModel.recheckCriticalCondition]. Always null for INFANT_VISIT: no
    * equivalent danger-sign combination rule has been confirmed with ARMMAN for the infant flow. */
@@ -321,6 +331,11 @@ class DynamicVisitFormViewModel @Inject constructor(
   private val ancRiskRegistrationResolver: AncRiskRegistrationResolver,
   private val healthEducationRepository: HealthEducationRepository,
   private val ppScheduleGenerator: PpScheduleGenerator,
+  /** CR-Referral-01 (in-visit "Visit name"/"Referral visit name" autopopulation fix, 2026-09-03)
+   * -- [loadReferralFormIfNeeded]'s only use: counts this beneficiary's past referrals so the
+   * in-visit Referral capture step can prefill `referral_visit_name` as "RV{count+1}", mirroring
+   * [org.armman.sakhi.ui.adhocform.AdHocFormViewModel]'s existing auto-numbering. */
+  private val referralRepository: ReferralRepository,
   savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -690,29 +705,52 @@ class DynamicVisitFormViewModel @Inject constructor(
           "versionId=${version.id} fields=${version.schemaJson.map { it.questionCode }}"
         },
     )
+    // Best-effort, same "offline/failure just means no prefill" reasoning as everywhere else in
+    // this file -- a count-fetch failure must not block the already-fetched schema from rendering.
+    val referralCount = if (version != null) {
+      runCatching { referralRepository.countReferralsForBeneficiary(beneficiaryId) }.getOrDefault(0)
+    } else {
+      0
+    }
     _uiState.update {
       it.copy(
         referralFormLoading = false,
         referralFormVersion = version,
-        referralAnswers = if (version != null) prefilledReferralAnswers(version) else it.referralAnswers,
+        referralAnswers = if (version != null) prefilledReferralAnswers(version, referralCount) else it.referralAnswers,
       )
     }
   }
 
   /** [FormDateRuleset.REFERRAL_FORM_FILLED_DATE_QUESTION_CODE] ("Referral visit form filled
    * date") is now shown (see [visibleReferralFields]'s doc), but still defaults to today so she
-   * isn't starting from a blank required date — she can still change it within `dateRule
+   * isn't starting from a blank required date -- she can still change it within `dateRule
    * .notFuture`. [FormDateRuleset.DECIDED_VISIT_DATE_QUESTION_CODE]'s own `dateRule.notBefore`
    * bound is relative to this field's value (see [FormDateRuleset]'s doc for both codes), so the
    * prefill also keeps that bound resolvable even before she's touched anything.
-   * `visit_name`/`referral_visit_name` are left genuinely blank — neither has a home in
-   * `POST /referrals` yet (see [referralCaptureOrNull]'s doc), so there's nothing to prefill them
-   * WITH beyond a guess; she can still type into them, it's just not sent anywhere today.
+   *
+   * `visit_name` (spec row 2: "Autopopulate visit name from which visit referral is flagged") is
+   * now prefilled from [visitLabel] (e.g. "ANC 3") -- the same value already used to prefill
+   * [VISIT_TYPE_QUESTION_CODE] on the main form, since the in-visit capture step is by definition
+   * always opened from a specific, already-known visit.
+   *
+   * `referral_visit_name` (spec row 3: "RV1, RV2 etc, Autocalculated") is prefilled with
+   * "RV{[referralCount] + 1}", mirroring [org.armman.sakhi.ui.adhocform.AdHocFormViewModel]'s
+   * identical auto-numbering for the standalone ad-hoc Referral form -- [referralCount] is
+   * [ReferralRepository.countReferralsForBeneficiary], fetched by [loadReferralFormIfNeeded]
+   * before this is called. Neither field has a home in `POST /referrals` yet (see
+   * [referralCaptureOrNull]'s doc) -- the prefill is display-only, exactly like the date above; she
+   * can still edit either before submitting.
    */
-  private fun prefilledReferralAnswers(version: FormVersion): FormAnswers {
+  private fun prefilledReferralAnswers(version: FormVersion, referralCount: Int): FormAnswers {
     var answers = FormAnswers()
     if (version.schemaJson.any { it.questionCode == FormDateRuleset.REFERRAL_FORM_FILLED_DATE_QUESTION_CODE }) {
       answers = answers.withSingleValue(FormDateRuleset.REFERRAL_FORM_FILLED_DATE_QUESTION_CODE, visitDate.toString())
+    }
+    if (version.schemaJson.any { it.questionCode == QUESTION_CODE_VISIT_NAME } && visitLabel.isNotBlank()) {
+      answers = answers.withSingleValue(QUESTION_CODE_VISIT_NAME, visitLabel)
+    }
+    if (version.schemaJson.any { it.questionCode == QUESTION_CODE_REFERRAL_VISIT_NAME }) {
+      answers = answers.withSingleValue(QUESTION_CODE_REFERRAL_VISIT_NAME, "RV${referralCount + 1}")
     }
     return answers
   }
@@ -780,6 +818,37 @@ class DynamicVisitFormViewModel @Inject constructor(
    * `referral_needed_new_condition`/`beneficiary_willing_for_referral`/`referral_form_filled_date`
    * /`visit_name`/`referral_visit_name` — see CR-Referral-01's backend-ask doc.
    */
+  /**
+   * Task 2 (LMP/Reopen/Referral/Audit task list): bundles ANC_VISIT's own sonography-confirmation
+   * branch (`lmp_date_edit` + `upload_sonography_report_image`) for [onFinish] to pass down to
+   * [VisitFormDraftRepository.submitDraft] -- mirrors [referralCaptureOrNull]'s role for the
+   * Referral tab exactly, just reading the MAIN answer set instead of a separate step's bucket
+   * (these two fields live directly on ANC_VISIT's own schema, not a distinct capture step).
+   *
+   * Null unless BOTH required pieces are present: a parseable [VisitFormQuestionCodes.LMP_DATE_EDIT]
+   * answer, and a real on-disk file for [VisitFormQuestionCodes.UPLOAD_SONOGRAPHY_REPORT_IMAGE] in
+   * [DynamicVisitFormUiState.capturedImagePaths] (not just [DynamicVisitFormUiState.capturedImages]'s
+   * URI -- see that field's own doc for why the two are tracked separately). Deliberately does not
+   * re-check the sonography Yes/No question itself: the schema only renders/allows an answer on
+   * [VisitFormQuestionCodes.LMP_DATE_EDIT] at all once that question is Yes (see
+   * [VisitFormComputedFieldEvaluator.isLmpDateEditLocked]'s doc), so a real parseable date there
+   * already implies it -- same reasoning [VisitFormComputedFieldEvaluator.isLmpDateEditLocked]
+   * itself already relies on.
+   *
+   * Only meaningful for ANC_VISIT; every other form code has neither question in its schema, so
+   * [FormAnswers.valueOf] simply returns null for both and this returns null too, no explicit
+   * formCode gate needed (same "the data just isn't there" reasoning [referralCaptureOrNull]
+   * relies on for every non-mother form).
+   */
+  private fun lmpChangeCaptureOrNull(): LmpChangeCapture? {
+    val state = _uiState.value
+    val newLmpDate = state.answers.valueOf(VisitFormQuestionCodes.LMP_DATE_EDIT)
+      ?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return null
+    val sonographyImageFilePath = state.capturedImagePaths[VisitFormQuestionCodes.UPLOAD_SONOGRAPHY_REPORT_IMAGE]
+      ?: return null
+    return LmpChangeCapture(newLmpDate = newLmpDate, sonographyImageFilePath = sonographyImageFilePath)
+  }
+
   private fun referralCaptureOrNull(): ReferralCapture? {
     val answers = _uiState.value.referralAnswers
     if (answers.valueOf(QUESTION_CODE_REFERRAL_NEEDED_NEW_CONDITION) != VALUE_YES) return null
@@ -937,6 +1006,20 @@ class DynamicVisitFormViewModel @Inject constructor(
       it.copy(
         capturedImages = if (uri == null) it.capturedImages - questionCode else it.capturedImages + (questionCode to uri),
         answers = it.answers.withSingleValue(questionCode, uri),
+      )
+    }
+  }
+
+  /** Task 2 -- companion to [setCapturedImage], called alongside it with the SAME capture's real
+   * on-disk path (see [DynamicVisitFormUiState.capturedImagePaths]'s own doc for why this is
+   * tracked separately from the `content://` URI). Only [org.armman.sakhi.ui.visitform
+   * .DynamicVisitFormScreen]'s live-camera capture flow calls this today, for the sonography
+   * report image specifically -- other image questions have no need for the raw path yet, so
+   * calling this is opt-in per call site rather than folded into [setCapturedImage] itself. */
+  fun setCapturedImagePath(questionCode: String, path: String?) {
+    _uiState.update {
+      it.copy(
+        capturedImagePaths = if (path == null) it.capturedImagePaths - questionCode else it.capturedImagePaths + (questionCode to path),
       )
     }
   }
@@ -1183,6 +1266,7 @@ class DynamicVisitFormViewModel @Inject constructor(
         visitDate = visitDate,
         riskResult = finalRiskResult,
         referralCapture = referralCaptureOrNull(),
+        lmpChangeCapture = lmpChangeCaptureOrNull(),
       )
       _uiState.update { it.copy(isSubmitting = false) }
       when (result) {
@@ -1338,9 +1422,10 @@ class DynamicVisitFormViewModel @Inject constructor(
     // referral_visit_name is read (not just rendered) since Pass 6.2 unhid it — see
     // referralCaptureOrNull's doc for why it's optional, unlike the constants above.
     const val QUESTION_CODE_REFERRAL_VISIT_NAME = "referral_visit_name"
-    // visit_name/referral_visit_name are rendered like any other schema field now (see
-    // visibleReferralFields' doc) but still aren't read by referralCaptureOrNull() — no constants
-    // needed for them since nothing in this file references their question codes directly.
+    // visit_name (2026-09-03 autopopulation fix): now prefilled by prefilledReferralAnswers from
+    // visitLabel -- see that function's doc. Still not read by referralCaptureOrNull() (no home in
+    // POST /referrals yet), same as referral_visit_name above.
+    const val QUESTION_CODE_VISIT_NAME = "visit_name"
 
     /**
      * CR-Referral-01 Pass 6.1 (2026-08-31): best-effort mapping from the real schema's

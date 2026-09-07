@@ -54,11 +54,13 @@ import org.armman.sakhi.R
 import org.armman.sakhi.data.beneficiary.RiskLevel
 import org.armman.sakhi.data.forms.FormFieldSchema
 import org.armman.sakhi.data.visitform.InfantVisitRiskFinding
+import org.armman.sakhi.data.visitform.VisitFormComputedFieldEvaluator
 import org.armman.sakhi.data.visitform.VisitFormOuterTab
 import org.armman.sakhi.data.visitform.VisitFormQuestionCodes
 import org.armman.sakhi.data.visitform.VisitFormRiskFinding
 import org.armman.sakhi.ui.components.AppTabRow
 import org.armman.sakhi.ui.components.BackHeader
+import org.armman.sakhi.ui.components.FullScreenLoadingOverlay
 import org.armman.sakhi.ui.components.ChoiceChip
 import org.armman.sakhi.ui.components.ConditionChip
 import org.armman.sakhi.ui.components.PrimaryButton
@@ -239,6 +241,10 @@ fun DynamicVisitFormScreen(
       onDismiss = viewModel::dismissEducationHint,
     )
   }
+
+  // Covers both the main step submit (Centered.isLastStep) and the referral-capture "Finish"
+  // button below — both drive the same state.isSubmitting flag.
+  FullScreenLoadingOverlay(visible = state.isSubmitting)
 }
 
 @Composable
@@ -888,6 +894,11 @@ private fun DynamicVisitFormFieldList(
   // Live capture into app-private storage, one target file per question_code — same pattern as
   // DynamicMotherRegistrationScreen's field list (see that file's doc for why one file per field).
   val photoUriFor = remember { mutableMapOf<String, android.net.Uri>() }
+  // Task 2 (LMP/Reopen/Referral/Audit task list): the real on-disk file per question_code,
+  // alongside photoUriFor's content:// Uri -- see DynamicVisitFormUiState.capturedImagePaths's
+  // own doc for why the raw path is needed separately (S3 upload needs real bytes, not an opaque
+  // FileProvider Uri).
+  val photoFileFor = remember { mutableMapOf<String, File>() }
   var captureTargetCode by remember { mutableStateOf<String?>(null) }
 
   val takePictureLauncher = rememberLauncherForActivityResult(
@@ -896,6 +907,7 @@ private fun DynamicVisitFormFieldList(
     val code = captureTargetCode
     if (success && code != null) {
       viewModel.setCapturedImage(code, photoUriFor.getValue(code).toString())
+      viewModel.setCapturedImagePath(code, photoFileFor.getValue(code).absolutePath)
     }
     captureTargetCode = null
   }
@@ -918,11 +930,25 @@ private fun DynamicVisitFormFieldList(
         registrationDate = viewModel.visitDate,
         mediaCompleted = field.questionCode in state.mediaCompleted,
         capturedImageUri = state.capturedImages[field.questionCode],
-        readOnlyQuestionCodes = if (state.heightLockedFromContext) {
-          setOf(VisitFormQuestionCodes.HEIGHT_CM)
-        } else {
-          emptySet()
+        readOnlyQuestionCodes = buildSet {
+          if (state.heightLockedFromContext) add(VisitFormQuestionCodes.HEIGHT_CM)
+          // Host-screen lock on top of the schema's own visibility — see
+          // VisitFormComputedFieldEvaluator.isLmpDateEditLocked's doc for why this isn't done via
+          // FormVisibilityEvaluator/visibleWhen instead.
+          if (field.questionCode == VisitFormQuestionCodes.LMP_DATE_EDIT &&
+            VisitFormComputedFieldEvaluator.isLmpDateEditLocked(state.answers)
+          ) {
+            add(VisitFormQuestionCodes.LMP_DATE_EDIT)
+          }
         },
+        // Task 1 (LMP/Reopen/Referral/Audit task list): explains the LMP_DATE_EDIT lock above
+        // rather than leaving the Sakhi looking at an unexplained empty locked box. Exact wording
+        // is a placeholder pending product/SRS confirmation of the precise lock copy (the SRS PDF
+        // this task references cuts off mid-sentence right where this is specified) -- flagged
+        // here rather than silently assumed final.
+        readOnlyHintQuestionCodes = mapOf(
+          VisitFormQuestionCodes.LMP_DATE_EDIT to "Upload sonography photo to enter date",
+        ),
         loadOptions = { viewModel.optionsFor(field) },
         onSingleAnswer = { value -> viewModel.setAnswer(field.questionCode, value) },
         onMultiAnswer = { values -> viewModel.setMultiAnswer(field.questionCode, values) },
@@ -931,6 +957,7 @@ private fun DynamicVisitFormFieldList(
           val uri = photoUriFor.getOrPut(field.questionCode) {
             val photoFile = File(File(context.filesDir, "dynamic-visit-form"), "${field.questionCode}.jpg")
               .apply { parentFile?.mkdirs() }
+            photoFileFor[field.questionCode] = photoFile
             FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", photoFile)
           }
           captureTargetCode = field.questionCode

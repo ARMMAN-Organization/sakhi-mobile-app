@@ -97,6 +97,7 @@ class VisitFormSyncExecutor @Inject constructor(
         localSubmissionUuid = draft.localSubmissionUuid,
         existingVisitId = draft.serverVisitId,
         referralCapture = payload.referralCapture,
+        lmpChangeCapture = payload.lmpChangeCapture,
         onVisitCreated = { visitId ->
           capturedVisitId = visitId
           dao.upsert(draft.copy(syncStatus = EnrollmentSyncStatus.SYNCING, serverVisitId = visitId))

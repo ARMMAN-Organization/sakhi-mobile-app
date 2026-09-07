@@ -28,4 +28,10 @@ class FakeFormSubmissionApi : FormSubmissionApi {
     exceptionToThrow?.let { throw it }
     return response!!
   }
+
+  override suspend fun updateAnswers(
+    submissionId: String,
+    request: UpdateFormSubmissionAnswersRequestDto,
+  ): Response<UpdateFormSubmissionAnswersResponseDto> =
+    throw NotImplementedError("CR-Registration-Edit: not exercised by the tests sharing this fake")
 }

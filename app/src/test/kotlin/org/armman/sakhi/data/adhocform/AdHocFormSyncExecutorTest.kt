@@ -233,6 +233,13 @@ class AdHocFormSyncExecutorTest {
     ): Response<CreateSubmissionResponseDto> {
       throw exception
     }
+
+    override suspend fun updateAnswers(
+      submissionId: String,
+      request: org.armman.sakhi.data.forms.UpdateFormSubmissionAnswersRequestDto,
+    ): Response<org.armman.sakhi.data.forms.UpdateFormSubmissionAnswersResponseDto> {
+      throw exception
+    }
   }
 
   @Test

@@ -113,6 +113,13 @@ object Dimens {
   /** Micro gap between a review row's label and its value (Summary frame). */
   val LabelValueGap = 2.dp
 
+  /** Bug fix (2026-09-02): caps the Home dashboard's notification stack so a long list of active
+   * notifications (reopen/closure/referral updates, etc.) scrolls inside its own area instead of
+   * consuming the whole screen and hiding the dashboard content below it — same
+   * cap-then-scroll pattern as [UploadModalListMaxHeight], sized a little shorter since this
+   * stack sits above content the Sakhi still needs to reach, not inside a modal of its own. */
+  val NotificationStackMaxHeight = 240.dp
+
   // "Forms Uploaded" sync-status modal (Home screen Data Upload pill).
   /** Status icon/spinner diameter per row. */
   val UploadModalStatusIconSize = 24.dp

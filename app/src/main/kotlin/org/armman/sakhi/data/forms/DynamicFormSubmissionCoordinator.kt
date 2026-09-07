@@ -58,6 +58,16 @@ sealed class DynamicFormSubmissionException(message: String) : Exception(message
     override val userMessage: String get() = SubmitErrorCopy.GENERIC
   }
 
+  /** Mirrors [NoBeneficiaryIdReturned] for the submission call: `POST /forms/.../submissions`
+   * returned 2xx but `data.id` was missing. Needed from CR-Registration-Edit onward — this is the
+   * id [FieldEditsRepository] targets with `PATCH /form-submissions/:id/answers`, so a submission
+   * that "succeeded" without one leaves the beneficiary permanently un-editable until she is
+   * re-submitted, which is worth failing loudly on rather than silently carrying a blank id. */
+  data object NoSubmissionIdReturned :
+    DynamicFormSubmissionException("Form submitted but no submission id was returned in the response") {
+    override val userMessage: String get() = SubmitErrorCopy.GENERIC
+  }
+
   /**
    * [violations] carries the backend schema validator's messages (`form-validation.ts`), which a
    * `422` from this endpoint returns under `fieldErrors.violations` as an ARRAY — e.g.
@@ -118,11 +128,12 @@ class DynamicFormSubmissionCoordinator @Inject constructor(
     answers: FormAnswers,
     fallbackRegistrationDate: LocalDate,
     duplicateAcknowledgement: DuplicateAcknowledgement? = null,
-    // Returns the server-assigned beneficiary id on success. CR-022 needs it: a locally generated
-    // visit schedule cannot be uploaded until its beneficiary exists server-side, and this is the
-    // only place that id is ever known. It used to be discarded, which left every schedule
-    // permanently ineligible for upload.
-  ): Result<String> = runCatching {
+    // Returns the server-assigned beneficiary id AND submission id on success. CR-022 needs the
+    // beneficiary id: a locally generated visit schedule cannot be uploaded until its beneficiary
+    // exists server-side, and this is the only place that id is ever known. The submission id used
+    // to be discarded the same way — it is what CR-Registration-Edit's `PATCH
+    // /form-submissions/:id/answers` targets, and there is nowhere else to recover it from later.
+  ): Result<DynamicFormSubmissionOutcome> = runCatching {
     val beneficiaryRequest = mapper.toCreateBeneficiaryRequest(
       localCaseUuid = localCaseUuid,
       answers = answers,
@@ -177,11 +188,22 @@ class DynamicFormSubmissionCoordinator @Inject constructor(
       )
     }
 
+    val serverSubmissionId = submissionResponse.body()?.data?.id
+      ?: throw DynamicFormSubmissionException.NoSubmissionIdReturned
+
     // CR-035: logged only on success, immediately after the submission call succeeds.
     formAuditRepository.recordSubmitted(localCaseUuid, FORM_CODE)
-    serverBeneficiaryId
+    DynamicFormSubmissionOutcome(beneficiaryId = serverBeneficiaryId, submissionId = serverSubmissionId)
   }
 }
+
+/** [DynamicFormSubmissionCoordinator.submit]'s success payload — both ids are only ever known at
+ * this one moment, so both are carried back rather than just the beneficiary id as before
+ * (CR-Registration-Edit). */
+data class DynamicFormSubmissionOutcome(
+  val beneficiaryId: String,
+  val submissionId: String,
+)
 
 /** Generates the once-per-draft, stable-across-retries id [DynamicFormSubmissionCoordinator.submit]
  * needs for `localSubmissionUuid` — same pattern as `EnrollmentRecord.beneficiaryId`/`localCaseUuid`

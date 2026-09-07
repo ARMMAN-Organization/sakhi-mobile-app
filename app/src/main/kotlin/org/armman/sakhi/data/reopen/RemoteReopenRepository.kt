@@ -73,4 +73,17 @@ class RemoteReopenRepository @Inject constructor(
     // Offline, timeout, malformed body — best-effort, see the interface doc.
     false
   }
+
+  override suspend fun hasRejectedReopenRequest(beneficiaryId: String): Boolean = try {
+    reopenApi.getReopenRequests(beneficiaryId)
+      .takeIf { it.isSuccessful }
+      ?.body()
+      ?.takeIf { it.success }
+      ?.data
+      ?.any { it.isRejected() }
+      ?: false
+  } catch (e: Exception) {
+    // Offline, timeout, malformed body — best-effort, see the interface doc.
+    false
+  }
 }

@@ -116,6 +116,7 @@ class RoomVisitFormDraftRepositoryTest {
       referralRepository = FakeReferralRepository(),
       referralLinkDao = FakeReferralLinkDao(),
       riskAssessmentDao = FakeRiskAssessmentDao(),
+      lmpChangeRepository = org.armman.sakhi.data.lmpchange.FakeLmpChangeRepository(),
     )
     // Reuses the same dao/secureStore as the repository so runOne() sees the row submitDraft just
     // wrote — matching how the real Hilt graph wires a single instance of each.
@@ -397,5 +398,38 @@ class RoomVisitFormDraftRepositoryTest {
     submit()
 
     assertEquals(EnrollmentSyncStatus.SYNCED, repository.observeUploadRecords().first().single().syncStatus)
+  }
+
+  // --- getAnswers: carries a visit's own answers forward to a later visit's computed fields -----
+  // (bug fix 2026-09-04 -- see StaticVisitFormRepository.firstAncVisitWeightKg's doc for the
+  // reported bug this method exists to fix: ANC_VISIT's Gestational Weight Gain always showing
+  // "Auto-calculated" because there was no way to read a beneficiary's first ANC visit's own
+  // weight answer back out.)
+
+  @Test
+  fun `getAnswers returns null when no draft was ever saved for this schedule`() = runTest {
+    assertEquals(null, repository.getAnswers("never-saved-schedule"))
+  }
+
+  @Test
+  fun `getAnswers returns the saved answers after an online-synced submit`() = runTest {
+    seedSyncedSchedule()
+    visitApi.response = successfulVisitResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    submit()
+
+    assertEquals(answers, repository.getAnswers("schedule-1"))
+  }
+
+  @Test
+  fun `getAnswers returns the saved answers for a draft still queued offline`() = runTest {
+    seedSyncedSchedule()
+    connectivityChecker.online = false
+
+    submit()
+
+    // The whole point: a later visit must be able to read this back even before it ever syncs.
+    assertEquals(answers, repository.getAnswers("schedule-1"))
   }
 }

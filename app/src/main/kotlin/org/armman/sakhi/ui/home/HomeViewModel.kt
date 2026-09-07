@@ -21,6 +21,11 @@ import org.armman.sakhi.data.dashboard.DashboardSummary
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.FormUploadRecord
+import org.armman.sakhi.data.notification.AppNotification
+import org.armman.sakhi.data.notification.NOTIFICATION_CTA_FILL_REFERRAL_FORM
+import org.armman.sakhi.data.notification.NOTIFICATION_TYPE_REFERRAL_INCOMPLETE_UPDATE
+import org.armman.sakhi.data.notification.NotificationRepository
+import org.armman.sakhi.data.referral.ReferralRepository
 import org.armman.sakhi.data.sync.ManualSyncTrigger
 import org.armman.sakhi.data.sync.UploadRecordsSource
 import javax.inject.Inject
@@ -74,6 +79,15 @@ sealed interface HomeEvent {
    * shown; see [HomeViewModel.onDataUploadClicked]'s doc for why the sync call and modal are
    * skipped entirely rather than started and left to fail. */
   data object OfflineUploadBlocked : HomeEvent
+
+  /** The "Fill Referral Form" CTA (SRS FR-S-7.2 row 2) resolved successfully — navigate to the
+   * Referral Follow-up ad-hoc form. See [HomeViewModel.onFillReferralFormClicked]'s doc for why
+   * [beneficiaryId] has to be resolved separately from the notification itself. */
+  data class NavigateToReferralFollowUp(val beneficiaryId: String, val referralId: String) : HomeEvent
+
+  /** The CTA's referral id wasn't found in the Sakhi's current pending-follow-up list — see
+   * [HomeViewModel.onFillReferralFormClicked]'s doc for when this can happen. */
+  data object ReferralFollowUpNotFound : HomeEvent
 }
 
 @HiltViewModel
@@ -83,6 +97,8 @@ class HomeViewModel @Inject constructor(
   private val manualSyncTrigger: ManualSyncTrigger,
   private val dynamicFormDraftRepository: DynamicFormDraftRepository,
   private val connectivityChecker: ConnectivityChecker,
+  private val notificationRepository: NotificationRepository,
+  private val referralRepository: ReferralRepository,
 ) : ViewModel() {
 
   private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
@@ -260,9 +276,85 @@ class HomeViewModel @Inject constructor(
       UploadModalState(isVisible = visible, records = records)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS), UploadModalState())
 
+  /** Raw feed from the last successful fetch — see [NotificationRepository.getNotifications]'s
+   * doc for why a failed fetch resolves to an empty list here instead of an error state. */
+  private val _notifications = MutableStateFlow<List<AppNotification>>(emptyList())
+
+  /** Ids the Sakhi has tapped the X on. In-memory only, cleared on process death / a fresh
+   * [loadNotifications] finding the row no longer present — there is no confirmed backend
+   * dismiss/mark-read mutation yet (CR-Notification-Escalation backend contract answers,
+   * 2026-09-02, item 5's PATCH option isn't confirmed live), so nothing is persisted server-side.
+   * This is a deliberate placeholder: once that endpoint exists, dismiss should call it instead of
+   * (or in addition to) filtering locally. */
+  private val _dismissedNotificationIds = MutableStateFlow<Set<String>>(emptySet())
+
+  /** [_notifications] minus anything [_dismissedNotificationIds] hid, sorted by
+   * [AppNotification.srsStackRank] — the real SRS FR-S-7.2 stacking order, not the raw backend
+   * `priority` int (unenforced on the DB side per backend, 2026-09-02). */
+  val notifications: StateFlow<List<AppNotification>> =
+    combine(_notifications, _dismissedNotificationIds) { all, dismissed ->
+      all.filterNot { it.id in dismissed }.sortedBy { it.srsStackRank }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIPTION_TIMEOUT_MS), emptyList())
+
+  /** Fetches the notification feed. Best-effort and independent of [loadSummary] — a notification
+   * failure must never block or error out the dashboard summary (see
+   * [NotificationRepository.getNotifications]'s doc), so this has no shared loading/error state
+   * with [uiState]. */
+  fun loadNotifications() {
+    viewModelScope.launch {
+      _notifications.value = notificationRepository.getNotifications()
+    }
+  }
+
+  /** Local-only dismiss — see [_dismissedNotificationIds]'s doc for why nothing is persisted
+   * server-side yet. */
+  fun onDismissNotification(notification: AppNotification) {
+    _dismissedNotificationIds.value = _dismissedNotificationIds.value + notification.id
+  }
+
+  /**
+   * The "Fill Referral Form" CTA (backend-confirmed 2026-09-02: only ever set — `ctaType ==
+   * "FILL_REFERRAL_FORM"` — on a `REFERRAL_INCOMPLETE_UPDATE` notification when the Supervisor
+   * rejected the follow-up; null on that same type when it was approved/lapsed instead, and null
+   * on every other notification type).
+   *
+   * The notification's [AppNotification.linkedEntityId] is the **referral id**, not a beneficiary
+   * id — but the Referral Follow-up ad-hoc form route needs both
+   * ([org.armman.sakhi.ui.navigation.Routes.adHocForm]). Backend confirmed there is no
+   * `GET /referrals/{id}` lookup; the only way to resolve a referral id to its beneficiary id is
+   * to search [ReferralRepository.getPendingFollowUps] (`GET
+   * /sakhi/{sakhiId}/referrals/pending-followup`) for the matching row — built on the assumption
+   * that a rejected-follow-up referral still appears in that pending list. If it doesn't (list is
+   * stale, or the assumption turns out wrong for some referral state), this surfaces
+   * [HomeEvent.ReferralFollowUpNotFound] rather than navigating with a guessed/blank beneficiary
+   * id.
+   */
+  fun onFillReferralFormClicked(notification: AppNotification) {
+    if (notification.type != NOTIFICATION_TYPE_REFERRAL_INCOMPLETE_UPDATE) return
+    if (notification.ctaType != NOTIFICATION_CTA_FILL_REFERRAL_FORM) return
+    val referralId = notification.linkedEntityId ?: return
+    viewModelScope.launch {
+      val match = try {
+        referralRepository.getPendingFollowUps().firstOrNull { it.referralId == referralId }
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        null
+      }
+      _events.trySend(
+        if (match != null) {
+          HomeEvent.NavigateToReferralFollowUp(beneficiaryId = match.beneficiaryId, referralId = referralId)
+        } else {
+          HomeEvent.ReferralFollowUpNotFound
+        },
+      )
+    }
+  }
+
   init {
     loadSummary()
     observeSyncCompletion()
+    loadNotifications()
   }
 
   /** Loads (or reloads after an error) the dashboard summary. */

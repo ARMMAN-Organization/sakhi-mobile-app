@@ -16,6 +16,7 @@ enum class ReopenRequestReason(val wireValue: String, val displayLabel: String) 
 
 private const val SUPERVISOR_STATUS_PENDING = "PENDING"
 private const val SUPERVISOR_STATUS_APPROVED = "APPROVED"
+private const val SUPERVISOR_STATUS_REJECTED = "REJECTED"
 
 /**
  * Reopen-request data boundary. UI depends only on this interface; the backing implementation is
@@ -51,9 +52,25 @@ interface ReopenRepository {
    * safe default (the beneficiary simply stays CLOSED locally until the next successful check).
    */
   suspend fun hasApprovedReopenRequest(beneficiaryId: String): Boolean
+
+  /**
+   * Task-6 (LMP/Reopen/Referral/Audit task list, #6 rejection half): true if [beneficiaryId] has
+   * at least one reopen request whose `supervisorStatus` is `"REJECTED"` — mirrors
+   * [hasApprovedReopenRequest] exactly, just for the other terminal outcome. A rejected request
+   * does NOT change the beneficiary's status (she stays CLOSED — only an APPROVED decision
+   * reactivates her server-side), so unlike the approved case this poll doesn't clear any local
+   * override; it only drives [org.armman.sakhi.ui.beneficiaryprofile.BeneficiaryProfileViewModel]
+   * showing a "request rejected" banner so the Sakhi isn't left wondering why nothing happened.
+   * Best-effort like [hasPendingReopenRequest]/[hasApprovedReopenRequest] — a fetch failure just
+   * means "not known rejected yet", the same safe default used everywhere else in this file.
+   */
+  suspend fun hasRejectedReopenRequest(beneficiaryId: String): Boolean
 }
 
 internal fun ReopenRequestRowDto.isPending(): Boolean = supervisorStatus == SUPERVISOR_STATUS_PENDING
 
 /** CR-Closure-04: mirrors [isPending] for the decided-and-approved case. */
 internal fun ReopenRequestRowDto.isApproved(): Boolean = supervisorStatus == SUPERVISOR_STATUS_APPROVED
+
+/** Mirrors [isApproved] for the decided-and-rejected case (task-6 rejection half). */
+internal fun ReopenRequestRowDto.isRejected(): Boolean = supervisorStatus == SUPERVISOR_STATUS_REJECTED

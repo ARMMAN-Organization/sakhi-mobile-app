@@ -6,6 +6,7 @@ import com.google.gson.JsonDeserializer
 import com.google.gson.JsonSerializer
 import java.time.LocalDate
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.lmpchange.LmpChangeCapture
 import org.armman.sakhi.data.referral.ReferralCapture
 import org.armman.sakhi.data.rules.RiskGradingResult
 
@@ -54,6 +55,15 @@ data class VisitFormDraftPayload(
    * referral trigger; filling this tab in alone never creates a referral by itself).
    */
   val referralCapture: ReferralCapture? = null,
+  /**
+   * Task 2 (LMP/Reopen/Referral/Audit task list): whatever the Sakhi filled on ANC_VISIT's own
+   * sonography-confirmation branch, captured at submit time alongside [answers] -- same
+   * "survives fully offline, read back by a resumed sync" rationale as [referralCapture]. Null
+   * when she left that branch untouched. See
+   * [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator.maybeCreateLmpChangeRequest]
+   * for how it's actually used.
+   */
+  val lmpChangeCapture: LmpChangeCapture? = null,
 )
 
 /** Plain [Gson] has no built-in support for [java.time.LocalDate] (no no-arg constructor, so

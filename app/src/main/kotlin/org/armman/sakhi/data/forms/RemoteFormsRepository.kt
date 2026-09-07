@@ -47,17 +47,21 @@ class RemoteFormsRepository @Inject constructor(
   override suspend fun getActiveVersion(formCode: String): FormVersion? = mutex.withLock {
     val fetched = fetchActiveVersion(formCode)
     if (fetched != null) {
-      store.putString(KEY_PREFIX + formCode, gson.toJson(fetched))
-      cachedByFormCode[formCode] = fetched
-      return fetched
+      val patched = KnownSchemaGapPatch.apply(formCode, fetched)
+      store.putString(KEY_PREFIX + formCode, gson.toJson(patched))
+      cachedByFormCode[formCode] = patched
+      return patched
     }
 
     // Live fetch failed (offline, 401, form not published yet, etc.) — fall back to memory, then
-    // to whatever was last persisted, in that order.
-    cachedByFormCode[formCode]?.let { return it }
+    // to whatever was last persisted, in that order. Both are re-patched on the way out too: the
+    // in-memory/persisted copy may predate this patch shipping (an older cached version), and
+    // KnownSchemaGapPatch.apply is a no-op once ARMMAN actually fixes the schema server-side (see
+    // its own doc), so re-applying here on every read is cheap and never double-patches.
+    cachedByFormCode[formCode]?.let { return KnownSchemaGapPatch.apply(formCode, it) }
     val persisted = readPersistedVersion(formCode)
     if (persisted != null) cachedByFormCode[formCode] = persisted
-    persisted
+    persisted?.let { KnownSchemaGapPatch.apply(formCode, it) }
   }
 
   private fun readPersistedVersion(formCode: String): FormVersion? {

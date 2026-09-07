@@ -38,6 +38,7 @@ import kotlinx.coroutines.delay
 import org.armman.sakhi.R
 import org.armman.sakhi.ui.components.AppIcons
 import org.armman.sakhi.ui.components.AppLogo
+import org.armman.sakhi.ui.components.FullScreenLoadingOverlay
 import org.armman.sakhi.ui.components.AppTextField
 import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.components.StatusBanner
@@ -200,6 +201,7 @@ fun LoginScreen(
         }
         Spacer(Modifier.height(24.dp))
       }
+      FullScreenLoadingOverlay(visible = state.isSubmitting)
     }
   }
 }

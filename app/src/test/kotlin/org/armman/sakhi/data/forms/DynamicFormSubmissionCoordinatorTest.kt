@@ -60,6 +60,12 @@ class DynamicFormSubmissionCoordinatorTest {
       lastRequest = request
       return response!!
     }
+
+    override suspend fun updateAnswers(
+      submissionId: String,
+      request: UpdateFormSubmissionAnswersRequestDto,
+    ): Response<UpdateFormSubmissionAnswersResponseDto> =
+      throw NotImplementedError("not exercised by this test")
   }
 
   private lateinit var enrollmentApi: FakeEnrollmentApi
@@ -141,6 +147,9 @@ class DynamicFormSubmissionCoordinatorTest {
     )
 
     assertTrue(result.isSuccess)
+    // CR-Registration-Edit: both ids now ride back on the outcome, not just the beneficiary id.
+    assertEquals("server-beneficiary-42", result.getOrNull()?.beneficiaryId)
+    assertEquals("server-sub-1", result.getOrNull()?.submissionId)
     assertEquals(1, enrollmentApi.callCount)
     assertEquals(1, formSubmissionApi.callCount)
 
@@ -303,6 +312,26 @@ class DynamicFormSubmissionCoordinatorTest {
     assertTrue(result.isFailure)
     assertTrue(result.exceptionOrNull() is DynamicFormSubmissionException.NoBeneficiaryIdReturned)
     assertEquals(0, formSubmissionApi.callCount)
+  }
+
+  @Test
+  fun `submission succeeding with no id in the response body fails without touching the audit log`() = runTest {
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    formSubmissionApi.response = Response.success(
+      CreateSubmissionResponseDto(success = true, message = "OK", data = null),
+    )
+
+    val result = coordinator.submit(
+      formVersionId = "version-v6",
+      localCaseUuid = "local-case-1",
+      localSubmissionUuid = "local-submission-1",
+      answers = consistentAnswers(),
+      fallbackRegistrationDate = LocalDate.now(),
+    )
+
+    assertTrue(result.isFailure)
+    assertTrue(result.exceptionOrNull() is DynamicFormSubmissionException.NoSubmissionIdReturned)
+    assertTrue(formAuditRepository.recordedEvents.isEmpty())
   }
 
   @Test
