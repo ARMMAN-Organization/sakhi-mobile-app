@@ -7,6 +7,7 @@ import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import org.armman.sakhi.data.forms.FormSchemaWarmer
 import org.armman.sakhi.data.forms.ReconnectLookupWarmer
 import org.armman.sakhi.data.motherlink.ReconnectMotherDetailsWarmer
 import org.armman.sakhi.data.sync.LegacyPeriodicSyncCleanup
@@ -31,6 +32,7 @@ class SakhiApplication : Application(), Configuration.Provider {
 
   @Inject lateinit var workerFactory: HiltWorkerFactory
   @Inject lateinit var reconnectLookupWarmer: ReconnectLookupWarmer
+  @Inject lateinit var formSchemaWarmer: FormSchemaWarmer
   @Inject lateinit var reconnectMotherDetailsWarmer: ReconnectMotherDetailsWarmer
   @Inject lateinit var legacyPeriodicSyncCleanup: LegacyPeriodicSyncCleanup
 
@@ -52,5 +54,10 @@ class SakhiApplication : Application(), Configuration.Provider {
     // actual uploads remain manual.
     reconnectLookupWarmer.start(applicationScope)
     reconnectMotherDetailsWarmer.start(applicationScope)
+    // CR-Forms-01: pre-fetches every known dynamic form schema on the same connectivity signal,
+    // so a form type the Sakhi has never opened online yet is still cached before she goes
+    // offline in the field. Same "reference-data warming, not a sync" reasoning as the two
+    // warmers above.
+    formSchemaWarmer.start(applicationScope)
   }
 }

@@ -368,7 +368,17 @@ private fun Footer(
     // CLOSED (closing her again is meaningless -- it used to stay visible and re-open the
     // closure form indefinitely). For a non-mother beneficiary who is CLOSED, neither button
     // has anything to show, so skip the row entirely rather than leaving an empty gap.
-    val showDelivery = beneficiaryType == BeneficiaryType.MOTHER
+    //
+    // Bug fix (2026-09-09): showDelivery used to ignore status entirely, so a MOTHER already
+    // CLOSED (e.g. maternal death, miscarriage, abortion -- CR-Closure-01's closure reasons)
+    // still saw a "Start Delivery" button. With no delivery session/recorded pregnancy outcome
+    // yet, computeDeliveryButtonState fell through to NotStarted and tapping it opened a brand
+    // new DELIVERY_VISIT form asking for a delivery date on a case that is already closed --
+    // reported as logically inconsistent (e.g. a deceased beneficiary "delivering" a month later
+    // off her LMP). A genuinely completed journey (delivery already recorded, then closed) has
+    // nothing lost here: deliveryButtonState is Completed by then anyway, so hiding the button
+    // post-closure never hides an in-progress action, only a stale entry point into a new one.
+    val showDelivery = beneficiaryType == BeneficiaryType.MOTHER && status != BeneficiaryStatus.CLOSED
     val showClosure = status != BeneficiaryStatus.CLOSED
     if (showDelivery || showClosure) {
       Row(

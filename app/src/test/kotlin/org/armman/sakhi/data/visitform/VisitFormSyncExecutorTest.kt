@@ -113,6 +113,7 @@ class VisitFormSyncExecutorTest {
       referralLinkDao = FakeReferralLinkDao(),
       riskAssessmentDao = FakeRiskAssessmentDao(),
       lmpChangeRepository = org.armman.sakhi.data.lmpchange.FakeLmpChangeRepository(),
+      sameSessionNnVisitResolver = org.armman.sakhi.data.schedule.SameSessionNnVisitResolver(scheduleRepository),
     )
     executor = VisitFormSyncExecutor(dao, secureStore, coordinator)
   }

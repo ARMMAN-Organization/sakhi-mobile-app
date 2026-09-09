@@ -78,6 +78,8 @@ class BeneficiaryFieldEditViewModelTest {
     override suspend fun applyFieldEdits(localBeneficiaryId: String, edits: Map<String, String>) {
       appliedEdits += localBeneficiaryId to edits
     }
+
+    override suspend fun getRemoteBeneficiaryId(localBeneficiaryId: String): String? = null
   }
 
   private class FakeChildDraftRepository : ChildFormDraftRepository {

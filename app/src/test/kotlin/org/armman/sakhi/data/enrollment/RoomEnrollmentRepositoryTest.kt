@@ -261,4 +261,31 @@ class RoomEnrollmentRepositoryTest {
     assertEquals(0, syncScheduler.syncNowCallCount)
     assertEquals(EnrollmentSyncStatus.PENDING, dao.getByBeneficiaryId("b-1")?.syncStatus)
   }
+
+  // --- getRemoteBeneficiaryId (fallback for DeliveryFormSubmissionCoordinator/
+  // AdHocFormSubmissionCoordinator's schedule-row lookup, legacy enrollment path) ------------
+
+  @Test
+  fun `getRemoteBeneficiaryId returns the synced draft's server beneficiary id`() = runTest {
+    connectivityChecker.online = true
+    api.createResponse = Response.success(
+      CreateBeneficiaryResponseDto(success = true, message = null, data = CreateBeneficiaryResponseData(id = "server-id-1")),
+    )
+    repository.submitEnrollment(record())
+
+    assertEquals("server-id-1", repository.getRemoteBeneficiaryId("b-1"))
+  }
+
+  @Test
+  fun `getRemoteBeneficiaryId returns null for a draft that hasn't synced yet`() = runTest {
+    connectivityChecker.online = false
+    repository.submitEnrollment(record())
+
+    assertNull(repository.getRemoteBeneficiaryId("b-1"))
+  }
+
+  @Test
+  fun `getRemoteBeneficiaryId returns null when there is no local draft at all`() = runTest {
+    assertNull(repository.getRemoteBeneficiaryId("no-such-id"))
+  }
 }

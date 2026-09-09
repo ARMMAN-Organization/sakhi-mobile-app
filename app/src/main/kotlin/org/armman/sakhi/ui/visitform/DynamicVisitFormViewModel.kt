@@ -19,6 +19,7 @@ import org.armman.sakhi.data.audit.FormAuditRepository
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfileRepository
 import org.armman.sakhi.data.delivery.DeliveryFormDraftRepository
 import org.armman.sakhi.data.delivery.DeliverySessionRepository
+import org.armman.sakhi.data.delivery.DeliverySessionStep
 import org.armman.sakhi.data.delivery.DeliveryToNeonatalPrefill
 import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
 import org.armman.sakhi.data.forms.DeliveryQuestionCodes
@@ -37,7 +38,9 @@ import org.armman.sakhi.data.forms.FormsRepository
 import org.armman.sakhi.data.forms.VisitCodeFormResolver
 import org.armman.sakhi.data.referral.ReferralRepository
 import org.armman.sakhi.data.schedule.PpScheduleGenerator
+import org.armman.sakhi.data.schedule.SameSessionNnVisitResolver
 import org.armman.sakhi.data.schedule.ScheduleContext
+import org.armman.sakhi.data.schedule.VisitCodeType
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
 import org.armman.sakhi.data.visitform.CriticalCondition
 import org.armman.sakhi.data.visitform.InfantVisitFormComputedFieldEvaluator
@@ -102,6 +105,21 @@ private const val TAG = "SakhiSync"
  * [org.armman.sakhi.ui.forms.FALLBACK_SECTION]; kept as a local copy so this ViewModel doesn't
  * depend on the registration flow's package for one constant. */
 private const val FALLBACK_SECTION = "Additional Information"
+
+/** CR-Delivery-01: PP1's own sequenceNo, mirroring
+ * [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator]'s own copy of this constant --
+ * kept as a local copy rather than imported since that one is private to its own file. */
+private const val PP1_SEQUENCE_NO = 1
+
+/** [childBeneficiaryId] + [localScheduleUuid] + a display [visitLabel] ("NN1"/"NN2") for the
+ * same-session NN visit [DynamicVisitFormViewModel.load] resolved via
+ * [org.armman.sakhi.data.schedule.SameSessionNnVisitResolver]. See
+ * [DynamicVisitFormUiState.sameSessionNnHandoff]'s own doc for when this is set. */
+data class SameSessionNnHandoff(
+  val childBeneficiaryId: String,
+  val localScheduleUuid: String,
+  val visitLabel: String,
+)
 
 data class DynamicVisitFormUiState(
   val isLoading: Boolean = true,
@@ -200,6 +218,18 @@ data class DynamicVisitFormUiState(
    * forced mother-closure form instead of Health Education/back on a successful submit.
    */
   val triggersClosurePrompt: Boolean = false,
+  /**
+   * CR-Delivery-01: non-null only when this visit is PP1 on a Delivery Event Session (CR-042)
+   * still sitting at [org.armman.sakhi.data.delivery.DeliverySessionStep.PP1], AND
+   * [org.armman.sakhi.data.schedule.SameSessionNnVisitResolver] finds a registered child with a
+   * same-session NN visit due. Set once at [DynamicVisitFormViewModel.load] time, same
+   * "knowable from schedule state alone, not from the submission response" reasoning as
+   * [triggersClosurePrompt] -- whether a same-session NN visit exists doesn't depend on this
+   * PP1 submission's own answers. Read by [org.armman.sakhi.ui.visitform.DynamicVisitFormScreen]'s
+   * `routeAfterSubmit` to auto-open that visit instead of leaving the Sakhi on Beneficiary
+   * Profile with no automatic way back into it (the CR-Delivery-01 bug this closes).
+   */
+  val sameSessionNnHandoff: SameSessionNnHandoff? = null,
   /**
    * CR-Closure-01 items #5/#6: true only right after a LAST `CCV_VISIT` submission whose response
    * came back with `closureDeferredForExtension == false` (no HR at this, the last scheduled CCV
@@ -336,6 +366,9 @@ class DynamicVisitFormViewModel @Inject constructor(
    * in-visit Referral capture step can prefill `referral_visit_name` as "RV{count+1}", mirroring
    * [org.armman.sakhi.ui.adhocform.AdHocFormViewModel]'s existing auto-numbering. */
   private val referralRepository: ReferralRepository,
+  /** CR-Delivery-01: resolves which (if any) registered child's NN visit is due the moment a
+   * same-session PP1 form is submitted -- see that class's own doc for the bug this closes. */
+  private val sameSessionNnVisitResolver: SameSessionNnVisitResolver,
   savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -419,12 +452,39 @@ class DynamicVisitFormViewModel @Inject constructor(
           registrationDate = beneficiaryProfile.registrationDate ?: visitDate,
         ),
       )
+      // CR-Delivery-01: this visit is PP1 and its Delivery Event Session is still sitting at
+      // DeliverySessionStep.PP1 -- once this submission succeeds, SameSessionNnVisitResolver says
+      // which (if any) registered child's NN1/NN2 is due right now, so routeAfterSubmit can hand
+      // off into it automatically instead of leaving the Sakhi stranded on Beneficiary Profile
+      // (the reported bug). schedule/session lookups are best-effort, same degrade-gracefully
+      // contract every other lookahead in this function already has -- a failure here just means
+      // no auto hand-off, never a load error.
+      val sameSessionNnHandoff = if (schedule != null &&
+        schedule.visitType == VisitCodeType.PP &&
+        schedule.sequenceNo == PP1_SEQUENCE_NO
+      ) {
+        val deliverySession = deliverySessionRepository.getActiveForBeneficiary(beneficiaryId)
+        if (deliverySession != null && deliverySession.step == DeliverySessionStep.PP1) {
+          sameSessionNnVisitResolver.resolve(deliverySession)?.let { match ->
+            SameSessionNnHandoff(
+              childBeneficiaryId = match.childBeneficiaryId,
+              localScheduleUuid = match.visit.localScheduleUuid,
+              visitLabel = "NN${match.visit.sequenceNo}",
+            )
+          }
+        } else {
+          null
+        }
+      } else {
+        null
+      }
       _uiState.update {
         it.copy(
           isLoading = false,
           formCode = formCode,
           version = version,
           triggersClosurePrompt = triggersClosurePrompt,
+          sameSessionNnHandoff = sameSessionNnHandoff,
         )
       }
       // CR-035: logged only once the form has genuinely loaded (version confirmed non-null) —

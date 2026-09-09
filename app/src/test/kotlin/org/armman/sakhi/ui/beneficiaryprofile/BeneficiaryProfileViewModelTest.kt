@@ -453,6 +453,58 @@ class BeneficiaryProfileViewModelTest {
   }
 
   @Test
+  fun `bug fix 2026-09-09 - a straggler open visit on an already-CLOSED beneficiary is self-healed on profile load`() = runTest {
+    // Regression test: AdHocFormSubmissionCoordinator.submitClosure's lapseAllOpenVisits sweep
+    // runs exactly once, best-effort, at closure-submit time -- if that sweep ever misses a row
+    // (a race with a just-generated visit, a transient failure), nothing else in the app ever
+    // retries it. Reported: "Beneficiary status marked 'Death', but PP1 remains active and
+    // available for processing." This seeds a PP1 row still GENERATED (as if it were written
+    // after -- or missed by -- the original closure-time sweep) on an already-CLOSED beneficiary,
+    // then asserts a profile load alone cancels it.
+    visitScheduleRepository.saveGenerated(
+      listOf(
+        schedule(
+          "pp1-schedule",
+          localBeneficiaryId = "mother",
+          visitCode = "PP1",
+          visitType = VisitCodeType.PP,
+          sequenceNo = 1,
+          status = VisitScheduleStatus.GENERATED,
+        ),
+      ),
+    )
+    repository.closureOverride = MOTHER.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = "MATERNAL_DEATH")
+
+    createViewModel("mother")
+
+    val pp1 = scheduleDao.getByLocalUuid("pp1-schedule")
+    assertEquals(VisitScheduleStatus.CANCELLED, pp1?.status)
+  }
+
+  @Test
+  fun `bug fix 2026-09-09 - an ACTIVE beneficiary's open visits are left untouched on profile load`() = runTest {
+    // Same seed as above but WITHOUT closure -- the self-heal sweep must stay CLOSED-gated, not
+    // start cancelling a live beneficiary's own open visits on every ordinary profile view.
+    visitScheduleRepository.saveGenerated(
+      listOf(
+        schedule(
+          "pp1-schedule-active",
+          localBeneficiaryId = "mother",
+          visitCode = "PP1",
+          visitType = VisitCodeType.PP,
+          sequenceNo = 1,
+          status = VisitScheduleStatus.GENERATED,
+        ),
+      ),
+    )
+
+    createViewModel("mother")
+
+    val pp1 = scheduleDao.getByLocalUuid("pp1-schedule-active")
+    assertEquals(VisitScheduleStatus.GENERATED, pp1?.status)
+  }
+
+  @Test
   fun `isReopenEligible is false for a CLOSED beneficiary closed for miscarriage or abortion`() {
     repository.closureOverride = MOTHER.copy(status = BeneficiaryStatus.CLOSED, closureReasonCode = "MISCARRIAGE")
     assertFalse(createViewModel("mother").uiState.value.isReopenEligible)
@@ -526,7 +578,10 @@ class BeneficiaryProfileViewModelTest {
 
     assertNull(statusOverrideStore.getStatus("mother"))
     assertNull(statusOverrideStore.getClosureReason("mother"))
-    assertEquals(2, repository.callCount)
+    // 3 calls: initial load, re-fetch after lapse sweep (seedServerBeneficiaryId created an
+    // OPEN schedule row that lapseAllOpenVisits cancels), re-fetch after reopen approval clears
+    // the local override.
+    assertEquals(3, repository.callCount)
   }
 
   @Test

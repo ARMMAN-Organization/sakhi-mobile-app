@@ -129,6 +129,8 @@ class DynamicMotherRegistrationViewModelTest {
     override suspend fun getEditableSubmission(remoteBeneficiaryId: String): EditableSubmissionInfo? = null
 
     override suspend fun applyFieldEdits(localBeneficiaryId: String, edits: Map<String, String>) = Unit
+
+    override suspend fun getRemoteBeneficiaryId(localBeneficiaryId: String): String? = null
   }
 
   private val dispatcher = StandardTestDispatcher()

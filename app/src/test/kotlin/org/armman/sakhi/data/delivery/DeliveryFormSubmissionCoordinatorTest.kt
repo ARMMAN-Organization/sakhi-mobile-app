@@ -3,13 +3,22 @@ package org.armman.sakhi.data.delivery
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import org.armman.sakhi.data.audit.FakeFormAuditRepository
 import org.armman.sakhi.data.auth.UserSession
 import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.auth.session.SessionStore
+import org.armman.sakhi.data.enrollment.EnrollmentRecord
+import org.armman.sakhi.data.enrollment.EnrollmentRepository
+import org.armman.sakhi.data.enrollment.EnrollmentSubmitResult
 import org.armman.sakhi.data.forms.CreateSubmissionResponseDto
+import org.armman.sakhi.data.forms.DynamicFormDraftRepository
+import org.armman.sakhi.data.forms.DynamicFormSubmitResult
+import org.armman.sakhi.data.forms.EditableSubmissionInfo
 import org.armman.sakhi.data.forms.FakeFormSubmissionApi
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.forms.SubmissionResponseData
 import org.armman.sakhi.data.schedule.AncScheduleGenerator
 import org.armman.sakhi.data.schedule.CcvScheduleGenerator
@@ -47,6 +56,8 @@ class DeliveryFormSubmissionCoordinatorTest {
   private lateinit var deliverySessionRepository: DeliverySessionRepository
   private lateinit var sessionStore: SessionStore
   private lateinit var formAuditRepository: FakeFormAuditRepository
+  private lateinit var dynamicFormDraftRepository: FakeDynamicFormDraftRepositoryForDelivery
+  private lateinit var enrollmentRepository: FakeEnrollmentRepositoryForDelivery
   private lateinit var coordinator: DeliveryFormSubmissionCoordinator
 
   private val session = UserSession(
@@ -82,6 +93,8 @@ class DeliveryFormSubmissionCoordinatorTest {
     sessionStore = SessionStore(FakeSecureKeyValueStore())
     sessionStore.saveSession(session)
     formAuditRepository = FakeFormAuditRepository()
+    dynamicFormDraftRepository = FakeDynamicFormDraftRepositoryForDelivery()
+    enrollmentRepository = FakeEnrollmentRepositoryForDelivery()
     coordinator = DeliveryFormSubmissionCoordinator(
       formSubmissionApi = formSubmissionApi,
       visitScheduleRepository = scheduleRepository,
@@ -89,6 +102,8 @@ class DeliveryFormSubmissionCoordinatorTest {
       deliverySessionRepository = deliverySessionRepository,
       sessionStore = sessionStore,
       formAuditRepository = formAuditRepository,
+      dynamicFormDraftRepository = dynamicFormDraftRepository,
+      enrollmentRepository = enrollmentRepository,
     )
   }
 
@@ -266,6 +281,8 @@ class DeliveryFormSubmissionCoordinatorTest {
       deliverySessionRepository = deliverySessionRepository,
       sessionStore = loggedOutSessionStore,
       formAuditRepository = formAuditRepository,
+      dynamicFormDraftRepository = dynamicFormDraftRepository,
+      enrollmentRepository = enrollmentRepository,
     )
     seedSyncedMother()
     formSubmissionApi.response = successResponse(childIds = null)
@@ -297,5 +314,141 @@ class DeliveryFormSubmissionCoordinatorTest {
     val secondRow = deliverySessionRepository.getBySessionUuid("session-1")!!
 
     assertEquals(firstRow.createdAtEpochMillis, secondRow.createdAtEpochMillis)
+  }
+
+  // --- serverBeneficiaryId resolution fallbacks (bug: "hasn't finished syncing" despite WiFi) ---
+
+  @Test
+  fun `submit() falls back to the mother's MOTHER_REGISTRATION draft when no schedule row has a server id yet`() = runTest {
+    // No seedSyncedMother() — her ANC schedule rows were never linked (e.g. she registered before
+    // that linking existed) — but her enrollment draft itself DID sync.
+    dynamicFormDraftRepository.remoteBeneficiaryIds["mother-1"] = "server-mother-1"
+    formSubmissionApi.response = successResponse(childIds = null)
+
+    val result = submit()
+
+    assertTrue(result.isSuccess)
+    assertEquals("server-mother-1", formSubmissionApi.lastRequest?.beneficiaryId)
+  }
+
+  @Test
+  fun `submit() falls back to the legacy enrollment draft when neither a schedule row nor a dynamic-form draft has a server id`() = runTest {
+    enrollmentRepository.remoteBeneficiaryIds["mother-1"] = "server-mother-1"
+    formSubmissionApi.response = successResponse(childIds = null)
+
+    val result = submit()
+
+    assertTrue(result.isSuccess)
+    assertEquals("server-mother-1", formSubmissionApi.lastRequest?.beneficiaryId)
+  }
+
+  @Test
+  fun `submit() prefers the dynamic-form draft over the legacy enrollment draft when both somehow have an id`() = runTest {
+    dynamicFormDraftRepository.remoteBeneficiaryIds["mother-1"] = "from-dynamic-form"
+    enrollmentRepository.remoteBeneficiaryIds["mother-1"] = "from-legacy"
+    formSubmissionApi.response = successResponse(childIds = null)
+
+    submit()
+
+    assertEquals("from-dynamic-form", formSubmissionApi.lastRequest?.beneficiaryId)
+  }
+
+  @Test
+  fun `submit() resolved via a fallback self-heals the mother's existing schedule rows for future lookups`() = runTest {
+    // Realistic setup: her ANC schedule was generated at enrolment (CR-022 — always happens
+    // immediately, offline or not) but never got linked to a server beneficiary id — the exact
+    // "registered before linking existed, or the one-time attempt silently failed" case this fix
+    // targets. Seeded directly (not via seedSyncedMother, which already carries a server id) so
+    // the row starts genuinely unlinked.
+    scheduleRepository.saveGenerated(
+      listOf(
+        schedule(
+          "anc-schedule-mother-1",
+          localBeneficiaryId = "mother-1",
+          serverScheduleId = null,
+          serverBeneficiaryId = null,
+        ),
+      ),
+    )
+    dynamicFormDraftRepository.remoteBeneficiaryIds["mother-1"] = "server-mother-1"
+    formSubmissionApi.response = successResponse(childIds = null)
+
+    submit()
+
+    // The pre-existing ANC row — previously unlinked — is now stamped, proving the fallback
+    // didn't just satisfy this one Delivery submission but actually re-linked her, so every other
+    // row of hers (this one, and whatever PP/NN this same submit() just generated) is
+    // upload-eligible from here on, not only the Delivery form.
+    val scheduleRows = scheduleRepository.getForBeneficiary("mother-1")
+    assertTrue(scheduleRows.isNotEmpty())
+    assertTrue(scheduleRows.all { it.serverBeneficiaryId == "server-mother-1" })
+  }
+
+  @Test
+  fun `submit() still fails with NotYetSynced when every source is empty`() = runTest {
+    // No schedule row, no dynamic-form draft, no legacy enrollment draft — genuinely never synced.
+    formSubmissionApi.response = successResponse(childIds = null)
+
+    val result = submit()
+
+    assertTrue(result.isFailure)
+    assertTrue(result.exceptionOrNull() is DeliveryFormSubmissionException.NotYetSynced)
+  }
+
+  /** Minimal fake — only [getRemoteBeneficiaryId] is exercised by these tests; every other member
+   * is unused here and left as an empty/no-op implementation. */
+  private class FakeDynamicFormDraftRepositoryForDelivery : DynamicFormDraftRepository {
+    val remoteBeneficiaryIds = mutableMapOf<String, String>()
+
+    override suspend fun saveDraft(
+      localBeneficiaryId: String,
+      formCode: String,
+      formVersionId: String,
+      localSubmissionUuid: String,
+      answers: FormAnswers,
+      registrationDate: LocalDate,
+    ): Result<Unit> = Result.success(Unit)
+
+    override suspend fun submitDraft(
+      localBeneficiaryId: String,
+      formCode: String,
+      formVersionId: String,
+      localSubmissionUuid: String,
+      answers: FormAnswers,
+      registrationDate: LocalDate,
+    ): DynamicFormSubmitResult = DynamicFormSubmitResult.QueuedOffline
+
+    override suspend fun confirmNewPregnancy(
+      localBeneficiaryId: String,
+      existingBeneficiaryId: String,
+    ): DynamicFormSubmitResult = DynamicFormSubmitResult.QueuedOffline
+
+    override suspend fun dismissNewPregnancyPrompt(localBeneficiaryId: String) = Unit
+
+    override suspend fun getUploadRecords(): List<FormUploadRecord> = emptyList()
+
+    override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = flowOf(emptyList())
+
+    override suspend fun getEditableSubmission(beneficiaryId: String): EditableSubmissionInfo? = null
+
+    override suspend fun applyFieldEdits(localBeneficiaryId: String, edits: Map<String, String>) = Unit
+
+    override suspend fun getRemoteBeneficiaryId(localBeneficiaryId: String): String? =
+      remoteBeneficiaryIds[localBeneficiaryId]
+  }
+
+  /** Minimal fake — only [getRemoteBeneficiaryId] is exercised by these tests. */
+  private class FakeEnrollmentRepositoryForDelivery : EnrollmentRepository {
+    val remoteBeneficiaryIds = mutableMapOf<String, String>()
+
+    override suspend fun saveEnrollment(record: EnrollmentRecord): Result<Unit> = Result.success(Unit)
+
+    override suspend fun submitEnrollment(record: EnrollmentRecord): EnrollmentSubmitResult =
+      EnrollmentSubmitResult.QueuedOffline
+
+    override suspend fun getEnrollment(beneficiaryId: String): EnrollmentRecord? = null
+
+    override suspend fun getRemoteBeneficiaryId(beneficiaryId: String): String? =
+      remoteBeneficiaryIds[beneficiaryId]
   }
 }

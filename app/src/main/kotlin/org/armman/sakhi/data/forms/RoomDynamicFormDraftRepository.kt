@@ -220,6 +220,9 @@ class RoomDynamicFormDraftRepository @Inject constructor(
     )
   }
 
+  override suspend fun getRemoteBeneficiaryId(localBeneficiaryId: String): String? =
+    dao.getByLocalBeneficiaryId(localBeneficiaryId)?.remoteBeneficiaryId
+
   /**
    * Reads the stored payload only for rows the backend rejected as duplicates, to surface an
    * unanswered new-pregnancy prompt on Home. Every other row skips the decrypt entirely — this maps

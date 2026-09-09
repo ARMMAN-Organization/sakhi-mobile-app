@@ -243,6 +243,24 @@ class BeneficiaryProfileViewModel @Inject constructor(
         // (this function also runs on every screen re-entry, not just init — see this function's
         // own doc above).
         if (profile.status == BeneficiaryStatus.CLOSED) {
+          // Bug fix (2026-09-09): AdHocFormSubmissionCoordinator.submitClosure's lapse sweep
+          // (lapseAllOpenVisits) is a one-shot best-effort call at closure-submit time -- wrapped
+          // in runCatching, with no other call site anywhere in the app. If it fails, or races a
+          // visit-schedule row not yet written when closure was submitted (e.g. a just-generated
+          // PP1), that row stays GENERATED/OPEN forever with nothing left to ever sweep it again.
+          // Reported: "Beneficiary status marked 'Death', but PP1 remains active and available
+          // for processing." Self-heals here instead: every profile load for an already-CLOSED
+          // beneficiary re-runs the same sweep, so a straggler visit gets cancelled -- and then
+          // hidden, see RETIRED_STATUSES in ProfileVisitMapper -- the next time her profile is
+          // opened, regardless of why the original submit-time sweep missed it. A beneficiary who
+          // is already fully lapsed costs one cheap no-op UPDATE (0 rows affected), so this runs
+          // unconditionally rather than trying to detect the original failure.
+          val lapsedCount = runCatching { visitScheduleRepository.lapseAllOpenVisits(beneficiaryId) }
+            .getOrDefault(0)
+          if (lapsedCount > 0) {
+            profile = repository.getBeneficiary(beneficiaryId)
+          }
+
           val approved = runCatching { reopenRepository.hasApprovedReopenRequest(serverBeneficiaryId) }
             .getOrDefault(false)
           if (approved) {

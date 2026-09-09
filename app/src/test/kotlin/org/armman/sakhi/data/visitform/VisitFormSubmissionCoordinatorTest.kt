@@ -37,6 +37,7 @@ import org.armman.sakhi.data.referral.ReferralStatus
 import org.armman.sakhi.data.referral.ReferralType
 import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
 import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
+import org.armman.sakhi.data.schedule.SameSessionNnVisitResolver
 import org.armman.sakhi.data.schedule.VisitCodeType
 import org.armman.sakhi.data.schedule.VisitScheduleStatus
 import org.armman.sakhi.data.schedule.schedule
@@ -85,6 +86,7 @@ class VisitFormSubmissionCoordinatorTest {
   private lateinit var riskAssessmentApi: FakeRiskAssessmentApi
   private lateinit var referralRepository: FakeReferralRepository
   private lateinit var lmpChangeRepository: FakeLmpChangeRepository
+  private lateinit var sameSessionNnVisitResolver: SameSessionNnVisitResolver
   private lateinit var coordinator: VisitFormSubmissionCoordinator
 
   private val session = UserSession(
@@ -104,6 +106,7 @@ class VisitFormSubmissionCoordinatorTest {
     formSubmissionApi = FakeFormSubmissionApi()
     scheduleDao = FakeVisitScheduleDao()
     scheduleRepository = RoomVisitScheduleRepository(scheduleDao)
+    sameSessionNnVisitResolver = SameSessionNnVisitResolver(scheduleRepository)
     lookupRepository = FakeLookupRepository(
       valuesByCategory = mutableMapOf(
         "VISIT_STATUS" to listOf(
@@ -140,6 +143,7 @@ class VisitFormSubmissionCoordinatorTest {
       referralLinkDao = referralLinkDao,
       riskAssessmentDao = riskAssessmentDao,
       lmpChangeRepository = lmpChangeRepository,
+      sameSessionNnVisitResolver = sameSessionNnVisitResolver,
     )
   }
 
@@ -434,6 +438,7 @@ class VisitFormSubmissionCoordinatorTest {
       referralLinkDao = referralLinkDao,
       riskAssessmentDao = riskAssessmentDao,
       lmpChangeRepository = FakeLmpChangeRepository(),
+      sameSessionNnVisitResolver = sameSessionNnVisitResolver,
     )
 
     val result = loggedOutCoordinator.submit(
@@ -529,6 +534,12 @@ class VisitFormSubmissionCoordinatorTest {
     localBeneficiaryId: String = "ben-1",
     step: DeliverySessionStep,
     deliveryFormFilledOnDate: LocalDate? = deliveryFormFilledOn,
+    // CR-Delivery-01: the registered child's own beneficiary id -- NN rows are generated under
+    // THIS id, never localBeneficiaryId (the mother's), so a same-session-NN test that wants to
+    // exercise the real lookup must set this to something distinct from localBeneficiaryId (the
+    // bug this fix closes was masked by earlier tests that left both defaulted to "ben-1").
+    child1BeneficiaryId: String? = null,
+    child2BeneficiaryId: String? = null,
   ) {
     deliverySessionRepository.save(
       DeliverySessionEntity(
@@ -537,6 +548,8 @@ class VisitFormSubmissionCoordinatorTest {
         step = step,
         deliverySubmissionLocalUuid = "delivery-sub-1",
         deliveryFormFilledOn = deliveryFormFilledOnDate,
+        child1BeneficiaryId = child1BeneficiaryId,
+        child2BeneficiaryId = child2BeneficiaryId,
         createdAtEpochMillis = 1_755_000_000_000L,
         updatedAtEpochMillis = 1_755_000_000_000L,
       ),
@@ -586,16 +599,21 @@ class VisitFormSubmissionCoordinatorTest {
 
   @Test
   fun `submit() advances a PP1 delivery session to NN when a same-session NN visit exists`() = runTest {
-    seedDeliverySession(step = DeliverySessionStep.PP1)
-    seedPp1Schedule()
+    // CR-Delivery-01 regression coverage: mother and child are DELIBERATELY distinct ids here
+    // (earlier tests left both at "ben-1", which masked the real bug -- see seedDeliverySession's
+    // own doc). This test fails against the pre-fix code, which looked up NN rows under the
+    // mother's id ("mother-1") and would find nothing under the child's ("child-1").
+    seedDeliverySession(step = DeliverySessionStep.PP1, localBeneficiaryId = "mother-1", child1BeneficiaryId = "child-1")
+    seedPp1Schedule(localBeneficiaryId = "mother-1")
     // The same-session NN1 row — GENERATED, scheduled on the delivery form's own fill date, not
-    // yet synced (it doesn't need to be: sameSessionNnVisit only cares about the schedule, and
-    // this PP1 submission never touches this row directly).
+    // yet synced (it doesn't need to be: SameSessionNnVisitResolver only cares about the
+    // schedule, and this PP1 submission never touches this row directly) — anchored to the
+    // CHILD's own beneficiary id, matching how NnScheduleGenerator really generates it.
     scheduleRepository.saveGenerated(
       listOf(
         schedule(
           "nn1-schedule",
-          localBeneficiaryId = "ben-1",
+          localBeneficiaryId = "child-1",
           visitCode = "NN1",
           visitType = VisitCodeType.NN,
           sequenceNo = 1,
@@ -623,8 +641,8 @@ class VisitFormSubmissionCoordinatorTest {
 
   @Test
   fun `submit() advances a PP1 delivery session straight to DONE when no same-session NN visit exists`() = runTest {
-    seedDeliverySession(step = DeliverySessionStep.PP1)
-    seedPp1Schedule()
+    seedDeliverySession(step = DeliverySessionStep.PP1, localBeneficiaryId = "mother-1", child1BeneficiaryId = "child-1")
+    seedPp1Schedule(localBeneficiaryId = "mother-1")
     // No NN schedule row at all — the neonatal window had already closed (SR-NN-01's "after Day
     // 28" case) by the time the delivery form was filed.
     visitApi.response = successfulVisitResponse()
@@ -646,15 +664,15 @@ class VisitFormSubmissionCoordinatorTest {
 
   @Test
   fun `submit() ignores an NN row that is not this session's own same-session visit`() = runTest {
-    seedDeliverySession(step = DeliverySessionStep.PP1)
-    seedPp1Schedule()
+    seedDeliverySession(step = DeliverySessionStep.PP1, localBeneficiaryId = "mother-1", child1BeneficiaryId = "child-1")
+    seedPp1Schedule(localBeneficiaryId = "mother-1")
     // Scenario A: NN1 opens same-session, but NN2 (Day 15) belongs to the regular tracker, not
     // this delivery session. Only NN1's own scheduledDate matches deliveryFormFilledOn.
     scheduleRepository.saveGenerated(
       listOf(
         schedule(
           "nn2-schedule",
-          localBeneficiaryId = "ben-1",
+          localBeneficiaryId = "child-1",
           visitCode = "NN2",
           visitType = VisitCodeType.NN,
           sequenceNo = 2,
@@ -675,6 +693,48 @@ class VisitFormSubmissionCoordinatorTest {
 
     assertEquals(
       DeliverySessionStep.DONE,
+      deliverySessionRepository.getBySessionUuid("delivery-session-1")?.step,
+    )
+  }
+
+  @Test
+  fun `submit() advances a PP1 delivery session to NN when only the SECOND child has the same-session visit`() = runTest {
+    // Twin/triplet coverage: child1 has nothing due (already completed, or window closed), but
+    // child2 does. SameSessionNnVisitResolver must keep looking past child1 rather than stopping
+    // at the first "no match" — same defense that makes the "first child in order" contract
+    // (SameSessionNnVisitResolverTest) actually mean something, not just "child1 or nothing".
+    seedDeliverySession(
+      step = DeliverySessionStep.PP1,
+      localBeneficiaryId = "mother-1",
+      child1BeneficiaryId = "child-1",
+      child2BeneficiaryId = "child-2",
+    )
+    seedPp1Schedule(localBeneficiaryId = "mother-1")
+    scheduleRepository.saveGenerated(
+      listOf(
+        schedule(
+          "nn1-schedule-child2",
+          localBeneficiaryId = "child-2",
+          visitCode = "NN1",
+          visitType = VisitCodeType.NN,
+          sequenceNo = 1,
+          scheduledDate = deliveryFormFilledOn,
+        ),
+      ),
+    )
+    visitApi.response = successfulVisitResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+
+    coordinator.submit(
+      localScheduleUuid = "pp1-schedule",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = deliveryFormFilledOn,
+      localSubmissionUuid = "test-submission-uuid",
+    )
+
+    assertEquals(
+      DeliverySessionStep.NN,
       deliverySessionRepository.getBySessionUuid("delivery-session-1")?.step,
     )
   }

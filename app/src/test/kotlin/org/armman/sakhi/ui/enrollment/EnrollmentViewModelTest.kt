@@ -86,6 +86,8 @@ class EnrollmentViewModelTest {
 
     override suspend fun getEnrollment(beneficiaryId: String): EnrollmentRecord? =
       saved.lastOrNull { it.beneficiaryId == beneficiaryId }
+
+    override suspend fun getRemoteBeneficiaryId(beneficiaryId: String): String? = null
   }
 
   private val dispatcher = StandardTestDispatcher()

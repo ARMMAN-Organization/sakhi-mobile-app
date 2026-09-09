@@ -105,6 +105,7 @@ fun HomeScreen(
             when (val state = uiState) {
               is HomeUiState.Loading -> HomeLoading()
               is HomeUiState.Error -> HomeError(onRetry = viewModel::loadSummary)
+              is HomeUiState.NeedsInitialSync -> HomeNeedsInitialSync(onRetry = viewModel::loadSummary)
               is HomeUiState.Success -> HomeContent(
                 summary = state.summary,
                 pendingUploadCount = pendingUploadCount,
@@ -201,6 +202,33 @@ private fun HomeError(onRetry: () -> Unit) {
   ) {
     Text(
       text = stringResource(R.string.home_error_load),
+      style = MaterialTheme.typography.bodyLarge,
+      color = NeutralG400,
+    )
+    PrimaryButton(
+      text = stringResource(R.string.home_retry),
+      onClick = onRetry,
+      modifier = Modifier.padding(top = Dimens.ItemSpacing),
+    )
+  }
+}
+
+/**
+ * Shown instead of [HomeError] specifically when the dashboard has never loaded on this
+ * device/install and there is no connectivity right now to load it for the first time (see
+ * [HomeUiState.NeedsInitialSync]'s doc). Unlike [HomeError]'s generic copy, this tells the Sakhi
+ * exactly what unblocks her — connect once, then the dashboard (and the rest of the app) keeps
+ * working offline — instead of a Retry button that would otherwise silently do nothing.
+ */
+@Composable
+private fun HomeNeedsInitialSync(onRetry: () -> Unit) {
+  Column(
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.Center,
+    modifier = Modifier.fillMaxSize().padding(Dimens.ScreenPadding),
+  ) {
+    Text(
+      text = stringResource(R.string.home_error_offline_no_cache),
       style = MaterialTheme.typography.bodyLarge,
       color = NeutralG400,
     )

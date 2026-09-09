@@ -37,6 +37,7 @@
   <string name="home_all_beneficiaries">All Beneficiaries</string>
   <string name="home_register_new">Register New</string>
   <string name="home_error_load">We couldn\'t load your dashboard. Please try again.</string>
+  <string name="home_error_offline_no_cache">No internet connection. Connect to the internet once to load your dashboard \u2014 after that, you can keep working offline.</string>
   <string name="home_retry">Retry</string>
 
   <!-- Login -->
@@ -166,6 +167,14 @@
   <string name="beneficiary_profile_state_active">Active</string>
   <string name="beneficiary_profile_state_journey_complete">Journey Complete</string>
   <string name="beneficiary_profile_state_closed">Closed</string>
+  <!-- Bug fix (2026-09-09): Closed chip used to show the same generic label for every closure reason; see IdentityCard.StateChip. "%1$s" is one of the reason strings below. -->
+  <string name="beneficiary_profile_state_closed_with_reason">Closed – %1$s</string>
+  <string name="beneficiary_profile_closure_reason_death">Died</string>
+  <string name="beneficiary_profile_closure_reason_migration">Migration</string>
+  <string name="beneficiary_profile_closure_reason_miscarriage">Miscarriage</string>
+  <string name="beneficiary_profile_closure_reason_abortion">Abortion</string>
+  <string name="beneficiary_profile_closure_reason_withdrawal">Withdrawal</string>
+  <string name="beneficiary_profile_closure_reason_program_completed">Program Completed</string>
   <string name="beneficiary_profile_coming_soon">This screen is coming soon</string>
   <string name="beneficiary_profile_error_load">We couldn\'t load this beneficiary. Please try again.</string>
   <string name="beneficiary_profile_see_visits">See Visits</string>

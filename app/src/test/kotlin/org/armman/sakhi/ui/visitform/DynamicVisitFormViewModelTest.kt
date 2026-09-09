@@ -20,6 +20,7 @@ import org.armman.sakhi.data.delivery.DeliveryFormDraftRepository
 import org.armman.sakhi.data.delivery.DeliveryFormSubmitResult
 import org.armman.sakhi.data.delivery.DeliverySessionEntity
 import org.armman.sakhi.data.delivery.DeliverySessionRepository
+import org.armman.sakhi.data.delivery.DeliverySessionStep
 import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
 import org.armman.sakhi.data.forms.FakeFormsApi
 import org.armman.sakhi.data.forms.FakeFormsRepository
@@ -33,6 +34,7 @@ import org.armman.sakhi.data.forms.FormVersion
 import org.armman.sakhi.data.forms.VisitCodeFormResolver
 import org.armman.sakhi.data.schedule.VisitCodeType
 import org.armman.sakhi.data.schedule.VisitScheduleEntity
+import org.armman.sakhi.data.schedule.SameSessionNnVisitResolver
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
 import org.armman.sakhi.data.schedule.VisitScheduleStatus
 import org.armman.sakhi.data.schedule.schedule
@@ -94,10 +96,15 @@ class DynamicVisitFormViewModelTest {
     override suspend fun getActiveForBeneficiary(localBeneficiaryId: String): List<VisitScheduleEntity> = emptyList()
     override fun observeActiveForBeneficiary(localBeneficiaryId: String): Flow<List<VisitScheduleEntity>> =
       MutableStateFlow(emptyList())
+    /** CR-Delivery-01: keyed by (localBeneficiaryId, visitType) so a test can hand back a
+     * specific child's open NN rows to [SameSessionNnVisitResolver] without this fake needing to
+     * grow a full generation/filter implementation. Empty by default, same "not exercised unless
+     * a test opts in" contract every other field on this fake already has. */
+    var openByType: MutableMap<Pair<String, VisitCodeType>, List<VisitScheduleEntity>> = mutableMapOf()
     override suspend fun getOpenByType(
       localBeneficiaryId: String,
       visitType: VisitCodeType,
-    ): List<VisitScheduleEntity> = emptyList()
+    ): List<VisitScheduleEntity> = openByType[localBeneficiaryId to visitType].orEmpty()
     override suspend fun hasSchedule(localBeneficiaryId: String): Boolean = false
     override suspend fun hasScheduleOfType(localBeneficiaryId: String, visitType: VisitCodeType): Boolean = false
     override suspend fun getUnsynced(): List<VisitScheduleEntity> = emptyList()
@@ -119,9 +126,13 @@ class DynamicVisitFormViewModelTest {
    * that route through NEONATAL_VISIT only care that [prefillDefaultVisitDate] ran, not about
    * [org.armman.sakhi.data.delivery.DeliveryToNeonatalPrefill]'s own separate prefill. */
   private class FakeDeliverySessionRepository : DeliverySessionRepository {
+    /** CR-Delivery-01: null by default (same "no delivery session yet" contract this class's own
+     * doc already describes) -- a test that needs [DynamicVisitFormViewModel.load] to see an
+     * active session sets this directly. */
+    var activeSession: DeliverySessionEntity? = null
     override suspend fun save(session: DeliverySessionEntity) {}
     override suspend fun getBySessionUuid(localSessionUuid: String): DeliverySessionEntity? = null
-    override suspend fun getActiveForBeneficiary(localBeneficiaryId: String): DeliverySessionEntity? = null
+    override suspend fun getActiveForBeneficiary(localBeneficiaryId: String): DeliverySessionEntity? = activeSession
     override suspend fun getMostRecentForBeneficiary(localBeneficiaryId: String): DeliverySessionEntity? = null
   }
 
@@ -448,6 +459,11 @@ class DynamicVisitFormViewModelTest {
     ppScheduleGenerator: org.armman.sakhi.data.schedule.PpScheduleGenerator =
       org.armman.sakhi.data.schedule.PpScheduleGenerator(org.armman.sakhi.data.schedule.HardcodedRuleSource()),
     referralRepository: FakeReferralRepository = FakeReferralRepository(),
+    // CR-Delivery-01: real resolver over this test's own visitScheduleRepository fake, same
+    // "constructible, opt in per-test via that fake's own fields" contract ppScheduleGenerator
+    // above already documents -- no dedicated fake needed since the resolver has no side effects
+    // of its own, only reads.
+    sameSessionNnVisitResolver: SameSessionNnVisitResolver = SameSessionNnVisitResolver(visitScheduleRepository),
   ) =
     DynamicVisitFormViewModel(
       formsRepository = formsRepository,
@@ -466,6 +482,7 @@ class DynamicVisitFormViewModelTest {
       healthEducationRepository = healthEducationRepository,
       ppScheduleGenerator = ppScheduleGenerator,
       referralRepository = referralRepository,
+      sameSessionNnVisitResolver = sameSessionNnVisitResolver,
       savedStateHandle = SavedStateHandle(
         mapOf(
           "beneficiaryId" to beneficiaryId,
@@ -723,6 +740,160 @@ class DynamicVisitFormViewModelTest {
     testDispatcher.scheduler.advanceUntilIdle()
 
     assertFalse(viewModel.uiState.value.triggersClosurePrompt)
+  }
+
+  // CR-Delivery-01: PP1 -> same-session NN hand-off. See SameSessionNnVisitResolverTest for the
+  // resolver's own per-child/twin-ordering coverage; these tests pin down when
+  // DynamicVisitFormViewModel.load() surfaces its result at all.
+  @Test
+  fun `load() sets sameSessionNnHandoff for PP1 when the session is at PP1 and a child has a matching NN visit`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    val deliveryFormFilledOn = LocalDate.of(2026, 8, 7)
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "PP1",
+      visitType = VisitCodeType.PP,
+      sequenceNo = 1,
+    )
+    deliverySessionRepository.activeSession = DeliverySessionEntity(
+      localSessionUuid = "delivery-session-1",
+      localBeneficiaryId = "beneficiary-1",
+      step = DeliverySessionStep.PP1,
+      deliverySubmissionLocalUuid = "delivery-sub-1",
+      deliveryFormFilledOn = deliveryFormFilledOn,
+      child1BeneficiaryId = "child-1",
+      createdAtEpochMillis = 1_755_000_000_000L,
+      updatedAtEpochMillis = 1_755_000_000_000L,
+    )
+    visitScheduleRepository.openByType[("child-1" to VisitCodeType.NN)] = listOf(
+      schedule(
+        localScheduleUuid = "nn1-schedule",
+        localBeneficiaryId = "child-1",
+        visitCode = "NN1",
+        visitType = VisitCodeType.NN,
+        sequenceNo = 1,
+        scheduledDate = deliveryFormFilledOn,
+      ),
+    )
+    formsRepository.version = versionWithFields(listOf(dateField(VisitFormQuestionCodes.ACTUAL_VISIT_DATE)))
+
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    val handoff = viewModel.uiState.value.sameSessionNnHandoff
+    assertEquals("child-1", handoff?.childBeneficiaryId)
+    assertEquals("nn1-schedule", handoff?.localScheduleUuid)
+    assertEquals("NN1", handoff?.visitLabel)
+  }
+
+  @Test
+  fun `load() does not set sameSessionNnHandoff when the session is not at the PP1 step`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    val deliveryFormFilledOn = LocalDate.of(2026, 8, 7)
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "PP1",
+      visitType = VisitCodeType.PP,
+      sequenceNo = 1,
+    )
+    // Session already moved past PP1 (e.g. resumed after the app was killed) -- the hand-off must
+    // not fire a second time out of a stale PP1 screen.
+    deliverySessionRepository.activeSession = DeliverySessionEntity(
+      localSessionUuid = "delivery-session-1",
+      localBeneficiaryId = "beneficiary-1",
+      step = DeliverySessionStep.NN,
+      deliverySubmissionLocalUuid = "delivery-sub-1",
+      deliveryFormFilledOn = deliveryFormFilledOn,
+      child1BeneficiaryId = "child-1",
+      createdAtEpochMillis = 1_755_000_000_000L,
+      updatedAtEpochMillis = 1_755_000_000_000L,
+    )
+    visitScheduleRepository.openByType[("child-1" to VisitCodeType.NN)] = listOf(
+      schedule(
+        localScheduleUuid = "nn1-schedule",
+        localBeneficiaryId = "child-1",
+        visitCode = "NN1",
+        visitType = VisitCodeType.NN,
+        sequenceNo = 1,
+        scheduledDate = deliveryFormFilledOn,
+      ),
+    )
+    formsRepository.version = versionWithFields(listOf(dateField(VisitFormQuestionCodes.ACTUAL_VISIT_DATE)))
+
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertNull(viewModel.uiState.value.sameSessionNnHandoff)
+  }
+
+  @Test
+  fun `load() does not set sameSessionNnHandoff for a non-PP1 postpartum visit`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    val deliveryFormFilledOn = LocalDate.of(2026, 8, 7)
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "PP2",
+      visitType = VisitCodeType.PP,
+      sequenceNo = 2,
+    )
+    deliverySessionRepository.activeSession = DeliverySessionEntity(
+      localSessionUuid = "delivery-session-1",
+      localBeneficiaryId = "beneficiary-1",
+      step = DeliverySessionStep.PP1,
+      deliverySubmissionLocalUuid = "delivery-sub-1",
+      deliveryFormFilledOn = deliveryFormFilledOn,
+      child1BeneficiaryId = "child-1",
+      createdAtEpochMillis = 1_755_000_000_000L,
+      updatedAtEpochMillis = 1_755_000_000_000L,
+    )
+    visitScheduleRepository.openByType[("child-1" to VisitCodeType.NN)] = listOf(
+      schedule(
+        localScheduleUuid = "nn1-schedule",
+        localBeneficiaryId = "child-1",
+        visitCode = "NN1",
+        visitType = VisitCodeType.NN,
+        sequenceNo = 1,
+        scheduledDate = deliveryFormFilledOn,
+      ),
+    )
+    formsRepository.version = versionWithFields(listOf(dateField(VisitFormQuestionCodes.ACTUAL_VISIT_DATE)))
+
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertNull(viewModel.uiState.value.sameSessionNnHandoff)
+  }
+
+  @Test
+  fun `load() does not set sameSessionNnHandoff when no child has a matching NN visit`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "PP1",
+      visitType = VisitCodeType.PP,
+      sequenceNo = 1,
+    )
+    deliverySessionRepository.activeSession = DeliverySessionEntity(
+      localSessionUuid = "delivery-session-1",
+      localBeneficiaryId = "beneficiary-1",
+      step = DeliverySessionStep.PP1,
+      deliverySubmissionLocalUuid = "delivery-sub-1",
+      deliveryFormFilledOn = LocalDate.of(2026, 8, 7),
+      child1BeneficiaryId = "child-1",
+      createdAtEpochMillis = 1_755_000_000_000L,
+      updatedAtEpochMillis = 1_755_000_000_000L,
+    )
+    // visitScheduleRepository.openByType left empty -- no NN row for child-1 at all.
+    formsRepository.version = versionWithFields(listOf(dateField(VisitFormQuestionCodes.ACTUAL_VISIT_DATE)))
+
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertNull(viewModel.uiState.value.sameSessionNnHandoff)
   }
 
   @Test

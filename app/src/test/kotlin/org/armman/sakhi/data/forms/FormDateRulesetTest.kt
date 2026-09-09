@@ -384,6 +384,32 @@ class FormDateRulesetTest {
   }
 
   @Test
+  fun `bug fix 2026-09-09 - ANC_VISIT's own lmp question_code now has picker bounds too`() {
+    // Regression test: "lmp" (VisitFormQuestionCodes.LMP, the ANC_VISIT form's own initial LMP
+    // entry field) previously had no case in boundsFor at all and fell through to `else -> null`
+    // - no picker ceiling, so a future date was selectable. Reported bug: "LMP field on ANC visit
+    // form shows future-date options as selectable".
+    val bounds = FormDateRuleset.boundsFor(
+      FormDateRuleset.LMP_VISIT_ENTRY_QUESTION_CODE,
+      FormAnswers(),
+      registrationDate,
+    )
+
+    assertEquals(registrationDate, bounds?.max)
+  }
+
+  @Test
+  fun `future lmp on the ANC_VISIT's own lmp question_code is a violation`() {
+    val violation = FormDateRuleset.violationFor(
+      FormDateRuleset.LMP_VISIT_ENTRY_QUESTION_CODE,
+      answers(FormDateRuleset.LMP_VISIT_ENTRY_QUESTION_CODE to registrationDate.plusDays(1).toString()),
+      registrationDate,
+    )
+
+    assertEquals(FormDateRuleset.Violation.LMP_FUTURE, violation)
+  }
+
+  @Test
   fun `lmp at the near window bound is accepted`() {
     assertNull(violationForLmp(registrationDate.minusDays(FormDateRuleset.LMP_MIN_DAYS_BEFORE_REGISTRATION)))
     // The far bound (LMP_MAX_DAYS_BEFORE_REGISTRATION, 239 days / ~34 weeks) is no longer accepted

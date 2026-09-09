@@ -117,6 +117,7 @@ class RoomVisitFormDraftRepositoryTest {
       referralLinkDao = FakeReferralLinkDao(),
       riskAssessmentDao = FakeRiskAssessmentDao(),
       lmpChangeRepository = org.armman.sakhi.data.lmpchange.FakeLmpChangeRepository(),
+      sameSessionNnVisitResolver = org.armman.sakhi.data.schedule.SameSessionNnVisitResolver(scheduleRepository),
     )
     // Reuses the same dao/secureStore as the repository so runOne() sees the row submitDraft just
     // wrote — matching how the real Hilt graph wires a single instance of each.

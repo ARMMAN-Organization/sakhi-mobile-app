@@ -156,6 +156,26 @@ object FormDateRuleset {
   const val LMP_DATE_EDIT_QUESTION_CODE = "lmp_date_edit"
 
   /**
+   * ANC_VISIT's own initial LMP entry (spec row 6, "Pregnancy Dating Validation" section) —
+   * matches [org.armman.sakhi.data.visitform.VisitFormQuestionCodes.LMP] ("lmp"), duplicated here
+   * as a literal per this file's own cross-module convention (see [LMP_DATE_EDIT_QUESTION_CODE]'s
+   * own doc above) rather than importing `data.visitform`, which would invert this package's
+   * dependency direction (visitform already depends on forms, never the reverse).
+   *
+   * Bug fix (2026-09-09): this question_code had NO case in [boundsFor]/[violationFor] at all —
+   * confirmed against the live ANC_VISIT schema (`{"question_code": "lmp", "input_type": "date",
+   * "required": true, ...}`), so it silently fell through to `else -> null`: no picker ceiling,
+   * any future date selectable, no post-pick violation either (reported: "LMP field on ANC visit
+   * form shows future-date options as selectable"). Given the exact same rule as
+   * [LMP_DATE_QUESTION_CODE] — this is the same underlying data point (the Sakhi's LMP entry),
+   * just captured on the visit form instead of at registration, and
+   * [org.armman.sakhi.data.visitform.VisitFormComputedFieldEvaluator] already treats the two as
+   * interchangeable (this one is superseded by [LMP_DATE_EDIT_QUESTION_CODE] once a sonography
+   * report confirms it, exactly like the registration-time LMP is).
+   */
+  const val LMP_VISIT_ENTRY_QUESTION_CODE = "lmp"
+
+  /**
    * ANC/Infant Closure forms' "Closure visit date" (spec row 1): "dd-mm-yyyy, Should auto populate
    * today's date." The prefill itself lives in [org.armman.sakhi.ui.adhocform.AdHocFormViewModel]
    * (`prefillTodayDateFields`); this file only supplies the matching "not future" bound so a
@@ -426,7 +446,7 @@ object FormDateRuleset {
       // "Cannot be future" (this constant's own KDoc) is the only picker-level ceiling; the
       // >30-day recency rule stays enforced, just as a post-pick validation message
       // ([Violation.LMP_TOO_RECENT] below) rather than blocking the date from being selected at all.
-      LMP_DATE_QUESTION_CODE -> Bounds(
+      LMP_DATE_QUESTION_CODE, LMP_VISIT_ENTRY_QUESTION_CODE -> Bounds(
         min = reference.minusDays(LMP_MAX_DAYS_BEFORE_REGISTRATION),
         max = reference,
       )
@@ -622,7 +642,7 @@ object FormDateRuleset {
 
       MOTHER_DOB_QUESTION_CODE -> adultDobViolation(value, reference)
 
-      LMP_DATE_QUESTION_CODE -> {
+      LMP_DATE_QUESTION_CODE, LMP_VISIT_ENTRY_QUESTION_CODE -> {
         val daysBefore = ChronoUnit.DAYS.between(value, reference)
         // Same floor-to-whole-weeks the GESTATIONAL_AGE_AT_REGISTRATION computed field uses, so
         // this rule and the number displayed on the form always agree.

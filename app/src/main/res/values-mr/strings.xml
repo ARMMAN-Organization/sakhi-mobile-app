@@ -36,6 +36,7 @@
   <string name="home_all_beneficiaries">सर्व लाभार्थी</string>
   <string name="home_register_new">नवीन नोंदणी</string>
   <string name="home_error_load">डॅशबोर्ड लोड होऊ शकला नाही. कृपया पुन्हा प्रयत्न करा.</string>
+  <string name="home_error_offline_no_cache">इंटरनेट कनेक्शन नाही. तुमचा डॅशबोर्ड लोड करण्यासाठी एकदा इंटरनेटशी कनेक्ट करा \u2014 त्यानंतर तुम्ही ऑफलाइन काम सुरू ठेवू शकता.</string>
   <string name="home_retry">पुन्हा प्रयत्न करा</string>
 
   <!-- Login -->
@@ -160,6 +161,14 @@
   <string name="beneficiary_profile_state_active">सक्रिय</string>
   <string name="beneficiary_profile_state_journey_complete">प्रवास पूर्ण</string>
   <string name="beneficiary_profile_state_closed">बंद</string>
+  <!-- NEEDS NATIVE/CLINICAL REVIEW before release; see matching comment in values/strings.xml -->
+  <string name="beneficiary_profile_state_closed_with_reason">बंद – %1$s</string>
+  <string name="beneficiary_profile_closure_reason_death">मृत्यू</string>
+  <string name="beneficiary_profile_closure_reason_migration">स्थलांतर</string>
+  <string name="beneficiary_profile_closure_reason_miscarriage">गर्भपात</string>
+  <string name="beneficiary_profile_closure_reason_abortion">गर्भपात</string>
+  <string name="beneficiary_profile_closure_reason_withdrawal">माघार</string>
+  <string name="beneficiary_profile_closure_reason_program_completed">कार्यक्रम पूर्ण</string>
   <string name="beneficiary_profile_coming_soon">ही स्क्रीन लवकरच येत आहे</string>
   <string name="beneficiary_profile_error_load">लाभार्थी लोड होऊ शकला नाही. कृपया पुन्हा प्रयत्न करा.</string>
   <string name="beneficiary_profile_see_visits">भेटी पहा</string>

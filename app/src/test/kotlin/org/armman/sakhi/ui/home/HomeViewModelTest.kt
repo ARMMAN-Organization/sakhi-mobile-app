@@ -18,6 +18,7 @@ import org.armman.sakhi.data.childregistration.FakeChildFormSyncScheduler
 import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import org.armman.sakhi.data.dashboard.DashboardRepository
 import org.armman.sakhi.data.dashboard.DashboardSummary
+import org.armman.sakhi.data.dashboard.NoDashboardCacheAvailableException
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.enrollment.FakeEnrollmentSyncScheduler
 import org.armman.sakhi.data.schedule.FakeVisitScheduleSyncScheduler
@@ -156,6 +157,8 @@ class HomeViewModelTest {
     override suspend fun getEditableSubmission(remoteBeneficiaryId: String): EditableSubmissionInfo? = null
 
     override suspend fun applyFieldEdits(localBeneficiaryId: String, edits: Map<String, String>) = Unit
+
+    override suspend fun getRemoteBeneficiaryId(localBeneficiaryId: String): String? = null
   }
 
   private lateinit var repository: FakeDashboardRepository
@@ -264,6 +267,53 @@ class HomeViewModelTest {
     dispatcher.scheduler.advanceUntilIdle()
 
     assertEquals(HomeUiState.Error, viewModel.uiState.value)
+  }
+
+  @Test
+  fun `NoDashboardCacheAvailableException results in NeedsInitialSync, not the generic Error`() = runTest(dispatcher) {
+    // Distinguishes "never synced on this device and offline right now" (a known, explainable
+    // cause) from any other failure — see HomeUiState.NeedsInitialSync's doc.
+    repository.error = NoDashboardCacheAvailableException()
+    val viewModel = viewModel()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(HomeUiState.NeedsInitialSync, viewModel.uiState.value)
+  }
+
+  @Test
+  fun `an unrelated failure still resolves to the generic Error, not NeedsInitialSync`() = runTest(dispatcher) {
+    repository.error = IOException("network down")
+    val viewModel = viewModel()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(HomeUiState.Error, viewModel.uiState.value)
+  }
+
+  @Test
+  fun `retry from NeedsInitialSync after connectivity returns reaches Success`() = runTest(dispatcher) {
+    repository.error = NoDashboardCacheAvailableException()
+    val viewModel = viewModel()
+    dispatcher.scheduler.advanceUntilIdle()
+    assertEquals(HomeUiState.NeedsInitialSync, viewModel.uiState.value)
+
+    repository.error = null
+    viewModel.loadSummary()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertTrue(viewModel.uiState.value is HomeUiState.Success)
+  }
+
+  @Test
+  fun `retry from NeedsInitialSync while still offline re-emits NeedsInitialSync, not stuck Loading`() = runTest(dispatcher) {
+    repository.error = NoDashboardCacheAvailableException()
+    val viewModel = viewModel()
+    dispatcher.scheduler.advanceUntilIdle()
+    assertEquals(HomeUiState.NeedsInitialSync, viewModel.uiState.value)
+
+    viewModel.loadSummary()
+    dispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(HomeUiState.NeedsInitialSync, viewModel.uiState.value)
   }
 
   @Test

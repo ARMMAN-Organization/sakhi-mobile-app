@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import org.armman.sakhi.data.dashboard.DashboardRepository
 import org.armman.sakhi.data.dashboard.DashboardSummary
+import org.armman.sakhi.data.dashboard.NoDashboardCacheAvailableException
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.FormUploadRecord
@@ -30,11 +31,27 @@ import org.armman.sakhi.data.sync.ManualSyncTrigger
 import org.armman.sakhi.data.sync.UploadRecordsSource
 import javax.inject.Inject
 
-/** UI state for the Home dashboard — loading, error and success. */
+/** UI state for the Home dashboard — loading, error, success, and the "never synced" case. */
 sealed interface HomeUiState {
   data object Loading : HomeUiState
   data class Success(val summary: DashboardSummary) : HomeUiState
+
+  /** Generic/unexpected failure (network error with no prior cache to fall back to further up
+   * the chain, malformed data, etc.) — technical detail must not leak to users, so this carries
+   * none. Distinct from [NeedsInitialSync], which is the one specific, known-cause case. */
   data object Error : HomeUiState
+
+  /**
+   * The dashboard has never been loaded on this device/install AND there is no connectivity right
+   * now to load it for the first time — thrown by [DashboardRepository.getSummary] as
+   * [NoDashboardCacheAvailableException]. Distinct from [Error] so [ui.home.HomeScreen] can tell
+   * the Sakhi *why* (connect once, then offline works) instead of showing the same
+   * generic "couldn't load, try again" copy a truly unknown failure gets — a Retry button alone
+   * here would otherwise silently do nothing while still offline (see Asana: "App is not working
+   * in offline mode" — a fresh install/test device taken offline before ever syncing online hits
+   * exactly this state).
+   */
+  data object NeedsInitialSync : HomeUiState
 }
 
 /**
@@ -368,6 +385,11 @@ class HomeViewModel @Inject constructor(
         // navigated off the dashboard mid-load). Swallowing it into HomeUiState.Error would both
         // break structured concurrency and paint a spurious error on a screen that is leaving.
         throw e
+      } catch (e: NoDashboardCacheAvailableException) {
+        // The one specific, known cause: never synced on this device/install, no connectivity
+        // right now either. Checked before the generic catch below so it isn't swallowed into the
+        // same unhelpful copy as a truly unexpected failure.
+        HomeUiState.NeedsInitialSync
       } catch (e: Exception) {
         // Generic error state for the UI; technical detail must not leak to users.
         HomeUiState.Error

@@ -157,15 +157,25 @@ class RemoteDashboardRepositoryTest {
       username = "meena.sakhi",
     )
 
-    assertThrows(IllegalStateException::class.java) {
+    assertThrows(NoDashboardCacheAvailableException::class.java) {
       kotlinx.coroutines.runBlocking { meenaOffline.getSummary() }
     }
   }
 
   @Test
-  fun `no cache and fetch fails throws so the caller's existing catch shows Error`() = runTest {
-    assertThrows(IllegalStateException::class.java) {
+  fun `no cache and fetch fails throws NoDashboardCacheAvailableException, distinct from a generic failure`() = runTest {
+    assertThrows(NoDashboardCacheAvailableException::class.java) {
       kotlinx.coroutines.runBlocking { repo(FakeDashboardApi(response = null)).getSummary() }
+    }
+  }
+
+  @Test
+  fun `corrupted persisted cache falls through to NoDashboardCacheAvailableException, not a crash`() = runTest {
+    val store = FakeSecureKeyValueStore()
+    store.putRawCorrupted("dashboard_summary_cache_sakhi-1")
+
+    assertThrows(NoDashboardCacheAvailableException::class.java) {
+      kotlinx.coroutines.runBlocking { repo(FakeDashboardApi(response = null), store).getSummary() }
     }
   }
 
@@ -201,7 +211,7 @@ class RemoteDashboardRepositoryTest {
     val api = FakeDashboardApi(
       response = { Response.error(500, "boom".toResponseBody("application/json".toMediaType())) },
     )
-    assertThrows(IllegalStateException::class.java) {
+    assertThrows(NoDashboardCacheAvailableException::class.java) {
       kotlinx.coroutines.runBlocking { repo(api).getSummary() }
     }
   }

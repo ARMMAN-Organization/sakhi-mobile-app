@@ -949,4 +949,30 @@ class RoomDynamicFormDraftRepositoryTest {
     // Must not throw — nothing to merge into.
     repository.applyFieldEdits("no-such-local-id", mapOf("mobile_number" to "9999999999"))
   }
+
+  // --- getRemoteBeneficiaryId (fallback for DeliveryFormSubmissionCoordinator/
+  // AdHocFormSubmissionCoordinator's schedule-row lookup) ------------------------------------
+
+  @Test
+  fun `getRemoteBeneficiaryId returns the synced draft's server beneficiary id`() = runTest {
+    connectivityChecker.online = true
+    enrollmentApi.response = successfulBeneficiaryResponse()
+    formSubmissionApi.response = successfulSubmissionResponse()
+    submit()
+
+    assertEquals("server-beneficiary-1", repository.getRemoteBeneficiaryId("local-1"))
+  }
+
+  @Test
+  fun `getRemoteBeneficiaryId returns null for a draft that hasn't synced yet`() = runTest {
+    connectivityChecker.online = false
+    repository.saveDraft("local-1", "MOTHER_REGISTRATION", "version-1", "submission-uuid-1", answers, LocalDate.now())
+
+    assertNull(repository.getRemoteBeneficiaryId("local-1"))
+  }
+
+  @Test
+  fun `getRemoteBeneficiaryId returns null when there is no local draft at all`() = runTest {
+    assertNull(repository.getRemoteBeneficiaryId("no-such-local-id"))
+  }
 }

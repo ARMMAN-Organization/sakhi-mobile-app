@@ -10,6 +10,10 @@ package org.armman.sakhi.data.forms
  * CR-Referral-01 Pass 6, the in-visit referral capture step's REFERRAL_VISIT schema). Checked
  * first; [version] remains the single-schema-fits-all default every pre-existing test already
  * relies on, so it's untouched when [versionByFormCode] has no entry for the requested formCode.
+ *
+ * [requestedFormCodes] records every `formCode` passed to [getActiveVersion], in call order --
+ * lets a test (e.g. `FormSchemaWarmerTest`) assert what was warmed, mirroring
+ * `FakeLookupRepository.requestedCategories`.
  */
 class FakeFormsRepository(
   var geography: List<FormGeographyUnit> = emptyList(),
@@ -17,8 +21,12 @@ class FakeFormsRepository(
   var versionByFormCode: MutableMap<String, FormVersion?> = mutableMapOf(),
 ) : FormsRepository {
 
-  override suspend fun getActiveVersion(formCode: String): FormVersion? =
-    if (versionByFormCode.containsKey(formCode)) {
+  /** Every `formCode` passed to [getActiveVersion], in call order. */
+  val requestedFormCodes = mutableListOf<String>()
+
+  override suspend fun getActiveVersion(formCode: String): FormVersion? {
+    requestedFormCodes += formCode
+    return if (versionByFormCode.containsKey(formCode)) {
       versionByFormCode[formCode]
     } else {
       version
@@ -35,4 +43,5 @@ class FakeFormsRepository(
         geography = units,
       )
     }
+  }
 }

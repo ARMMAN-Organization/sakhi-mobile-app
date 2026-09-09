@@ -29,4 +29,13 @@ interface EnrollmentRepository {
 
   /** The stored record for [beneficiaryId], or null if never saved. */
   suspend fun getEnrollment(beneficiaryId: String): EnrollmentRecord?
+
+  /**
+   * The server beneficiary id this (legacy-path) enrollment was assigned once it synced, or null
+   * if it hasn't (or there is no local draft for [beneficiaryId] at all). See
+   * [org.armman.sakhi.data.forms.DynamicFormDraftRepository.getRemoteBeneficiaryId]'s doc — this is
+   * the same fallback for beneficiaries registered through this older enrollment path instead of
+   * the current dynamic-form one.
+   */
+  suspend fun getRemoteBeneficiaryId(beneficiaryId: String): String?
 }

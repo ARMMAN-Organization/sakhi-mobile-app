@@ -70,6 +70,9 @@ class RoomEnrollmentRepository @Inject constructor(
       .getOrNull()
   }
 
+  override suspend fun getRemoteBeneficiaryId(beneficiaryId: String): String? =
+    dao.getByBeneficiaryId(beneficiaryId)?.remoteBeneficiaryId
+
   private suspend fun saveLocally(record: EnrollmentRecord) {
     val payloadKey = enrollmentDraftPayloadKey(record.beneficiaryId)
     secureStore.putString(payloadKey, enrollmentRecordGson.toJson(record))

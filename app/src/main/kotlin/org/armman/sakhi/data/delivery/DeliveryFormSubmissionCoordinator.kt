@@ -3,8 +3,10 @@ package org.armman.sakhi.data.delivery
 import org.armman.sakhi.data.audit.FormAuditRepository
 import org.armman.sakhi.data.auth.session.SessionStore
 import org.armman.sakhi.data.enrollment.ApiErrorParser
+import org.armman.sakhi.data.enrollment.EnrollmentRepository
 import org.armman.sakhi.data.forms.CreateSubmissionRequestDto
 import org.armman.sakhi.data.forms.DeliveryQuestionCodes
+import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormSubmissionApi
 import org.armman.sakhi.data.forms.SubmitErrorCopy
@@ -74,6 +76,8 @@ class DeliveryFormSubmissionCoordinator @Inject constructor(
   private val deliverySessionRepository: DeliverySessionRepository,
   private val sessionStore: SessionStore,
   private val formAuditRepository: FormAuditRepository,
+  private val dynamicFormDraftRepository: DynamicFormDraftRepository,
+  private val enrollmentRepository: EnrollmentRepository,
 ) {
 
   /**
@@ -102,12 +106,7 @@ class DeliveryFormSubmissionCoordinator @Inject constructor(
   ): Result<List<String>?> = runCatching {
     sessionStore.readSession() ?: throw DeliveryFormSubmissionException.NoActiveSession
 
-    // Same resolution path as AdHocFormSubmissionCoordinator: no schedule of our own yet to pull a
-    // server beneficiary id from (that's exactly what this submission is about to create), so we
-    // reuse whatever server beneficiary id the mother's EXISTING (ANC-era) schedule rows already
-    // carry.
-    val serverBeneficiaryId = visitScheduleRepository.getForBeneficiary(localBeneficiaryId)
-      .firstNotNullOfOrNull { it.serverBeneficiaryId }
+    val serverBeneficiaryId = resolveServerBeneficiaryId(localBeneficiaryId)
       ?: throw DeliveryFormSubmissionException.NotYetSynced
 
     val submissionRequest = CreateSubmissionRequestDto(
@@ -156,6 +155,48 @@ class DeliveryFormSubmissionCoordinator @Inject constructor(
     )
 
     childIds
+  }
+
+  /**
+   * Resolves the mother's server beneficiary id, needed to submit the Delivery form against her.
+   *
+   * Same resolution path as [org.armman.sakhi.data.adhocform.AdHocFormSubmissionCoordinator]: no
+   * schedule of our own yet to pull a server beneficiary id from (that's exactly what this
+   * submission is about to create), so this first reuses whatever server beneficiary id the
+   * mother's EXISTING (ANC-era) schedule rows already carry — the fast path, correct for the
+   * common case where her enrolment sync already linked those rows (see
+   * [org.armman.sakhi.data.forms.DynamicFormSyncExecutor]'s `linkScheduleToServerBeneficiary` and
+   * [VisitScheduleCoordinator]'s `saveGeneratedAndBackfill`).
+   *
+   * That link only ever gets written at specific moments (right after her Mother Registration
+   * form syncs, or when a later schedule series is generated for her). A mother registered before
+   * that linking existed, or whose one-time linking attempt silently failed, is left with schedule
+   * rows that NEVER carry a server beneficiary id again — nothing else ever retries it — so every
+   * later form for her (Delivery included) would keep failing here forever, even though she is
+   * fully synced (reported live: "This beneficiary data hasn't finished syncing yet" while
+   * connected to WiFi).
+   *
+   * So when the schedule rows come up empty, this falls back to asking her own enrolment record
+   * directly — first the current dynamic-form path
+   * ([DynamicFormDraftRepository.getRemoteBeneficiaryId], her `MOTHER_REGISTRATION` draft), then
+   * the legacy path ([EnrollmentRepository.getRemoteBeneficiaryId], for mothers registered before
+   * that newer path existed). Either fallback finding an id also re-links her schedule rows via
+   * [VisitScheduleRepository.attachServerBeneficiaryId] right here — self-healing, so this isn't
+   * just a one-time workaround for the Delivery form: every later schedule row for her (PP1, NN,
+   * ...) becomes upload-eligible too, the same fix [VisitScheduleCoordinator.saveGeneratedAndBackfill]
+   * already established for newly generated series.
+   */
+  private suspend fun resolveServerBeneficiaryId(localBeneficiaryId: String): String? {
+    visitScheduleRepository.getForBeneficiary(localBeneficiaryId)
+      .firstNotNullOfOrNull { it.serverBeneficiaryId }
+      ?.let { return it }
+
+    val resolved = dynamicFormDraftRepository.getRemoteBeneficiaryId(localBeneficiaryId)
+      ?: enrollmentRepository.getRemoteBeneficiaryId(localBeneficiaryId)
+      ?: return null
+
+    visitScheduleRepository.attachServerBeneficiaryId(localBeneficiaryId, resolved)
+    return resolved
   }
 
   /** [childIds] == null means no live birth: skip CHILD_REGISTRATION entirely and go straight to

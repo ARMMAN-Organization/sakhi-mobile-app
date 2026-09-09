@@ -32,8 +32,8 @@ import org.armman.sakhi.data.rules.RuleSetIds
 import org.armman.sakhi.data.schedule.VisitCodeType
 import org.armman.sakhi.data.schedule.VisitScheduleEntity
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
+import org.armman.sakhi.data.schedule.SameSessionNnVisitResolver
 import org.armman.sakhi.data.schedule.VisitScheduleStatus
-import org.armman.sakhi.data.schedule.sameSessionNnVisit
 import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -202,6 +202,10 @@ class VisitFormSubmissionCoordinator @Inject constructor(
   private val riskAssessmentDao: RiskAssessmentDao,
   /** Task 2 (LMP/Reopen/Referral/Audit task list). */
   private val lmpChangeRepository: LmpChangeRepository,
+  /** CR-Delivery-01: single source of truth for "which same-session NN visit is due" -- see
+   * that class's own doc for why this replaced this coordinator's own former copy of the same
+   * lookup, which queried the wrong (mother's) beneficiary id. */
+  private val sameSessionNnVisitResolver: SameSessionNnVisitResolver,
 ) {
 
   private val riskAssessmentJsonMapper = Gson()
@@ -756,15 +760,18 @@ class VisitFormSubmissionCoordinator @Inject constructor(
    * only PP visit this session cares about).
    *
    * - [DeliverySessionStep.PP1] + this visit is PP1 (`visitType == PP`, `sequenceNo == 1`):
-   *   advances to [DeliverySessionStep.NN] if [sameSessionNnVisit] finds one among this
-   *   beneficiary's still-open NN rows (measured against the session's own
+   *   advances to [DeliverySessionStep.NN] if [SameSessionNnVisitResolver] finds one among the
+   *   registered children's still-open NN rows (measured against the session's own
    *   [DeliverySessionEntity.deliveryFormFilledOn]), else straight to [DeliverySessionStep.DONE].
+   *   CR-Delivery-01: this used to look up NN rows under this beneficiary's own id, which is the
+   *   MOTHER's id — NN is generated under the CHILD's, so it never found anything and this step
+   *   always fell through to DONE. See [SameSessionNnVisitResolver]'s own doc for the full story.
    * - [DeliverySessionStep.NN] + this visit is NN (`visitType == NN` — NN1 or NN2, "either NN
    *   visit" per CR-042): advances to [DeliverySessionStep.DONE]. Deliberately does not
    *   re-verify which NN row this is — by the time a session reaches [DeliverySessionStep.NN],
    *   at most one NN row can still be open as *this* session's own visit (see
-   *   [sameSessionNnVisit]'s doc), so any NN submission that lands while the session is still at
-   *   this step is that one.
+   *   [SameSessionNnVisitResolver]'s doc), so any NN submission that lands while the session is
+   *   still at this step is that one.
    * - [DeliverySessionEntity.deliveryFormFilledOn] is null (only possible on a session row that
    *   predates the v11 migration and never advanced past [DeliverySessionStep.DELIVERY_FORM] in
    *   the field): falls back to [DeliverySessionStep.DONE] rather than guessing, since there is no
@@ -791,11 +798,8 @@ class VisitFormSubmissionCoordinator @Inject constructor(
     )
   }
 
-  private suspend fun hasSameSessionNnVisit(session: DeliverySessionEntity): Boolean {
-    val deliveryFormFilledOn = session.deliveryFormFilledOn ?: return false
-    val openNnVisits = visitScheduleRepository.getOpenByType(session.localBeneficiaryId, VisitCodeType.NN)
-    return sameSessionNnVisit(openNnVisits, deliveryFormFilledOn) != null
-  }
+  private suspend fun hasSameSessionNnVisit(session: DeliverySessionEntity): Boolean =
+    sameSessionNnVisitResolver.hasMatch(session)
 }
 
 /** Fresh per-attempt, and correctly so — unlike [newLocalVisitSubmissionUuid] below, nothing about

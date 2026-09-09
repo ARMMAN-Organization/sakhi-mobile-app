@@ -424,6 +424,16 @@ fun AppNavHost() {
             popUpTo(Routes.VISIT_FORM) { inclusive = true }
           }
         },
+        // CR-Delivery-01: PP1 just advanced its Delivery Event Session to a same-session NN
+        // visit — hand off into it the same way PP1 itself was handed off into from
+        // DeliverySessionScreen/DeliveryChildRegistrationScreen. Same replace-not-stack pattern as
+        // every other hand-off here, so system back from the NN form lands on the profile, not
+        // back into the just-submitted PP1 visit.
+        onSubmittedTriggersSameSessionNn = { childBeneficiaryId, localScheduleUuid, visitLabel ->
+          navController.navigate(Routes.visitForm(childBeneficiaryId, localScheduleUuid, visitLabel)) {
+            popUpTo(Routes.VISIT_FORM) { inclusive = true }
+          }
+        },
       )
     }
     composable(

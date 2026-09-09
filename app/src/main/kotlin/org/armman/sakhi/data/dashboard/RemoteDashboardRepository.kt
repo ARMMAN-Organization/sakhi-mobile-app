@@ -12,6 +12,23 @@ import javax.inject.Singleton
 
 private const val KEY_DASHBOARD_CACHE_PREFIX = "dashboard_summary_cache_"
 
+/**
+ * Thrown by [RemoteDashboardRepository.getSummary] specifically when there is genuinely nothing to
+ * show: the live fetch didn't succeed (offline, timeout, server error) AND nothing was ever
+ * persisted for this Sakhi on this device/install (first launch, fresh APK, or a device that has
+ * never completed one successful dashboard fetch while online).
+ *
+ * Kept distinct from a bare [IllegalStateException] so [org.armman.sakhi.ui.home.HomeViewModel]
+ * can tell this apart from an unexpected/unknown failure and show the Sakhi a message that
+ * explains the one-time "connect once" precondition, instead of a generic error with a
+ * Retry button that silently does nothing while still offline (see Asana bug: "App is not
+ * working in offline mode" — a fresh install/test device taken offline before its first online
+ * dashboard fetch hit exactly this branch, with no way to tell from the old generic error that
+ * connecting once would fix it).
+ */
+class NoDashboardCacheAvailableException :
+  IllegalStateException("No dashboard summary available online or cached")
+
 /** The on-disk cache key is scoped per-Sakhi (by session subjectId), not a single device-global
  * key. Without this, a device previously used by a different Sakhi would still surface her stale
  * cached [DashboardSummary.sakhiName] (and counts) after a new Sakhi logs in but before her first
@@ -74,7 +91,7 @@ class RemoteDashboardRepository @Inject constructor(
       return fetched
     }
     sakhiId?.let { readPersisted(it) }?.toDomain()
-      ?: throw IllegalStateException("No dashboard summary available online or cached")
+      ?: throw NoDashboardCacheAvailableException()
   }
 
   private suspend fun fetchSummary(sakhiId: String?): DashboardSummary? {

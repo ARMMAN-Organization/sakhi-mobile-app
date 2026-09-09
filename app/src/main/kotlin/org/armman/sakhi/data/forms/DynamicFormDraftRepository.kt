@@ -98,4 +98,16 @@ interface DynamicFormDraftRepository {
    * bookkeeping only.
    */
   suspend fun applyFieldEdits(localBeneficiaryId: String, edits: Map<String, String>)
+
+  /**
+   * The server beneficiary id this mother's own draft was assigned once her form synced, or null
+   * if it hasn't (or there is no local draft for [localBeneficiaryId] at all).
+   *
+   * Used as a fallback source of truth for "has this beneficiary synced yet" checks that would
+   * otherwise only look at her [org.armman.sakhi.data.schedule.VisitScheduleRepository] rows (see
+   * [org.armman.sakhi.data.delivery.DeliveryFormSubmissionCoordinator]'s own doc for the bug this
+   * closes) — this draft's [DynamicFormDraftEntity.remoteBeneficiaryId] is populated at the exact
+   * same moment a schedule row would be, but doesn't depend on a schedule row existing at all.
+   */
+  suspend fun getRemoteBeneficiaryId(localBeneficiaryId: String): String?
 }

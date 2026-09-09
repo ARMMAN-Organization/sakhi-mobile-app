@@ -144,7 +144,7 @@ private fun HeaderRow(
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.weight(1f, fill = false).padding(horizontal = Dimens.SmallSpacing),
       )
-      if (showStateChip) StateChip(profile.status)
+      if (showStateChip) StateChip(profile.status, profile.closureReasonCode)
     }
     SecondaryButton(
       text = stringResource(R.string.beneficiary_profile_edit),
@@ -156,8 +156,8 @@ private fun HeaderRow(
 }
 
 @Composable
-private fun StateChip(status: BeneficiaryStatus) {
-  val (label, content, container) = when (status) {
+private fun StateChip(status: BeneficiaryStatus, closureReasonCode: String? = null) {
+  val (labelRes, content, container) = when (status) {
     BeneficiaryStatus.ACTIVE ->
       Triple(R.string.beneficiary_profile_state_active, Information, InformationSurface)
     BeneficiaryStatus.JOURNEY_COMPLETE ->
@@ -165,14 +165,46 @@ private fun StateChip(status: BeneficiaryStatus) {
     BeneficiaryStatus.CLOSED ->
       Triple(R.string.beneficiary_profile_state_closed, NeutralG200, NeutralG10)
   }
+  // Bug fix (2026-09-09): this chip used to show the bare 3-value BeneficiaryStatus label only,
+  // so EVERY closure reason (migration, miscarriage, program completion, maternal/infant death)
+  // rendered as the same generic "Closed" -- reported: "beneficiary submitted status as 'Died'
+  // but the UI shows 'Closed' instead." closureReasonCode carries the actual submitted reason
+  // (see Beneficiary.closureReasonCode's own doc for why it's device-local, not server-derived)
+  // -- reasonSuffixRes() below resolves the known SCREAMING_CASE backend codes
+  // (AdHocFormSubmissionCoordinator.ANC_CLOSURE_REASON_TO_BACKEND_CODE /
+  // CHILD_CLOSURE_REASON_TO_BACKEND_CODE) to a localized suffix, falling back to the bare status
+  // label for CLOSED with no known reason on this device (a beneficiary closed from a different
+  // device, or a legacy record) rather than showing nothing or a raw code.
+  val reasonSuffixRes = if (status == BeneficiaryStatus.CLOSED) closureReasonCode.toReasonSuffixRes() else null
+  val text = if (reasonSuffixRes != null) {
+    stringResource(R.string.beneficiary_profile_state_closed_with_reason, stringResource(reasonSuffixRes))
+  } else {
+    stringResource(labelRes)
+  }
   Text(
-    text = stringResource(label),
+    text = text,
     style = MaterialTheme.typography.labelLarge,
     color = content,
     modifier = Modifier
       .background(container, RoundedCornerShape(6.dp))
       .padding(horizontal = 10.dp, vertical = 4.dp),
   )
+}
+
+/** Localized suffix for a known closure `CLOSURE_REASON` backend code, or null for an unknown/
+ * absent one (falls back to the bare "Closed" chip). Mirrors the exact backend-code vocabulary
+ * [org.armman.sakhi.data.adhocform.AdHocFormSubmissionCoordinator]'s
+ * `ANC_CLOSURE_REASON_TO_BACKEND_CODE`/`CHILD_CLOSURE_REASON_TO_BACKEND_CODE` write into
+ * [BeneficiaryProfile.closureReasonCode] -- literal strings, not a cross-import of that object,
+ * same convention [FormDateRuleset] uses for question codes owned by another package. */
+private fun String?.toReasonSuffixRes(): Int? = when (this) {
+  "MATERNAL_DEATH", "INFANT_OR_CHILD_DEATH" -> R.string.beneficiary_profile_closure_reason_death
+  "MIGRATION" -> R.string.beneficiary_profile_closure_reason_migration
+  "MISCARRIAGE" -> R.string.beneficiary_profile_closure_reason_miscarriage
+  "ABORTION" -> R.string.beneficiary_profile_closure_reason_abortion
+  "WITHDRAWAL" -> R.string.beneficiary_profile_closure_reason_withdrawal
+  "PROGRAM_CYCLE_COMPLETED" -> R.string.beneficiary_profile_closure_reason_program_completed
+  else -> null
 }
 
 /** Mobile: single-column "Label :  Value" rows per the purple board. */
@@ -208,7 +240,7 @@ private fun StatStrip(profile: BeneficiaryProfile, modifier: Modifier = Modifier
       label = stringResource(R.string.beneficiary_profile_label_state),
       modifier = Modifier.weight(1f),
     ) {
-      StateChip(profile.status)
+      StateChip(profile.status, profile.closureReasonCode)
     }
     StripDivider()
     StatColumn(

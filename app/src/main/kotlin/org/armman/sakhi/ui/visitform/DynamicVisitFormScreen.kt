@@ -109,6 +109,12 @@ fun DynamicVisitFormScreen(
    * mother case, `true` for the CCV/child case. Defaults to [onBack] for any caller that hasn't
    * wired the forced-closure hand-off yet. */
   onSubmittedTriggersClosure: (String, Boolean) -> Unit = { _, _ -> onBack() },
+  /** CR-Delivery-01: called instead of [onBack]/[onSubmittedNeedsEducation]/
+   * [onSubmittedTriggersClosure] when this PP1 submission just advanced its Delivery Event
+   * Session to a same-session NN visit — (childBeneficiaryId, localScheduleUuid, visitLabel). See
+   * [DynamicVisitFormUiState.sameSessionNnHandoff]'s own doc. Defaults to [onBack] for any caller
+   * that hasn't wired the hand-off yet. */
+  onSubmittedTriggersSameSessionNn: (String, String, String) -> Unit = { _, _, _ -> onBack() },
   viewModel: DynamicVisitFormViewModel = hiltViewModel(),
 ) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -153,6 +159,7 @@ fun DynamicVisitFormScreen(
             viewModel.beneficiaryId,
             onSubmittedNeedsEducation,
             onSubmittedTriggersClosure,
+            onSubmittedTriggersSameSessionNn,
             onBack,
           )
         }
@@ -163,6 +170,7 @@ fun DynamicVisitFormScreen(
             viewModel.beneficiaryId,
             onSubmittedNeedsEducation,
             onSubmittedTriggersClosure,
+            onSubmittedTriggersSameSessionNn,
             onBack,
           )
         }
@@ -988,6 +996,7 @@ private fun routeAfterSubmit(
   beneficiaryId: String,
   onSubmittedNeedsEducation: (String, List<String>) -> Unit,
   onSubmittedTriggersClosure: (String, Boolean) -> Unit,
+  onSubmittedTriggersSameSessionNn: (String, String, String) -> Unit,
   onBack: () -> Unit,
 ) {
   if (state.triggersClosurePrompt) {
@@ -1001,6 +1010,14 @@ private fun routeAfterSubmit(
   // either branch into Health Education instead.
   if (state.triggersChildClosurePrompt) {
     onSubmittedTriggersClosure(beneficiaryId, true)
+    return
+  }
+  // CR-Delivery-01: PP1 is the only visit type that ever sets this, and it's mutually exclusive
+  // with both closure checks above (PP1 is never PP5, and never a CCV visit), so there's no real
+  // ordering conflict — this just needs its own priority slot, grouped with the other same-session
+  // hard-redirects rather than left to the health-education/back fallback below.
+  state.sameSessionNnHandoff?.let { handoff ->
+    onSubmittedTriggersSameSessionNn(handoff.childBeneficiaryId, handoff.localScheduleUuid, handoff.visitLabel)
     return
   }
   if (state.ccvHrExtensionWindow != null) {
