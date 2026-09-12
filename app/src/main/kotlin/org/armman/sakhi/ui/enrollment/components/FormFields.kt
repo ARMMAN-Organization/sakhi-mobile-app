@@ -93,7 +93,12 @@ private fun FieldLabelText(label: String, required: Boolean, modifier: Modifier 
   }
   Text(
     text = text,
-    style = MaterialTheme.typography.labelLarge,
+    // titleMedium (16sp SemiBold), not labelLarge (14sp SemiBold) — the question must read
+    // larger/heavier than its own answer options (bodyLarge, 16sp Regular), which labelLarge's
+    // smaller size failed to do (CR: Visit Tracker UI issues, 2026-09-10). Shared by every field
+    // type (enrollment + visit forms), so this also fixes Enrollment's identical label/option
+    // proportions.
+    style = MaterialTheme.typography.titleMedium,
     color = NeutralG400,
     modifier = modifier.then(
       if (description != null) {
@@ -565,7 +570,15 @@ fun AppRadioGroup(
   // above, not the error text below) in a soft rounded container instead.
   fieldBackground: Color? = null,
 ) {
-  FieldFrame(label = label, errorText = errorText, modifier = modifier, required = required) {
+  FieldFrame(
+    label = label,
+    errorText = errorText,
+    modifier = modifier,
+    required = required,
+    // Matches AppCheckboxGroup: error renders directly under the question label, not after the
+    // last option (CR: Visit Tracker UI issues, 2026-09-10).
+    errorBelowLabel = true,
+  ) {
     val optionsModifier = if (fieldBackground != null) {
       Modifier
         .clip(RoundedCornerShape(8.dp))

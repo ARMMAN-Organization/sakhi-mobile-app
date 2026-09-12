@@ -69,6 +69,9 @@ class DeliverySessionViewModelTest {
     // it never reads a stored delivery answers payload back. See
     // DeliveryChildRegistrationViewModelTest for the fake that DOES configure this.
     override suspend fun getAnswers(localSubmissionUuid: String): FormAnswers? = null
+
+    override fun observeUploadRecords(): kotlinx.coroutines.flow.Flow<List<org.armman.sakhi.data.forms.FormUploadRecord>> =
+      kotlinx.coroutines.flow.MutableStateFlow(emptyList())
   }
 
   /** Mirrors [org.armman.sakhi.ui.adhocform.AdHocFormViewModelTest]'s own copy — none of this

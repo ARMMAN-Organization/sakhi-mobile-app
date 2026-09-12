@@ -56,6 +56,22 @@ private val VISIT_FORM_CODES = setOf(
 /** Display category all registration-family form codes are folded into for this modal. */
 private const val REGISTRATION_CATEGORY_CODE = "REGISTRATION"
 
+/**
+ * Bharath, 2026-09-10: [org.armman.sakhi.data.sync.CombinedUploadRecordsSource] now merges the
+ * ad-hoc-form queue in too (Referral, Referral Follow-up, ANC/Child Closure, Beneficiary Reopen —
+ * see [org.armman.sakhi.data.adhocform.AdHocFormDraftEntity]'s own doc for the five codes). Each
+ * passes through [displayCategoryCode]'s `else` branch unchanged and gets its own card — these
+ * constants are just their raw form codes, named here so [categoryLabelRes] can give each a real
+ * label instead of falling through to the "Registration" default (which is what a Sakhi actually
+ * saw for a Referral Follow-up card before this fix — the literal root cause of "no indication is
+ * coming" being read as "nothing is happening" rather than "mislabeled").
+ */
+private const val REFERRAL_FORM_CODE = "REFERRAL_VISIT"
+private const val REFERRAL_FOLLOWUP_FORM_CODE = "REFERRAL_FOLLOWUP_VISIT"
+private const val ANC_CLOSURE_FORM_CODE = "ANC_CLOSURE_VISIT"
+private const val CHILD_CLOSURE_FORM_CODE = "CHILD_CLOSURE_VISIT"
+private const val BENEFICIARY_REOPEN_FORM_CODE = "BENEFICIARY_REOPEN_VISIT"
+
 /** Category code all [VISIT_FORM_CODES] entries display under. Deliberately kept as the literal
  * "ANC_VISIT" (not a new "VISIT" code) — existing tests and any other caller that already checks
  * for category code "ANC_VISIT" must keep working unchanged now that PP/NN/DELIVERY/INC/CCV fold
@@ -160,6 +176,10 @@ internal fun categoryIconKind(statuses: List<EnrollmentSyncStatus>): UploadStatu
 internal fun categoryLabelRes(formCode: String): Int = when (formCode) {
   REGISTRATION_CATEGORY_CODE -> R.string.home_upload_modal_registration_form_label
   VISIT_CATEGORY_CODE -> R.string.home_upload_modal_visit_form_label
+  REFERRAL_FORM_CODE -> R.string.home_upload_modal_referral_form_label
+  REFERRAL_FOLLOWUP_FORM_CODE -> R.string.home_upload_modal_referral_followup_form_label
+  ANC_CLOSURE_FORM_CODE, CHILD_CLOSURE_FORM_CODE -> R.string.home_upload_modal_closure_form_label
+  BENEFICIARY_REOPEN_FORM_CODE -> R.string.home_upload_modal_reopen_form_label
   else -> R.string.home_upload_modal_registration_form_label
 }
 

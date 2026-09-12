@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import org.armman.sakhi.ui.theme.Dimens
@@ -31,6 +32,10 @@ fun StatTile(
   value: AnnotatedString,
   caption: AnnotatedString,
   modifier: Modifier = Modifier,
+  // Active Visits' Open/Pending tiles use the default (KpiNumber, 40sp) as the screen's primary
+  // numbers; Active Beneficiaries' Mothers/Infants tiles pass KpiNumberSecondary (32sp) — see
+  // that token's doc for why the two cards intentionally differ.
+  valueStyle: TextStyle = KpiNumber,
 ) {
   Column(
     horizontalAlignment = Alignment.CenterHorizontally,
@@ -46,7 +51,7 @@ fun StatTile(
     )
     Text(
       text = value,
-      style = KpiNumber,
+      style = valueStyle,
       color = NeutralG400,
       maxLines = 1,
       modifier = Modifier.padding(top = Dimens.SmallSpacing),

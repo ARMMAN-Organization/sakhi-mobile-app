@@ -480,7 +480,13 @@ private fun SummaryTabContent(
   onEditVisitData: () -> Unit,
 ) {
   val findings = remember(state.answers, state.formCode) { viewModel.testsFindings() }
-  val overallRisk = remember(state.answers, state.formCode, state.comorbidities) { viewModel.overallRiskLevel() }
+  // Bug fix (2026-09-11, reported): overallRiskLevel() now also reads state.goRulesRiskResult
+  // (see that function's own doc) -- must be a remember() key too, or this banner can go stale
+  // after a keystroke that changes the GoRules grading but not, on its own, state.answers'
+  // object identity in the same recomposition pass.
+  val overallRisk = remember(state.answers, state.formCode, state.comorbidities, state.goRulesRiskResult) {
+    viewModel.overallRiskLevel()
+  }
   Column(
     verticalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
     modifier = Modifier
@@ -799,7 +805,11 @@ private fun ReferralCaptureStep(state: DynamicVisitFormUiState, viewModel: Dynam
   // DynamicVisitFormUiState's doc for why Pass 5's hand-built approach was replaced.
   Column(modifier = Modifier.fillMaxSize()) {
     Column(
-      verticalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
+      // FormFieldSpacing, not ItemSpacing — this step renders its own question-by-question
+      // DynamicFormField list further down, same as the main Visit Data form (CR: Visit
+      // Tracker UI issues, 2026-09-10); the title/explainer above the list still read fine at
+      // this wider gap.
+      verticalArrangement = Arrangement.spacedBy(Dimens.FormFieldSpacing),
       modifier = Modifier
         .weight(1f)
         .verticalScroll(rememberScrollState())
@@ -838,6 +848,9 @@ private fun ReferralCaptureStep(state: DynamicVisitFormUiState, viewModel: Dynam
               registrationDate = viewModel.visitDate,
               mediaCompleted = false,
               capturedImageUri = null,
+              // Bug fix (2026-09-11, reported): caps decided_visit_date at the beneficiary's next
+              // scheduled visit — see DynamicVisitFormUiState.nextScheduledVisitDate's own doc.
+              nextScheduledVisitDate = state.nextScheduledVisitDate,
               loadOptions = { viewModel.optionsFor(field) },
               onSingleAnswer = { value -> viewModel.setReferralAnswer(field.questionCode, value) },
               onMultiAnswer = {}, // REFERRAL_VISIT's schema has no multiselect fields.
@@ -928,7 +941,10 @@ private fun DynamicVisitFormFieldList(
       top = Dimens.ScreenPadding,
       bottom = Dimens.FormListBottomSlack,
     ),
-    verticalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
+    // FormFieldSpacing (32dp), not ItemSpacing (16dp) — matches the Enrollment stepper's
+    // question-to-question gap so each question reads as its own block, not a cramped stack
+    // (CR: Visit Tracker UI issues, 2026-09-10).
+    verticalArrangement = Arrangement.spacedBy(Dimens.FormFieldSpacing),
     modifier = Modifier.fillMaxSize(),
   ) {
     itemsIndexed(fields, key = { _, field -> field.questionCode }) { _, field ->

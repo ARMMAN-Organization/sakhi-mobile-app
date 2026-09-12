@@ -1,10 +1,13 @@
 package org.armman.sakhi.data.delivery
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import org.armman.sakhi.data.audit.FormAuditRepository
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.forms.SubmitErrorCopy
 import org.armman.sakhi.data.schedule.VisitScheduleSyncExecutor
 import java.time.Instant
@@ -132,6 +135,19 @@ class RoomDeliveryFormDraftRepository @Inject constructor(
       ),
     )
   }
+
+  override fun observeUploadRecords(): Flow<List<FormUploadRecord>> =
+    dao.observeAll().map { entities -> entities.map { it.toUploadRecord() } }
+
+  private fun DeliveryFormDraftEntity.toUploadRecord() = FormUploadRecord(
+    localBeneficiaryId = localBeneficiaryId,
+    formCode = FORM_CODE_DELIVERY_VISIT,
+    syncStatus = syncStatus,
+    createdAtEpochMillis = createdAtEpochMillis,
+    // No duplicate-review step on this queue (Mother Registration-only) -- always null here, same
+    // as every other non-Mother-Registration queue's own toUploadRecord().
+    pendingNewPregnancyBeneficiaryId = null,
+  )
 
   private companion object {
     const val FORM_CODE_DELIVERY_VISIT = "DELIVERY_VISIT"

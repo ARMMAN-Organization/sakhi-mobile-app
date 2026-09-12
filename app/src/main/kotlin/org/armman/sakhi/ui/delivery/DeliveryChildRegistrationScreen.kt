@@ -103,7 +103,7 @@ fun DeliveryChildRegistrationScreen(
           }
         }
         DeliveryChildRegistrationEvent.QueuedOffline -> {
-          Toast.makeText(context, "Saved. Will upload when back online.", Toast.LENGTH_SHORT).show()
+          Toast.makeText(context, "Saved. It will upload on your next Data Upload.", Toast.LENGTH_SHORT).show()
           onBack()
         }
         is DeliveryChildRegistrationEvent.SubmitFailed -> Toast.makeText(context, event.message, Toast.LENGTH_LONG).show()

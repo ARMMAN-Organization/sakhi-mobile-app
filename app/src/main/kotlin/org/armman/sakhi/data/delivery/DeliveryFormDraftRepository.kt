@@ -1,6 +1,8 @@
 package org.armman.sakhi.data.delivery
 
+import kotlinx.coroutines.flow.Flow
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormUploadRecord
 import java.time.LocalDate
 
 /**
@@ -42,4 +44,9 @@ interface DeliveryFormDraftRepository {
    * prefilled is also an ordinary Sakhi-fillable field on `CHILD_REGISTRATION`.
    */
   suspend fun getAnswers(localSubmissionUuid: String): FormAnswers?
+
+  /** Bharath, 2026-09-11: the Home "Forms Uploaded" modal never had a Delivery Form row at all —
+   * same shape as [org.armman.sakhi.data.adhocform.AdHocFormDraftRepository.observeUploadRecords]'s
+   * own doc for the identical gap on that queue. */
+  fun observeUploadRecords(): Flow<List<FormUploadRecord>>
 }

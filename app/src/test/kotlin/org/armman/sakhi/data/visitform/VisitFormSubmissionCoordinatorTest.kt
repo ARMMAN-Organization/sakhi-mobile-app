@@ -35,10 +35,17 @@ import org.armman.sakhi.data.referral.Referral
 import org.armman.sakhi.data.referral.ReferralCapture
 import org.armman.sakhi.data.referral.ReferralStatus
 import org.armman.sakhi.data.referral.ReferralType
+import org.armman.sakhi.data.schedule.AncScheduleGenerator
+import org.armman.sakhi.data.schedule.CcvScheduleGenerator
 import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
+import org.armman.sakhi.data.schedule.HardcodedRuleSource
+import org.armman.sakhi.data.schedule.IncScheduleGenerator
+import org.armman.sakhi.data.schedule.NnScheduleGenerator
+import org.armman.sakhi.data.schedule.PpScheduleGenerator
 import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
 import org.armman.sakhi.data.schedule.SameSessionNnVisitResolver
 import org.armman.sakhi.data.schedule.VisitCodeType
+import org.armman.sakhi.data.schedule.VisitScheduleCoordinator
 import org.armman.sakhi.data.schedule.VisitScheduleStatus
 import org.armman.sakhi.data.schedule.schedule
 import org.junit.Assert.assertEquals
@@ -87,6 +94,7 @@ class VisitFormSubmissionCoordinatorTest {
   private lateinit var referralRepository: FakeReferralRepository
   private lateinit var lmpChangeRepository: FakeLmpChangeRepository
   private lateinit var sameSessionNnVisitResolver: SameSessionNnVisitResolver
+  private lateinit var visitScheduleCoordinator: VisitScheduleCoordinator
   private lateinit var coordinator: VisitFormSubmissionCoordinator
 
   private val session = UserSession(
@@ -125,6 +133,15 @@ class VisitFormSubmissionCoordinatorTest {
     lmpChangeRepository = FakeLmpChangeRepository()
     referralLinkDao = FakeReferralLinkDao()
     riskAssessmentDao = FakeRiskAssessmentDao()
+    val rules = HardcodedRuleSource()
+    visitScheduleCoordinator = VisitScheduleCoordinator(
+      repository = scheduleRepository,
+      ancGenerator = AncScheduleGenerator(rules),
+      ppGenerator = PpScheduleGenerator(rules),
+      nnGenerator = NnScheduleGenerator(rules),
+      incGenerator = IncScheduleGenerator(rules),
+      ccvGenerator = CcvScheduleGenerator(rules),
+    )
     coordinator = VisitFormSubmissionCoordinator(
       visitApi = visitApi,
       formSubmissionApi = formSubmissionApi,
@@ -144,6 +161,7 @@ class VisitFormSubmissionCoordinatorTest {
       riskAssessmentDao = riskAssessmentDao,
       lmpChangeRepository = lmpChangeRepository,
       sameSessionNnVisitResolver = sameSessionNnVisitResolver,
+      visitScheduleCoordinator = visitScheduleCoordinator,
     )
   }
 
@@ -303,7 +321,14 @@ class VisitFormSubmissionCoordinatorTest {
     )
 
     assertTrue(result.isSuccess)
-    assertEquals(VisitSubmitOutcome(), result.getOrNull())
+    val outcome = result.getOrNull()
+    // Not a full VisitSubmitOutcome() equality check: this schedule's ANC_VISIT form code does
+    // have a risk phase, so triggerRiskAssessment actually calls the (default, unconfigured)
+    // FakeRiskAssessmentApi as part of this submission — see riskAssessmentCompleted's own doc for
+    // why that default response (success=true, data=null) reads as "no response", i.e. false here.
+    // Neither of those two fields is what this test is about; the CCV-signal fields are.
+    assertEquals(null, outcome?.closureDeferredForExtension)
+    assertEquals(null, outcome?.extensionVisit)
   }
 
   @Test
@@ -439,6 +464,7 @@ class VisitFormSubmissionCoordinatorTest {
       riskAssessmentDao = riskAssessmentDao,
       lmpChangeRepository = FakeLmpChangeRepository(),
       sameSessionNnVisitResolver = sameSessionNnVisitResolver,
+      visitScheduleCoordinator = visitScheduleCoordinator,
     )
 
     val result = loggedOutCoordinator.submit(
@@ -956,6 +982,39 @@ class VisitFormSubmissionCoordinatorTest {
     isReferralTrigger = isReferralTrigger,
   )
 
+  // CR (2026-09-11, ANC1 missing-HR-visit fix): overallHighRiskFlag=true must generate the
+  // ANC-HR/INC-HR follow-up, not only cache the assessment and (conditionally) create a referral.
+  // Regression test for the reported defect: ANC1 submission with moderate anaemia produced no
+  // ANC-HR1 visit and no referral.
+  @Test
+  fun `overallHighRiskFlag true generates an ANC-HR follow-up anchored to the visit's actual completion date`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    // No referralFlag set to isReferralTrigger — this exercises the HR-visit path in isolation
+    // from referral creation, which the fix keeps entirely independent.
+    riskAssessmentApi.responseToReturn = riskAssessmentResponse()
+
+    val result = coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+    )
+
+    assertTrue(result.isSuccess)
+    val hrVisits = scheduleRepository.getForBeneficiary("ben-1")
+      .filter { it.visitType == VisitCodeType.ANC_HR }
+    assertEquals(1, hrVisits.size)
+    val hrVisit = hrVisits.single()
+    assertEquals("ANC-HR1", hrVisit.visitCode)
+    assertEquals(LocalDate.of(2026, 8, 7), hrVisit.anchorDate)
+    // FR-S-3.4: 15 days from the triggering visit's actual completion date.
+    assertEquals(LocalDate.of(2026, 8, 22), hrVisit.scheduledDate)
+    assertEquals("schedule-1", hrVisit.anchorVisitLocalUuid)
+  }
+
   @Test
   fun `a referral trigger with a filled-in Referral tab creates exactly one referral`() = runTest {
     syncedSchedule()
@@ -1039,6 +1098,51 @@ class VisitFormSubmissionCoordinatorTest {
     assertEquals(ReferralStatus.PENDING_FOLLOWUP.name, cached?.status)
     assertEquals("lookup-standard-1", cached?.referralTypeLookupValueId)
     assertEquals("2026-08-14T00:00:00Z", cached?.validTill)
+    // CR (2026-09-10, Visit Tracker referral-follow-up count/list gap analysis): the cached row's
+    // beneficiaryId must be this schedule's LOCAL beneficiary id ("ben-1", syncedSchedule()'s
+    // default) — every reader of this column (PadaVisitsViewModel's local overlay,
+    // LocalPadaSummaryOverlay, the in-visit auto-numbering) matches against the local id, not the
+    // server id ("server-beneficiary-1") the create-referral request itself carries.
+    assertEquals("ben-1", cached?.beneficiaryId)
+  }
+
+  @Test
+  fun `the create-referral request still carries the server beneficiary id, not the local one`() = runTest {
+    syncedSchedule()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    riskAssessmentApi.responseToReturn = riskAssessmentResponse(referralFlag("cond-anemia", isReferralTrigger = true))
+    referralRepository.resultToReturn = Result.success(
+      CreateReferralOutcome.Created(
+        Referral(
+          referralId = "ref-1",
+          visitId = "server-visit-42",
+          sourceSubmissionId = "server-sub-1",
+          beneficiaryId = "server-beneficiary-1",
+          referralTypeLookupValueId = "lookup-standard-1",
+          status = ReferralStatus.PENDING_FOLLOWUP,
+          facilityName = "Civil Hospital",
+          facilityType = FacilityType.PHC,
+          triggeringConditionIds = listOf("cond-anemia"),
+          createdAt = null,
+          validTill = null,
+        ),
+      ),
+    )
+
+    coordinator.submit(
+      localScheduleUuid = "schedule-1",
+      formVersionId = "version-v1",
+      answers = FormAnswers(),
+      visitDate = LocalDate.of(2026, 8, 7),
+      localSubmissionUuid = "test-submission-uuid",
+      referralCapture = capture(),
+    )
+
+    // The wire request is unaffected by this fix — only the local cache row changed.
+    assertEquals("server-beneficiary-1", referralRepository.requests.single().beneficiaryId)
+    // But the local cache is keyed by the local id, not the server one.
+    assertEquals("ben-1", referralLinkDao.getByLocalScheduleUuid("schedule-1")?.beneficiaryId)
   }
 
   // CR-Referral-01

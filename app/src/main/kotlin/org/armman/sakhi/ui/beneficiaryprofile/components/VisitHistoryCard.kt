@@ -138,12 +138,35 @@ private fun SolidRiskChip(label: String) {
 @Composable
 private fun StatusChip(visit: ProfileVisit) {
   when {
+    // bharath, 2026-09-10: a saved-but-not-yet-synced submission outranks the days-remaining
+    // chip -- the countdown is meaningless (and null anyway, see ProfileVisitMapper) once the
+    // Sakhi has already filled the form; she needs to see "not yet synced", not "N days left".
+    visit.pendingSync -> Text(
+      text = stringResource(R.string.beneficiary_profile_pending_sync_chip),
+      style = MaterialTheme.typography.labelLarge,
+      color = NeutralG100,
+      modifier = Modifier
+        .background(NeutralG50, RoundedCornerShape(6.dp))
+        .padding(horizontal = 10.dp, vertical = 6.dp),
+    )
     visit.state == ProfileVisitState.OPEN && visit.daysRemaining != null -> Text(
       text = stringResource(R.string.beneficiaries_days_remaining, visit.daysRemaining),
       style = MaterialTheme.typography.labelLarge,
       color = MaterialTheme.colorScheme.primary,
       modifier = Modifier
         .background(PrimarySurface, RoundedCornerShape(6.dp))
+        .padding(horizontal = 10.dp, vertical = 6.dp),
+    )
+    // bharath, 2026-09-10: a Referral Follow-up already submitted (but not yet synced) reads
+    // "Referral Followup Incomplete" until ProfileVisitMapper's own doc's fix -- see
+    // ProfileVisit.referralPendingSync. Must come before the referralIncomplete branch below,
+    // since both are true at once for this row.
+    visit.referralPendingSync -> Text(
+      text = stringResource(R.string.beneficiary_profile_pending_sync_chip),
+      style = MaterialTheme.typography.labelLarge,
+      color = NeutralG100,
+      modifier = Modifier
+        .background(NeutralG50, RoundedCornerShape(6.dp))
         .padding(horizontal = 10.dp, vertical = 6.dp),
     )
     // CR-Referral-01: PENDING_FOLLOWUP keeps the original wording/styling (referralIncomplete is
@@ -182,7 +205,9 @@ private fun StatusChip(visit: ProfileVisit) {
 @Composable
 private fun MetaRow(visit: ProfileVisit, isTablet: Boolean, modifier: Modifier = Modifier) {
   Row(verticalAlignment = Alignment.CenterVertically, modifier = modifier) {
-    val stateLabel = if (visit.state == ProfileVisitState.OPEN) {
+    val stateLabel = if (visit.pendingSync) {
+      R.string.beneficiary_profile_visit_pending_sync
+    } else if (visit.state == ProfileVisitState.OPEN) {
       R.string.beneficiary_profile_visit_open
     } else if (isTablet) {
       R.string.beneficiary_profile_visit_complete_short
@@ -239,6 +264,7 @@ private fun ActionButton(action: ProfileVisitAction, enabled: Boolean, onClick: 
     ProfileVisitAction.FILL_FORM -> PrimaryButton(
       text = stringResource(R.string.beneficiary_profile_fill_form),
       onClick = onClick,
+      enabled = enabled,
       trailingIcon = painterResource(R.drawable.ic_arrow_right),
       fullWidth = false,
       height = Dimens.SmallButtonHeight,
@@ -259,6 +285,15 @@ private fun ActionButton(action: ProfileVisitAction, enabled: Boolean, onClick: 
   }
 }
 
-/** Start Visit is only tappable once the visit is due; other actions are always tappable. */
-private fun ProfileVisit.startable(): Boolean =
-  action != ProfileVisitAction.START_VISIT || startable
+/**
+ * Start Visit is only tappable once the visit is due. Fill Form (Referral Follow-up) is only
+ * tappable while the follow-up hasn't already been submitted -- bharath, 2026-09-10, see
+ * [ProfileVisit.referralPendingSync]'s doc: once submitted (even if not yet synced), re-tapping
+ * would open a second follow-up form for the same referral. Every other action is always
+ * tappable.
+ */
+private fun ProfileVisit.startable(): Boolean = when (action) {
+  ProfileVisitAction.START_VISIT -> startable
+  ProfileVisitAction.FILL_FORM -> !referralPendingSync
+  else -> true
+}

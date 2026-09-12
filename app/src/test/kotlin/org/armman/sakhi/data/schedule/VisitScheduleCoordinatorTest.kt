@@ -94,49 +94,10 @@ class VisitScheduleCoordinatorTest {
     assertEquals(11, stored.count { it.visitType == VisitCodeType.INC })
   }
 
-  // ---- Baseline HR (enrolment-time), bug fix 2026-09-02 -----------------------------------------
-
-  @Test
-  fun `onEnrollmentHighRiskDetected generates a single ANC-HR visit anchored to registration`() = runTest {
-    val registrationDate = LocalDate.of(2026, 8, 4)
-
-    val visit = coordinator.onEnrollmentHighRiskDetected(
-      ScheduleContext(localBeneficiaryId = BENEFICIARY, registrationDate = registrationDate),
-    )
-
-    assertNotNull(visit)
-    assertEquals(VisitCodeType.ANC_HR, visit!!.visitType)
-    assertEquals(registrationDate.plusDays(15), visit.scheduledDate)
-    assertEquals(AnchorType.REGISTRATION, visit.anchorType)
-    val stored = repository.getForBeneficiary(BENEFICIARY)
-    assertEquals(1, stored.size)
-    assertEquals(visit.localScheduleUuid, stored.single().localScheduleUuid)
-  }
-
-  @Test
-  fun `onEnrollmentHighRiskDetected is idempotent - a retried enrolment does not generate a second row`() = runTest {
-    val context = ScheduleContext(localBeneficiaryId = BENEFICIARY, registrationDate = LocalDate.of(2026, 8, 4))
-
-    val first = coordinator.onEnrollmentHighRiskDetected(context)
-    val second = coordinator.onEnrollmentHighRiskDetected(context)
-
-    assertNotNull(first)
-    assertNull(second)
-    assertEquals(1, repository.getForBeneficiary(BENEFICIARY).count { it.visitType == VisitCodeType.ANC_HR })
-  }
-
-  @Test
-  fun `onEnrollmentHighRiskDetected does not disturb the regular ANC series`() = runTest {
-    coordinator.onMotherEnrolled(motherContext())
-
-    coordinator.onEnrollmentHighRiskDetected(
-      ScheduleContext(localBeneficiaryId = BENEFICIARY, registrationDate = lmp),
-    )
-
-    val stored = repository.getForBeneficiary(BENEFICIARY)
-    assertEquals(10, stored.count { it.visitType == VisitCodeType.ANC })
-    assertEquals(1, stored.count { it.visitType == VisitCodeType.ANC_HR })
-  }
+  // Baseline HR (enrolment-time) generation, added as a bug fix 2026-09-02, was removed
+  // 2026-09-11 per explicit product decision - onEnrollmentHighRiskDetected() no longer
+  // exists on VisitScheduleCoordinator. See MotherEnrolmentScheduleTrigger's class doc and
+  // delivery-log.md 2026-09-11 for the full reasoning; its 3 tests here were removed with it.
 
   /**
    * TR-3 — one submission, two effects, both applied. NN is deliberately NOT one of them (CR-042

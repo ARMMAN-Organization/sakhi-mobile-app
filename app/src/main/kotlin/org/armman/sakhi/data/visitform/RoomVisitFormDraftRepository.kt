@@ -148,6 +148,12 @@ class RoomVisitFormDraftRepository @Inject constructor(
         // submission step.
         serverVisitId = existing?.serverVisitId,
         lastErrorMessage = null,
+        // Preserved across a re-save for the same reason as serverVisitId above.
+        serverSubmissionId = existing?.serverSubmissionId,
+        // CR (ANC3 missed-referral gap): reset to PENDING on every (re-)save, same as syncStatus
+        // above — a re-submit means fresh answers, so the risk-assessment/referral step should be
+        // redone too, not skipped because a prior attempt (against stale answers) already ran it.
+        riskAssessmentStatus = EnrollmentSyncStatus.PENDING,
       ),
     )
   }

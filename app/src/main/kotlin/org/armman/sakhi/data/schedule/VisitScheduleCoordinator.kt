@@ -165,33 +165,11 @@ class VisitScheduleCoordinator @Inject constructor(
     return visit
   }
 
-  /**
-   * A baseline (enrolment-time) obstetric condition is already HIGH risk — e.g. Sickle Cell
-   * Disease — before the woman has attended a single ANC visit (SRS FR-S-3.4's 15-day HR cadence,
-   * applied at the earliest point a risk is actually known).
-   *
-   * Bug fix (2026-09-02): this used to have no caller at all. [org.armman.sakhi.data.enrollment
-   * .EnrollmentRiskAssessment] correctly flagged conditions like Sickle Cell Disease as
-   * [org.armman.sakhi.data.beneficiary.RiskLevel.HIGH] for the Beneficiaries-list badge, and
-   * [org.armman.sakhi.data.enrollment.EnrollmentRiskBaselineTrigger] persisted that finding as a
-   * historical audit row — but neither ever generated an actual [VisitScheduleEntity], and
-   * [onHighRiskDetected] above cannot apply here since it requires a completed visit that does not
-   * exist yet at enrolment. [org.armman.sakhi.data.schedule.MotherEnrolmentScheduleTrigger] is the
-   * new caller, right after it generates the regular ANC series.
-   *
-   * Idempotent via [VisitScheduleRepository.hasScheduleOfType], same convention as every other
-   * family in this class — a retried enrolment submission must not generate a second ANC-HR row.
-   * Returns null when a schedule already exists, same "0/no-op" convention [onMotherEnrolled] uses
-   * (that one returns an Int count; this one returns the generated row, or null, since there is
-   * only ever at most one).
-   */
-  suspend fun onEnrollmentHighRiskDetected(context: ScheduleContext): VisitScheduleEntity? {
-    if (repository.hasScheduleOfType(context.localBeneficiaryId, VisitCodeType.ANC_HR)) return null
-
-    val visit = ancGenerator.generateBaselineHrVisit(context)
-    saveGeneratedAndBackfill(context.localBeneficiaryId, listOf(visit))
-    return visit
-  }
+  // 2026-09-11: onEnrollmentHighRiskDetected() (enrolment-time baseline HR visit generation,
+  // added 2026-09-02) removed per explicit product decision — see
+  // MotherEnrolmentScheduleTrigger's class doc and delivery-log.md 2026-09-11 for the full
+  // reasoning. A baseline finding still sets the Beneficiaries-list High Risk badge unchanged;
+  // it no longer pre-generates an ANC-HR visit before any ANC visit has actually been attended.
 
   /**
    * The infant phase ended — generates the CCV journey (SRS CCV risk-state table).

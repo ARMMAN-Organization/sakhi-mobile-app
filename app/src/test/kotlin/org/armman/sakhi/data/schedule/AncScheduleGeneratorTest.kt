@@ -298,50 +298,10 @@ class AncScheduleGeneratorTest {
     assertNull(generator.generateHrVisit(context(lmp), nn1, LocalDate.of(2026, 6, 10)))
   }
 
-  // ---- Baseline HR (enrolment-time), bug fix 2026-09-02 -----------------------------------------
-
-  @Test
-  fun `baseline HR visit is scheduled 15 days from registration, not from LMP or EDD`() {
-    val registrationDate = LocalDate.of(2026, 8, 4)
-
-    val hr = generator.generateBaselineHrVisit(
-      ScheduleContext(localBeneficiaryId = "ben-1", registrationDate = registrationDate),
-      newUuid = { "baseline-hr" },
-      createdAt = createdAt,
-    )
-
-    assertEquals(registrationDate.plusDays(15), hr.scheduledDate)
-    assertEquals("ANC-HR1", hr.visitCode)
-    assertEquals(VisitCodeType.ANC_HR, hr.visitType)
-    assertEquals(1, hr.sequenceNo)
-  }
-
-  @Test
-  fun `baseline HR visit anchors to registration, with no triggering visit`() {
-    val registrationDate = LocalDate.of(2026, 8, 4)
-
-    val hr = generator.generateBaselineHrVisit(
-      ScheduleContext(localBeneficiaryId = "ben-1", registrationDate = registrationDate),
-      newUuid = { "baseline-hr" },
-      createdAt = createdAt,
-    )
-
-    assertEquals(AnchorType.REGISTRATION, hr.anchorType)
-    assertEquals(registrationDate, hr.anchorDate)
-    assertNull(hr.anchorVisitLocalUuid)
-  }
-
-  @Test
-  fun `baseline HR visit window is the same plus-or-minus-two-days ANC-HR window`() {
-    val hr = generator.generateBaselineHrVisit(
-      ScheduleContext(localBeneficiaryId = "ben-1", registrationDate = LocalDate.of(2026, 8, 4)),
-      newUuid = { "baseline-hr" },
-      createdAt = createdAt,
-    )
-
-    assertEquals(hr.scheduledDate.minusDays(2), hr.windowStartDate)
-    assertEquals(hr.scheduledDate.plusDays(2), hr.windowEndDate)
-  }
+  // Baseline HR (enrolment-time) generation, added as a bug fix 2026-09-02, was removed
+  // 2026-09-11 per explicit product decision - generateBaselineHrVisit() no longer exists on
+  // AncScheduleGenerator. See MotherEnrolmentScheduleTrigger's class doc and delivery-log.md
+  // 2026-09-11 for the full reasoning; its 3 tests here were removed with it.
 
   @Test
   fun `a missed HR visit escalates immediately`() {

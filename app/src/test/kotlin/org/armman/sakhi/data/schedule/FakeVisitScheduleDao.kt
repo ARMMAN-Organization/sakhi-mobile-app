@@ -61,6 +61,14 @@ class FakeVisitScheduleDao : VisitScheduleDao {
     .filter { it.serverScheduleId == null && it.serverBeneficiaryId != null }
     .sortedWith(compareBy({ it.localBeneficiaryId }, { it.scheduledDate }))
 
+  override suspend fun getAllActive(): List<VisitScheduleEntity> = rows.values
+    .filter { it.status in setOf(VisitScheduleStatus.GENERATED, VisitScheduleStatus.OPEN) }
+    .sortedWith(compareBy({ it.localBeneficiaryId }, { it.scheduledDate }))
+
+  override suspend fun getActiveUnsynced(): List<VisitScheduleEntity> = rows.values
+    .filter { it.serverScheduleId == null && it.status in setOf(VisitScheduleStatus.GENERATED, VisitScheduleStatus.OPEN) }
+    .sortedWith(compareBy({ it.localBeneficiaryId }, { it.scheduledDate }))
+
   override fun observeUnsyncedCount(): Flow<Int> = unsyncedCountFlow
 
   override suspend fun markSynced(localScheduleUuid: String, serverScheduleId: String) {

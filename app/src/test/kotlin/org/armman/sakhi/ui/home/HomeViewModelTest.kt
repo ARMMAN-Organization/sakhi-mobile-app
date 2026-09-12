@@ -30,7 +30,12 @@ import org.armman.sakhi.data.forms.EditableSubmissionInfo
 import org.armman.sakhi.data.forms.DynamicFormSubmitResult
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.FormUploadRecord
+import org.armman.sakhi.data.dashboard.LocalReferralFollowUpOverlay
 import org.armman.sakhi.data.notification.FakeNotificationRepository
+import org.armman.sakhi.data.schedule.VisitCodeType
+import org.armman.sakhi.data.schedule.VisitScheduleEntity
+import org.armman.sakhi.data.schedule.VisitScheduleRepository
+import org.armman.sakhi.data.schedule.VisitScheduleStatus
 import org.armman.sakhi.data.sync.ManualSyncTrigger
 import org.armman.sakhi.data.sync.UploadRecordsSource
 import org.armman.sakhi.data.visitform.FakeReferralRepository
@@ -161,6 +166,50 @@ class HomeViewModelTest {
     override suspend fun getRemoteBeneficiaryId(localBeneficiaryId: String): String? = null
   }
 
+  /** Minimal fake: every method either no-ops or returns empty/false/0, since no HomeViewModel
+   * test exercises visit-schedule behavior directly through this repository — it only backs
+   * [HomeViewModel]'s local visit-count overlay, which stays empty here unless a test opts in by
+   * assigning to [entities]. */
+  private class FakeVisitScheduleRepository(
+    var entities: List<VisitScheduleEntity> = emptyList(),
+  ) : VisitScheduleRepository {
+    override suspend fun saveGenerated(schedules: List<VisitScheduleEntity>) {}
+    override suspend fun getForBeneficiary(localBeneficiaryId: String): List<VisitScheduleEntity> = emptyList()
+    override suspend fun getByLocalScheduleUuid(localScheduleUuid: String): VisitScheduleEntity? = null
+    override suspend fun getActiveForBeneficiary(localBeneficiaryId: String): List<VisitScheduleEntity> = emptyList()
+    override fun observeActiveForBeneficiary(localBeneficiaryId: String): Flow<List<VisitScheduleEntity>> =
+      MutableStateFlow(emptyList())
+    override suspend fun getOpenByType(
+      localBeneficiaryId: String,
+      visitType: VisitCodeType,
+    ): List<VisitScheduleEntity> = emptyList()
+    override suspend fun hasSchedule(localBeneficiaryId: String): Boolean = false
+    override suspend fun hasScheduleOfType(localBeneficiaryId: String, visitType: VisitCodeType): Boolean = false
+    override suspend fun getUnsynced(): List<VisitScheduleEntity> = emptyList()
+    override suspend fun getActiveUnsynced(): List<VisitScheduleEntity> = entities
+    override suspend fun getAllActive(): List<VisitScheduleEntity> = entities
+    override fun observeUnsyncedCount(): Flow<Int> = MutableStateFlow(0)
+    override suspend fun markSynced(localScheduleUuid: String, serverScheduleId: String) {}
+    override suspend fun attachServerBeneficiaryId(localBeneficiaryId: String, serverBeneficiaryId: String) {}
+    override suspend fun updateStatus(
+      localScheduleUuid: String,
+      status: VisitScheduleStatus,
+      reasonCode: String?,
+    ) {}
+    override suspend fun lapseOpenAncVisits(localBeneficiaryId: String): Int = 0
+    override suspend fun lapseAllOpenVisits(localBeneficiaryId: String): Int = 0
+    override suspend fun supersedeOpenVisits(localBeneficiaryId: String): Int = 0
+  }
+
+  /** Controllable fake for the offline referral-follow-up overlay (bharath, 2026-09-10) — see
+   * [LocalReferralFollowUpOverlay]'s doc for why this is an interface purely so tests don't need
+   * to construct a real [org.armman.sakhi.data.beneficiary.LocalEnrolmentBeneficiarySource]. */
+  private class FakeLocalReferralFollowUpOverlay(
+    var count: Int = 0,
+  ) : LocalReferralFollowUpOverlay {
+    override suspend fun pendingCount(today: LocalDate): Int = count
+  }
+
   private lateinit var repository: FakeDashboardRepository
   private lateinit var uploadRecordsSource: FakeUploadRecordsSource
   private lateinit var draftRepository: FakeDraftRepository
@@ -174,6 +223,8 @@ class HomeViewModelTest {
   private lateinit var connectivityChecker: FakeConnectivityChecker
   private lateinit var notificationRepository: FakeNotificationRepository
   private lateinit var referralRepository: FakeReferralRepository
+  private lateinit var visitScheduleRepository: FakeVisitScheduleRepository
+  private lateinit var localReferralFollowUpOverlay: FakeLocalReferralFollowUpOverlay
 
   @Before
   fun setUp() {
@@ -197,10 +248,14 @@ class HomeViewModelTest {
       visitFormScheduler,
       adHocFormScheduler,
       org.armman.sakhi.data.referral.FakeReferralEvidenceSyncScheduler(),
+      org.armman.sakhi.data.delivery.FakeDeliverySyncScheduler(),
+      org.armman.sakhi.data.delivery.FakeDeliveryChildRegistrationSyncScheduler(),
     )
     connectivityChecker = FakeConnectivityChecker()
     notificationRepository = FakeNotificationRepository()
     referralRepository = FakeReferralRepository()
+    visitScheduleRepository = FakeVisitScheduleRepository()
+    localReferralFollowUpOverlay = FakeLocalReferralFollowUpOverlay()
   }
 
   @After
@@ -217,6 +272,8 @@ class HomeViewModelTest {
       connectivityChecker,
       notificationRepository,
       referralRepository,
+      visitScheduleRepository,
+      localReferralFollowUpOverlay,
     )
 
   /** Keeps the WhileSubscribed StateFlows active for the duration of a test so their derived values

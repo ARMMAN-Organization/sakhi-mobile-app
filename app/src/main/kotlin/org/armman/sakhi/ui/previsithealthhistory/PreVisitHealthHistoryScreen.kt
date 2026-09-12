@@ -172,7 +172,10 @@ private fun Header(profile: BeneficiaryProfile) {
       label = stringResource(R.string.previsit_village_pada, profile.village, profile.pada),
       modifier = Modifier.padding(top = Dimens.SmallSpacing),
     )
-    InfoRow(stringResource(R.string.previsit_husband_name, profile.husbandName))
+    // Husband's Name intentionally omitted here too (bharath, 2026-10-10) — matches
+    // IdentityCard's own long-standing convention of excluding it from the profile card display
+    // (see that composable's doc). Previously always rendered via previsit_husband_name even when
+    // profile.husbandName was blank, showing a bare "Husband's Name :" label with nothing after it.
     InfoRow(stringResource(R.string.previsit_mobile_no, profile.mobileNumber))
   }
 }

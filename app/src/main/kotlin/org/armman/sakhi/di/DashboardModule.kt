@@ -7,7 +7,9 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import org.armman.sakhi.data.dashboard.DashboardApi
 import org.armman.sakhi.data.dashboard.DashboardRepository
+import org.armman.sakhi.data.dashboard.LocalReferralFollowUpOverlay
 import org.armman.sakhi.data.dashboard.RemoteDashboardRepository
+import org.armman.sakhi.data.dashboard.RoomLocalReferralFollowUpOverlay
 import retrofit2.Retrofit
 import javax.inject.Singleton
 
@@ -23,6 +25,12 @@ abstract class DashboardModule {
   @Binds
   @Singleton
   abstract fun bindDashboardRepository(impl: RemoteDashboardRepository): DashboardRepository
+
+  @Binds
+  @Singleton
+  abstract fun bindLocalReferralFollowUpOverlay(
+    impl: RoomLocalReferralFollowUpOverlay,
+  ): LocalReferralFollowUpOverlay
 
   companion object {
     @Provides

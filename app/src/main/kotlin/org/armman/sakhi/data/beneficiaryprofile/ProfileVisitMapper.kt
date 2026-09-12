@@ -53,6 +53,14 @@ fun List<VisitScheduleEntity>.toProfileVisits(
    * and behaving exactly as before this parameter existed.
    */
   referralLinks: Map<String, ReferralLinkEntity> = emptyMap(),
+  /** [ProfileVisit.pendingSync]'s source set — [VisitScheduleEntity.localScheduleUuid]s with a
+   * saved-but-not-yet-synced [org.armman.sakhi.data.visitform.VisitFormDraftEntity]. Empty by
+   * default, same "existing callers keep compiling" rationale as [referralLinks]. */
+  pendingSyncScheduleIds: Set<String> = emptySet(),
+  /** [ProfileVisit.referralPendingSync]'s source set — [ReferralLinkEntity.referralId]s with a
+   * saved-but-not-yet-synced [org.armman.sakhi.data.adhocform.AdHocFormDraftEntity] (Referral
+   * Follow-up). Empty by default, same rationale as [pendingSyncScheduleIds]. */
+  pendingSyncReferralIds: Set<String> = emptySet(),
 ): List<ProfileVisit> {
   // Retired rows never appear: a superseded visit was replaced by an LMP correction, and a
   // cancelled one lapsed at delivery. Neither is something the Sakhi can act on, and showing them
@@ -66,10 +74,13 @@ fun List<VisitScheduleEntity>.toProfileVisits(
   }
 
   val mapped = visible.mapIndexed { index, visit ->
+    val referralLink = referralLinks[visit.localScheduleUuid]
     visit to visit.toProfileVisit(
       today,
       priorCompletedCount = completedBefore[index],
-      referralLink = referralLinks[visit.localScheduleUuid],
+      referralLink = referralLink,
+      pendingSync = visit.localScheduleUuid in pendingSyncScheduleIds,
+      referralPendingSync = referralLink != null && referralLink.referralId in pendingSyncReferralIds,
     )
   }
 
@@ -87,9 +98,14 @@ private fun VisitScheduleEntity.toProfileVisit(
   today: LocalDate,
   priorCompletedCount: Int,
   referralLink: ReferralLinkEntity?,
+  pendingSync: Boolean,
+  referralPendingSync: Boolean,
 ): ProfileVisit {
   val completed = status == VisitScheduleStatus.COMPLETED
   val missed = status == VisitScheduleStatus.MISSED
+  // A completed/missed visit has no draft left to be "pending" — pendingSync only means
+  // something for a visit still nominally OPEN. See ProfileVisit.pendingSync's own doc.
+  val stillPendingSync = pendingSync && !completed && !missed
 
   return ProfileVisit(
     // The schedule's own key, so the visit form receives an identifier the server will recognise
@@ -104,8 +120,11 @@ private fun VisitScheduleEntity.toProfileVisit(
     // window shuts today rather than that it already has — false urgency on a row the Sakhi can do
     // nothing about. A proper "Missed" treatment needs a third ProfileVisitState and a card design;
     // raised for CR-024 rather than invented here.
-    daysRemaining = if (completed || missed) null else daysRemaining(today),
-    startable = !completed && !missed && isInWindow(today),
+    daysRemaining = if (completed || missed || stillPendingSync) null else daysRemaining(today),
+    // Already submitted (even if not yet synced) — tapping Start Visit again would re-open a
+    // visit whose form has already been filled and saved.
+    startable = !completed && !missed && !stillPendingSync && isInWindow(today),
+    pendingSync = stillPendingSync,
     // FR-S-4.6: the Pre-Visit Health History screen needs at least one earlier completed visit to
     // have anything to show. A beneficiary's genuine first visit skips straight to the form.
     hasPreVisitHistory = priorCompletedCount > 0,
@@ -121,6 +140,8 @@ private fun VisitScheduleEntity.toProfileVisit(
     referralIncomplete = referralLink?.referralStatus() == ReferralStatus.PENDING_FOLLOWUP,
     referralStatus = referralLink?.referralStatus(),
     referralId = referralLink?.referralId,
+    // Only meaningful alongside referralIncomplete -- see ProfileVisit.referralPendingSync's doc.
+    referralPendingSync = referralPendingSync && referralLink?.referralStatus() == ReferralStatus.PENDING_FOLLOWUP,
     // A completed visit with a pending referral follow-up still needs an action — SEE_DATA (the
     // completed-visit default below) has no follow-up route. FILL_FORM is repurposed here to open
     // the referral follow-up form instead of the Visit Form flow — see

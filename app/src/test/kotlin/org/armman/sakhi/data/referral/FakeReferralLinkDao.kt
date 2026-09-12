@@ -20,4 +20,7 @@ class FakeReferralLinkDao : ReferralLinkDao {
 
   override suspend fun countByBeneficiaryId(beneficiaryId: String): Int =
     rows.values.count { it.beneficiaryId == beneficiaryId }
+
+  override suspend fun getPendingFollowUp(): List<ReferralLinkEntity> =
+    rows.values.filter { it.status == "PENDING_FOLLOWUP" }
 }

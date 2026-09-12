@@ -1,8 +1,12 @@
 package org.armman.sakhi.data.previsithealth
 
+import android.util.Log
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import org.armman.sakhi.data.beneficiary.RiskLevel
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
 import org.armman.sakhi.data.visitform.VisitFormRiskAssessment
+import java.io.IOException
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -23,6 +27,10 @@ private const val HISTORY_LIMIT = 2
  * overall still has data from another visit — distinct from a factor with no data at all across
  * every visit, which is dropped entirely (see [buildFactor]/[buildBloodPressureFactor]). */
 private const val NO_READING = "—"
+
+private val VISIT_HISTORY_LIST_TYPE = object : TypeToken<List<VisitHistoryEntryDto>>() {}.type
+
+private const val TAG = "PreVisitHealthHistory"
 
 /**
  * Real [PreVisitHealthHistoryRepository] backed by `GET /beneficiaries/:beneficiaryId/visit-history`
@@ -46,27 +54,67 @@ private const val NO_READING = "—"
  * [visitId] (the other nav argument) is intentionally unused here beyond the interface contract —
  * the endpoint returns a beneficiary's history regardless of which upcoming visit triggered the
  * screen; only the beneficiary is in scope, not the specific visit about to start.
+ *
+ * ### Offline fallback (cache-then-live, reported gap fixed here)
+ * Once a beneficiary has synced (past her first visit), every subsequent open of this screen made
+ * a *live-only* network call with nothing cached — so going offline (or hitting the Android
+ * clock-skew/TLS restriction from changing the device date) hard-blocked every later visit behind
+ * a Retry-only error screen, even though the beneficiary's very first visit had "worked offline"
+ * moments earlier by accident (that case never needed the network — see
+ * [BeneficiaryNotSyncedException] above). Now: a successful live fetch is cached in
+ * [PreVisitHealthHistoryCacheDao] keyed by server beneficiary id; a network-layer failure
+ * ([IOException] and its subtypes — offline, DNS, TLS/clock-skew, timeout) falls back to that
+ * cache instead of failing outright. A real server rejection (e.g. HTTP 403/404) is NOT an
+ * [IOException] and is not masked by this fallback — it still surfaces as before. If there is no
+ * cache yet (this beneficiary's history was never successfully fetched on this device), the
+ * original exception is rethrown and the screen's existing error+Retry state is unchanged — this
+ * fallback only ever adds a success path, never removes the prior one.
  */
 @Singleton
 class RemotePreVisitHealthHistoryRepository @Inject constructor(
   private val api: PreVisitHealthHistoryApi,
   private val visitScheduleRepository: VisitScheduleRepository,
+  private val cacheDao: PreVisitHealthHistoryCacheDao,
 ) : PreVisitHealthHistoryRepository {
+
+  private val gson = Gson()
 
   override suspend fun getHealthHistory(beneficiaryId: String, visitId: String): PreVisitHealthHistory {
     val serverBeneficiaryId = visitScheduleRepository.getForBeneficiary(beneficiaryId)
       .firstNotNullOfOrNull { it.serverBeneficiaryId }
       ?: throw BeneficiaryNotSyncedException(beneficiaryId)
 
-    val response = api.getVisitHistory(serverBeneficiaryId, limit = HISTORY_LIMIT)
-    if (!response.isSuccessful) {
-      throw NoSuchElementException(
-        "GET visit-history failed for beneficiary $serverBeneficiaryId: HTTP ${response.code()}",
-      )
+    val liveVisits = try {
+      val response = api.getVisitHistory(serverBeneficiaryId, limit = HISTORY_LIMIT)
+      if (!response.isSuccessful) {
+        throw NoSuchElementException(
+          "GET visit-history failed for beneficiary $serverBeneficiaryId: HTTP ${response.code()}",
+        )
+      }
+      response.body()?.takeIf { it.success }?.data?.visits.orEmpty()
+    } catch (e: IOException) {
+      // Network-layer failure, not a real server rejection — fall back to the last successful
+      // fetch for this beneficiary rather than hard-failing the screen. Rethrow unchanged (same
+      // exception the caller already knows how to log/classify) when nothing is cached yet.
+      val cached = cacheDao.get(serverBeneficiaryId)
+      if (cached == null) {
+        Log.w(TAG, "Live fetch failed for $serverBeneficiaryId and no cache exists — rethrowing: ${e.message}")
+        throw e
+      }
+      Log.i(TAG, "Live fetch failed for $serverBeneficiaryId (${e.javaClass.simpleName}: ${e.message}) — serving cached copy from ${cached.cachedAtEpochMillis}")
+      return gson.fromJson<List<VisitHistoryEntryDto>>(cached.visitsJson, VISIT_HISTORY_LIST_TYPE)
+        .toPreVisitHealthHistory()
     }
 
-    val visits = response.body()?.takeIf { it.success }?.data?.visits.orEmpty()
-    return visits.toPreVisitHealthHistory()
+    Log.d(TAG, "Live fetch succeeded for $serverBeneficiaryId — caching ${liveVisits.size} visit(s)")
+    cacheDao.upsert(
+      PreVisitHealthHistoryCacheEntity(
+        serverBeneficiaryId = serverBeneficiaryId,
+        visitsJson = gson.toJson(liveVisits),
+        cachedAtEpochMillis = System.currentTimeMillis(),
+      ),
+    )
+    return liveVisits.toPreVisitHealthHistory()
   }
 }
 

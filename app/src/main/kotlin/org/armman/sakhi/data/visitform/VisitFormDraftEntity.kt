@@ -49,4 +49,40 @@ data class VisitFormDraftEntity(
    */
   val serverVisitId: String?,
   val lastErrorMessage: String?,
+  /**
+   * Set the moment `POST /forms/:formCode/submissions` succeeds (step 2) — the id
+   * [VisitFormSubmissionCoordinator.triggerRiskAssessment] sends as `submissionId` on
+   * `POST /risk-assessments`. Persisted here (unlike before this field existed, when it only ever
+   * lived in-memory for the duration of one [VisitFormSubmissionCoordinator.submit] call) so
+   * [VisitFormSyncExecutor.retryRiskAssessments] can re-run just that best-effort step later
+   * without re-submitting the whole visit. Null until step 2 succeeds; terminal once set.
+   */
+  val serverSubmissionId: String? = null,
+  /**
+   * Bharath, 2026-09-10 (CR — missed risk-assessment/referral gap): whether the best-effort
+   * `POST /risk-assessments` + referral-creation step that runs right after a successful main
+   * submission (see [VisitFormSubmissionCoordinator.triggerRiskAssessment]) has actually
+   * completed for this draft. Independent of [syncStatus] — the main submission can be fully
+   * SYNCED while this is still PENDING (e.g. the connection dropped between the two calls, which
+   * is exactly what happened for the ANC3 case that motivated this field: the visit form itself
+   * synced and the card correctly showed Completed, but no referral was ever created because the
+   * risk-assessment call that decides one is needed never got a response).
+   *
+   * PENDING on every fresh/re-saved draft (see [RoomVisitFormDraftRepository.saveLocally]) —
+   * flipped to SYNCED once [VisitFormSubmissionCoordinator.triggerRiskAssessment] (called from
+   * [submit][VisitFormSubmissionCoordinator.submit] itself, right after a successful sync) or its
+   * standalone twin [VisitFormSubmissionCoordinator.retryRiskAssessment] (called from
+   * [VisitFormSyncExecutor.retryRiskAssessments] on a later manual/background sync pass) actually
+   * gets a `POST /risk-assessments` response — whether or not that response ends up flagging (and
+   * therefore creating) a referral; "no referral needed" is a complete, successful outcome, not a
+   * failure. FAILED after [VisitFormSyncExecutor.retryRiskAssessments] exhausts a pass without a
+   * response — still retried on the next Data Upload, same forgiving convention [syncStatus]'s
+   * own FAILED already follows elsewhere in this app (see [VisitFormDraftDao.getPendingSync]'s
+   * doc), not a permanent give-up state the Sakhi ever sees.
+   *
+   * Meaningless (left at its default) while [syncStatus] itself isn't yet SYNCED — there's no
+   * `serverVisitId`/[serverSubmissionId] to retry with before that, so
+   * [VisitFormDraftDao.getRiskAssessmentPending] filters on both.
+   */
+  val riskAssessmentStatus: EnrollmentSyncStatus = EnrollmentSyncStatus.PENDING,
 )

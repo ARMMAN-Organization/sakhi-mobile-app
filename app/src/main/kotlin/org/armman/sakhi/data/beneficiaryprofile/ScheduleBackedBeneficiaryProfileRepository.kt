@@ -6,8 +6,11 @@ import org.armman.sakhi.data.beneficiary.LocalEnrolmentBeneficiarySource
 import org.armman.sakhi.data.forms.ChildRegistrationQuestionCodes
 import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.GeographyQuestionCodes
+import org.armman.sakhi.data.adhocform.AdHocFormDraftDao
+import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.referral.ReferralLinkDao
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
+import org.armman.sakhi.data.visitform.VisitFormDraftDao
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -42,6 +45,8 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
   private val scheduleRepository: VisitScheduleRepository,
   private val localEnrolments: LocalEnrolmentBeneficiarySource,
   private val referralLinkDao: ReferralLinkDao,
+  private val visitFormDraftDao: VisitFormDraftDao,
+  private val adHocFormDraftDao: AdHocFormDraftDao,
 ) : BeneficiaryProfileRepository {
 
   override suspend fun getBeneficiary(id: String): BeneficiaryProfile {
@@ -83,10 +88,39 @@ class ScheduleBackedBeneficiaryProfileRepository @Inject constructor(
       .getByLocalScheduleUuids(schedules.map { it.localScheduleUuid })
       .associateBy { it.localScheduleUuid }
 
+    // bharath, 2026-09-10: a visit form saved while offline only ever writes a
+    // VisitFormDraftEntity (VisitFormSubmissionCoordinator.saveLocally) -- the schedule itself
+    // stays OPEN until a later successful sync flips it to COMPLETED. Anything short of SYNCED
+    // here means "submitted on this device, not yet reflected on the server", which is exactly
+    // what ProfileVisit.pendingSync is for -- see that field's doc and ProfileVisitMapper.
+    val pendingSyncScheduleIds = visitFormDraftDao
+      .getByLocalScheduleUuids(schedules.map { it.localScheduleUuid })
+      .filter { it.syncStatus != EnrollmentSyncStatus.SYNCED }
+      .map { it.localScheduleUuid }
+      .toSet()
+
+    // bharath, 2026-09-10: same "submitted offline, not yet reflected" gap as pendingSyncScheduleIds
+    // above, but for the Referral Follow-up ad-hoc form -- see ProfileVisit.referralPendingSync's
+    // doc. Looked up by referralId (not localScheduleUuid), since AdHocFormDraftEntity is keyed to
+    // the referral it follows up on, not to a schedule row.
+    val referralIds = referralLinks.values.map { it.referralId }
+    val pendingSyncReferralIds = adHocFormDraftDao
+      .getReferralFollowUpDraftsByReferralIds(referralIds)
+      .filter { it.syncStatus != EnrollmentSyncStatus.SYNCED }
+      .mapNotNull { it.referralId }
+      .toSet()
+
     // A beneficiary enrolled before this build has no schedule rows. Return an empty list rather
     // than falling back to the static sample: showing another woman's visits would be worse than
     // showing none, and the screen renders a distinct empty state for it.
-    return profile.copy(visits = schedules.toProfileVisits(LocalDate.now(), referralLinks))
+    return profile.copy(
+      visits = schedules.toProfileVisits(
+        LocalDate.now(),
+        referralLinks,
+        pendingSyncScheduleIds,
+        pendingSyncReferralIds,
+      ),
+    )
   }
 
   /** Delegates to [LocalEnrolmentBeneficiarySource.answersFor] — null for a remote-only

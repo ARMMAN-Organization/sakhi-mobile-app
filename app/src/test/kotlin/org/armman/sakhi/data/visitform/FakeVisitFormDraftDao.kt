@@ -20,9 +20,20 @@ class FakeVisitFormDraftDao : VisitFormDraftDao {
   override suspend fun getByLocalScheduleUuid(localScheduleUuid: String): VisitFormDraftEntity? =
     rows[localScheduleUuid]
 
+  override suspend fun getByLocalScheduleUuids(localScheduleUuids: List<String>): List<VisitFormDraftEntity> =
+    localScheduleUuids.mapNotNull { rows[it] }
+
   override suspend fun getPendingSync(): List<VisitFormDraftEntity> =
     rows.values
       .filter { it.syncStatus == EnrollmentSyncStatus.PENDING || it.syncStatus == EnrollmentSyncStatus.FAILED }
+      .sortedBy { it.createdAtEpochMillis }
+
+  override suspend fun getRiskAssessmentPending(): List<VisitFormDraftEntity> =
+    rows.values
+      .filter {
+        it.syncStatus == EnrollmentSyncStatus.SYNCED &&
+          (it.riskAssessmentStatus == EnrollmentSyncStatus.PENDING || it.riskAssessmentStatus == EnrollmentSyncStatus.FAILED)
+      }
       .sortedBy { it.createdAtEpochMillis }
 
   override suspend fun reclaimStaleSyncing(): Int {

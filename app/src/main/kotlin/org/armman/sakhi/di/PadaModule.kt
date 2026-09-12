@@ -6,8 +6,10 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import org.armman.sakhi.data.visittracker.PadaApi
+import org.armman.sakhi.data.visittracker.LocalPadaSummaryOverlay
 import org.armman.sakhi.data.visittracker.PadaRepository
 import org.armman.sakhi.data.visittracker.RemotePadaRepository
+import org.armman.sakhi.data.visittracker.RoomLocalPadaSummaryOverlay
 import retrofit2.Retrofit
 import javax.inject.Singleton
 
@@ -20,6 +22,12 @@ abstract class PadaModule {
   @Binds
   @Singleton
   abstract fun bindPadaRepository(impl: RemotePadaRepository): PadaRepository
+
+  @Binds
+  @Singleton
+  abstract fun bindLocalPadaSummaryOverlay(
+    impl: RoomLocalPadaSummaryOverlay,
+  ): LocalPadaSummaryOverlay
 
   companion object {
     @Provides

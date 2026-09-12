@@ -91,6 +91,40 @@ interface VisitScheduleDao {
   @Query("SELECT COUNT(*) FROM visit_schedules WHERE serverScheduleId IS NULL")
   fun observeUnsyncedCount(): Flow<Int>
 
+  /**
+   * CR-Dashboard/VisitTracker offline overlay (bharath, 2026-09-10): every currently-open
+   * (`GENERATED`/`OPEN`, i.e. not completed and not retired) schedule that has never been
+   * uploaded — regardless of whether its beneficiary itself has synced yet, unlike [getUnsynced]
+   * which requires a non-null `serverBeneficiaryId`. A visit generated on this device (e.g. an
+   * ANC post-EDD visit, or any visit for a beneficiary enrolled offline) cannot possibly be
+   * reflected in a server-fetched dashboard/visit-tracker response yet, so this is the safe set to
+   * additively overlay on top of the last server value without risking a double count — see
+   * [org.armman.sakhi.data.dashboard.LocalVisitCounts] and
+   * [org.armman.sakhi.ui.visittracker.PadaVisitsViewModel] for the two call sites.
+   */
+  @Query(
+    "SELECT * FROM visit_schedules WHERE serverScheduleId IS NULL " +
+      "AND status IN ('GENERATED', 'OPEN') " +
+      "ORDER BY localBeneficiaryId ASC, scheduledDate ASC",
+  )
+  suspend fun getActiveUnsynced(): List<VisitScheduleEntity>
+
+  /**
+   * Every currently-open schedule, synced or not — the full-replacement counterpart to
+   * [getActiveUnsynced] for the specific case where a screen has NO server value at all to
+   * protect from double-counting (bharath, 2026-09-10: a schedule that already synced, e.g. an
+   * earlier successful Data Upload, is invisible to [getActiveUnsynced]'s `serverScheduleId IS
+   * NULL` filter — correct when overlaying onto a real cached/live server response, wrong when
+   * there is no such response to overlay onto at all, which is when this is used instead). See
+   * [org.armman.sakhi.data.visittracker.LocalPadaSummaryOverlay] and
+   * [org.armman.sakhi.ui.visittracker.PadaVisitsViewModel]'s error-path fallback.
+   */
+  @Query(
+    "SELECT * FROM visit_schedules WHERE status IN ('GENERATED', 'OPEN') " +
+      "ORDER BY localBeneficiaryId ASC, scheduledDate ASC",
+  )
+  suspend fun getAllActive(): List<VisitScheduleEntity>
+
   /** Records the server ID after a successful upload. Touches nothing else — the schedule content
    * itself is device-authored and must not be rewritten by a sync response. */
   @Query(

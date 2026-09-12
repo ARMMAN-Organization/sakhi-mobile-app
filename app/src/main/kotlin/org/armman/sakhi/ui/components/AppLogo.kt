@@ -55,10 +55,10 @@ fun AppLogo(
 
 object AppLogoDefaults {
   /** Intrinsic width of `logo_arogya_sakhi.png`, in px. */
-  const val INTRINSIC_WIDTH_PX = 553f
+  const val INTRINSIC_WIDTH_PX = 412f
 
   /** Intrinsic height of `logo_arogya_sakhi.png`, in px. */
-  const val INTRINSIC_HEIGHT_PX = 615f
+  const val INTRINSIC_HEIGHT_PX = 432f
 
   /** Width : height of the logo asset. Sizing to anything else letterboxes or crops the lockup. */
   const val ASPECT_RATIO = INTRINSIC_WIDTH_PX / INTRINSIC_HEIGHT_PX

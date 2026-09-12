@@ -43,4 +43,15 @@ interface ReferralLinkDao {
    */
   @Query("SELECT COUNT(*) FROM referral_links WHERE beneficiaryId = :beneficiaryId")
   suspend fun countByBeneficiaryId(beneficiaryId: String): Int
+
+  /**
+   * Visit Tracker offline overlay (bharath, 2026-09-10) — every referral this device knows is
+   * still awaiting its follow-up, so [org.armman.sakhi.ui.visittracker.PadaVisitsViewModel] can
+   * show a beneficiary's pending follow-up on the Referral Follow-up tab even before
+   * `GET /padas/{padaId}/visits` has ever reported it (offline, or simply not yet synced
+   * server-side). [ReferralLinkEntity.status] is stored by enum name, same TEXT convention as
+   * every other enum column here.
+   */
+  @Query("SELECT * FROM referral_links WHERE status = 'PENDING_FOLLOWUP'")
+  suspend fun getPendingFollowUp(): List<ReferralLinkEntity>
 }

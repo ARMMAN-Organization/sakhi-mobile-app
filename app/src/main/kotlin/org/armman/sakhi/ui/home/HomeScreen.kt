@@ -33,6 +33,7 @@ import org.armman.sakhi.ui.components.PrimaryButton
 import org.armman.sakhi.ui.theme.Dimens
 import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG400
+import org.armman.sakhi.ui.theme.WelcomeHeaderText
 import org.armman.sakhi.ui.theme.White
 import java.time.Instant
 import java.time.LocalDate
@@ -169,7 +170,7 @@ private fun HomeHeader(onProfile: () -> Unit) {
     Column {
       Text(
         text = stringResource(R.string.home_welcome),
-        style = MaterialTheme.typography.titleLarge,
+        style = WelcomeHeaderText,
         color = NeutralG400,
       )
       Text(

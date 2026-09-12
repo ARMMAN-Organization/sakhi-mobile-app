@@ -50,6 +50,30 @@ class RemotePreVisitHealthHistoryRepositoryTest {
     createdAtEpochMillis = 0L,
   )
 
+
+  /** In-memory [PreVisitHealthHistoryCacheDao] — the offline cache is incidental to what these
+
+   * tests assert, so it just needs to round-trip whatever the repository writes. */
+
+  private class FakeCacheDao : PreVisitHealthHistoryCacheDao {
+
+    private val rows = mutableMapOf<String, PreVisitHealthHistoryCacheEntity>()
+
+
+    override suspend fun get(serverBeneficiaryId: String): PreVisitHealthHistoryCacheEntity? =
+
+      rows[serverBeneficiaryId]
+
+
+    override suspend fun upsert(entity: PreVisitHealthHistoryCacheEntity) {
+
+      rows[entity.serverBeneficiaryId] = entity
+
+    }
+
+  }
+
+
   private class FakeVisitScheduleRepository(
     private val schedules: List<VisitScheduleEntity>,
   ) : VisitScheduleRepository {
@@ -64,6 +88,8 @@ class RemotePreVisitHealthHistoryRepositoryTest {
     override suspend fun hasSchedule(localBeneficiaryId: String) = schedules.any { it.localBeneficiaryId == localBeneficiaryId }
     override suspend fun hasScheduleOfType(localBeneficiaryId: String, visitType: VisitCodeType) = false
     override suspend fun getUnsynced() = emptyList<VisitScheduleEntity>()
+    override suspend fun getActiveUnsynced() = emptyList<VisitScheduleEntity>()
+    override suspend fun getAllActive() = emptyList<VisitScheduleEntity>()
     override fun observeUnsyncedCount(): Flow<Int> = MutableStateFlow(0)
     override suspend fun markSynced(localScheduleUuid: String, serverScheduleId: String) = Unit
     override suspend fun attachServerBeneficiaryId(localBeneficiaryId: String, serverBeneficiaryId: String) = Unit
@@ -96,7 +122,7 @@ class RemotePreVisitHealthHistoryRepositoryTest {
   fun `resolves the local beneficiary id to its server id before calling the api`() = runTest {
     val schedules = FakeVisitScheduleRepository(listOf(scheduleEntity("local-1", "server-1")))
     val api = FakeApi(successResponse(emptyList()))
-    val repository = RemotePreVisitHealthHistoryRepository(api, schedules)
+    val repository = RemotePreVisitHealthHistoryRepository(api, schedules, FakeCacheDao())
 
     repository.getHealthHistory("local-1", "sched-local-1")
 
@@ -108,7 +134,7 @@ class RemotePreVisitHealthHistoryRepositoryTest {
   fun `throws BeneficiaryNotSyncedException when no schedule row has a server id yet`() = runTest {
     val schedules = FakeVisitScheduleRepository(listOf(scheduleEntity("local-1", serverBeneficiaryId = null)))
     val api = FakeApi(successResponse(emptyList()))
-    val repository = RemotePreVisitHealthHistoryRepository(api, schedules)
+    val repository = RemotePreVisitHealthHistoryRepository(api, schedules, FakeCacheDao())
 
     repository.getHealthHistory("local-1", "sched-local-1")
   }
@@ -117,7 +143,7 @@ class RemotePreVisitHealthHistoryRepositoryTest {
   fun `empty visits array maps to an empty history, not an error`() = runTest {
     val schedules = FakeVisitScheduleRepository(listOf(scheduleEntity("local-1", "server-1")))
     val api = FakeApi(successResponse(emptyList()))
-    val repository = RemotePreVisitHealthHistoryRepository(api, schedules)
+    val repository = RemotePreVisitHealthHistoryRepository(api, schedules, FakeCacheDao())
 
     val history = repository.getHealthHistory("local-1", "sched-local-1")
 
@@ -129,7 +155,7 @@ class RemotePreVisitHealthHistoryRepositoryTest {
   fun `an unsuccessful http response throws`() = runTest {
     val schedules = FakeVisitScheduleRepository(listOf(scheduleEntity("local-1", "server-1")))
     val api = FakeApi(errorResponse(403))
-    val repository = RemotePreVisitHealthHistoryRepository(api, schedules)
+    val repository = RemotePreVisitHealthHistoryRepository(api, schedules, FakeCacheDao())
 
     repository.getHealthHistory("local-1", "sched-local-1")
   }
@@ -228,6 +254,6 @@ class RemotePreVisitHealthHistoryRepositoryTest {
   private suspend fun mapVisits(visits: List<VisitHistoryEntryDto>): PreVisitHealthHistory {
     val schedules = FakeVisitScheduleRepository(listOf(scheduleEntity("local-1", "server-1")))
     val api = FakeApi(successResponse(visits))
-    return RemotePreVisitHealthHistoryRepository(api, schedules).getHealthHistory("local-1", "sched-local-1")
+    return RemotePreVisitHealthHistoryRepository(api, schedules, FakeCacheDao()).getHealthHistory("local-1", "sched-local-1")
   }
 }

@@ -53,6 +53,9 @@ class AdHocFormViewModelTest {
     ): AdHocFormSubmitResult = throw NotImplementedError("not exercised by these tests")
 
     override suspend fun countByFormCode(localBeneficiaryId: String, formCode: String): Int = referralCount
+
+    override fun observeUploadRecords(): kotlinx.coroutines.flow.Flow<List<org.armman.sakhi.data.forms.FormUploadRecord>> =
+      kotlinx.coroutines.flow.flowOf(emptyList())
   }
 
   /** Mirrors [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModelTest]'s own fake — a missing

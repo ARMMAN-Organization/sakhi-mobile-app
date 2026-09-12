@@ -6,6 +6,7 @@ import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfile
 import org.armman.sakhi.data.beneficiaryprofile.BeneficiaryProfileRepository
 import org.armman.sakhi.data.schedule.VisitCodeType
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
+import org.armman.sakhi.data.schedule.VisitScheduleStatus
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -62,7 +63,15 @@ class StaticVisitFormRepository @Inject constructor(
     // an RCH number entered at MOTHER_REGISTRATION never carried forward onto ANC1. Read from the
     // profile the same way `lmp` two lines below already does; still blank (not a crash) for a
     // beneficiary with no RCH card on file, exactly per FR spec row 39-40.
-    rchNumber = profile.rchNumber.orEmpty(),
+    //
+    // Bug fix (2026-10-10, reported): spec row 5 says "Autogenerate if already mentioned in the
+    // registration OR ANY VISIT FORM" — but this only ever read the registration-time value
+    // above. RCH Number is itself an editable field on the visit form (RCH_NUMBER_QUESTION_CODE),
+    // so a Sakhi who enters it for the first time at ANC1 (registration left it blank) had it
+    // vanish again on ANC2 — same "entered on a visit form, never read back on the next one" gap
+    // firstAncVisitWeightKg below already fixed for weight. Falls back to whatever the earliest
+    // completed visit answered, same lookup pattern as that function.
+    rchNumber = profile.rchNumber.orEmpty().ifBlank { carriedForwardRchNumber(beneficiaryId, visitId).orEmpty() },
     lmp = profile.lmp
       ?.let { runCatching { LocalDate.parse(it, PROFILE_DATE_FORMAT) }.getOrNull() }
       ?: LocalDate.now(),
@@ -117,8 +126,39 @@ class StaticVisitFormRepository @Inject constructor(
     return answers.valueOf(VisitFormQuestionCodes.WEIGHT_KG)?.toDoubleOrNull()
   }
 
+  /**
+   * Bug fix (2026-10-10) — see [syntheticContext]'s own doc. Mirrors [firstAncVisitWeightKg]'s
+   * shape: reads the visit form's own `rch_number` answer back out of the beneficiary's completed
+   * visit drafts on THIS device, oldest first, returning the first non-blank answer found. Unlike
+   * [firstAncVisitWeightKg] this isn't restricted to `ANC`/`sequenceNo == 1` — RCH Number can be
+   * entered (or corrected) on any visit type, and once entered anywhere should carry forward to
+   * every later one, per spec row 5's "registration OR any visit form" wording. Literal question
+   * code (not a [VisitFormQuestionCodes] constant — that object has no RCH_NUMBER entry today),
+   * matching [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel]'s own
+   * `RCH_NUMBER_QUESTION_CODE` = "rch_number".
+   *
+   * Null when: no completed visit exists yet, no completed visit answered this question, or a
+   * visit where it WAS answered was recorded on a different device (same not-yet-closed device-
+   * local gap [firstAncVisitWeightKg] documents — CR-026 replacing this stub with a real backend
+   * fetch resolves it for good).
+   */
+  private suspend fun carriedForwardRchNumber(beneficiaryId: String, visitId: String): String? {
+    val completedVisits = visitScheduleRepository.getForBeneficiary(beneficiaryId)
+      .filter { it.status == VisitScheduleStatus.COMPLETED && it.localScheduleUuid != visitId }
+      .sortedBy { it.scheduledDate }
+    for (visit in completedVisits) {
+      val answers = visitFormDraftRepository.getAnswers(visit.localScheduleUuid) ?: continue
+      val rchNumber = answers.valueOf(RCH_NUMBER_QUESTION_CODE)?.takeIf { it.isNotBlank() }
+      if (rchNumber != null) return rchNumber
+    }
+    return null
+  }
+
   private companion object {
     const val NETWORK_LATENCY_MS = 500L
+
+    /** Matches DynamicVisitFormViewModel's own RCH_NUMBER_QUESTION_CODE. */
+    const val RCH_NUMBER_QUESTION_CODE = "rch_number"
 
     /** Matches ScheduleBackedBeneficiaryProfileRepository.PROFILE_DATE_FORMAT — same source. */
     val PROFILE_DATE_FORMAT: DateTimeFormatter =

@@ -53,6 +53,30 @@ val ButtonTextTablet = TextStyle(
   fontSize = 20.sp,
 )
 
+/**
+ * Home dashboard "Welcome, Arogya Sakhi" header — same 18sp as [ArogyaTypography.titleLarge]
+ * but regular weight per the confirmed Home dashboard design (CR: Home UI issues, 2026-09-10) —
+ * titleLarge itself stays Bold for its other uses (H4, card names).
+ */
+val WelcomeHeaderText = TextStyle(
+  fontFamily = CabinFamily,
+  fontWeight = FontWeight.Normal,
+  fontSize = 18.sp,
+)
+
+/**
+ * Secondary KPI number style for the Active Beneficiaries tiles (Mothers/Infants) — deliberately
+ * smaller than [KpiNumber] (40sp, used for Active Visits' Open/Pending tiles) per the confirmed
+ * Home dashboard design (CR: Home UI issues, 2026-09-10): Active Visits' counts are the primary
+ * numbers on the screen, Active Beneficiaries' are secondary. Same Cabin Bold weight, base-4 step
+ * down (40 -> 32).
+ */
+val KpiNumberSecondary = TextStyle(
+  fontFamily = CabinFamily,
+  fontWeight = FontWeight.Bold,
+  fontSize = 32.sp,
+)
+
 // Style-guide scale mapped onto Material3 tokens.
 val ArogyaTypography = Typography(
   headlineLarge = TextStyle(fontFamily = CabinFamily, fontWeight = FontWeight.Bold, fontSize = 32.sp), // H2 (KPI)

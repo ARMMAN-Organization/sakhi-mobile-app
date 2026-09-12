@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface DeliveryChildRegistrationDraftDao {
@@ -28,4 +29,9 @@ interface DeliveryChildRegistrationDraftDao {
 
   @Query("SELECT * FROM delivery_child_registration_drafts ORDER BY createdAtEpochMillis DESC")
   suspend fun getAll(): List<DeliveryChildRegistrationDraftEntity>
+
+  /** Observable stream, newest first — feeds the Home "Forms Uploaded" modal via
+   * [DeliveryChildRegistrationDraftRepository.observeUploadRecords]. */
+  @Query("SELECT * FROM delivery_child_registration_drafts ORDER BY createdAtEpochMillis DESC")
+  fun observeAll(): Flow<List<DeliveryChildRegistrationDraftEntity>>
 }

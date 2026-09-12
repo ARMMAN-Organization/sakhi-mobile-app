@@ -118,6 +118,17 @@ class RoomVisitFormDraftRepositoryTest {
       riskAssessmentDao = FakeRiskAssessmentDao(),
       lmpChangeRepository = org.armman.sakhi.data.lmpchange.FakeLmpChangeRepository(),
       sameSessionNnVisitResolver = org.armman.sakhi.data.schedule.SameSessionNnVisitResolver(scheduleRepository),
+      visitScheduleCoordinator = run {
+        val rules = org.armman.sakhi.data.schedule.HardcodedRuleSource()
+        org.armman.sakhi.data.schedule.VisitScheduleCoordinator(
+          repository = scheduleRepository,
+          ancGenerator = org.armman.sakhi.data.schedule.AncScheduleGenerator(rules),
+          ppGenerator = org.armman.sakhi.data.schedule.PpScheduleGenerator(rules),
+          nnGenerator = org.armman.sakhi.data.schedule.NnScheduleGenerator(rules),
+          incGenerator = org.armman.sakhi.data.schedule.IncScheduleGenerator(rules),
+          ccvGenerator = org.armman.sakhi.data.schedule.CcvScheduleGenerator(rules),
+        )
+      },
     )
     // Reuses the same dao/secureStore as the repository so runOne() sees the row submitDraft just
     // wrote — matching how the real Hilt graph wires a single instance of each.
@@ -165,7 +176,16 @@ class RoomVisitFormDraftRepositoryTest {
 
       val result = submit()
 
-      assertEquals(VisitFormSubmitResult.Synced(), result)
+      assertEquals(
+      VisitFormSubmitResult.Synced(
+        // This test's FakeRiskAssessmentApi returns success with a null `data`, so the
+        // best-effort risk step reports "not completed" and leaves the draft to
+        // VisitFormSyncExecutor.retryRiskAssessments — the submission itself still succeeds,
+        // which is what this test asserts.
+        VisitSubmitOutcome(serverSubmissionId = "server-sub-1", riskAssessmentCompleted = false),
+      ),
+      result,
+    )
       assertEquals(EnrollmentSyncStatus.SYNCED, dao.getByLocalScheduleUuid("schedule-1")?.syncStatus)
       assertEquals("server-visit-42", dao.getByLocalScheduleUuid("schedule-1")?.serverVisitId)
       // Same visible side effect as the pre-CR-026b direct-coordinator call: the schedule flips to
@@ -331,7 +351,16 @@ class RoomVisitFormDraftRepositoryTest {
 
     val onlineResult = submit()
 
-    assertEquals(VisitFormSubmitResult.Synced(), onlineResult)
+    assertEquals(
+      VisitFormSubmitResult.Synced(
+        // This test's FakeRiskAssessmentApi returns success with a null `data`, so the
+        // best-effort risk step reports "not completed" and leaves the draft to
+        // VisitFormSyncExecutor.retryRiskAssessments — the submission itself still succeeds,
+        // which is what this test asserts.
+        VisitSubmitOutcome(serverSubmissionId = "server-sub-1", riskAssessmentCompleted = false),
+      ),
+      onlineResult,
+    )
     assertEquals(
       listOf(FormAuditEventType.SAVED),
       formAuditRepository.recordedEvents.map { it.eventType },

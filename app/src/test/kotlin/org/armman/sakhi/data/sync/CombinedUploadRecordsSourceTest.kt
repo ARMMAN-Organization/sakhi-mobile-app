@@ -5,8 +5,14 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import org.armman.sakhi.data.adhocform.AdHocFormDraftRepository
+import org.armman.sakhi.data.adhocform.AdHocFormSubmitResult
 import org.armman.sakhi.data.childregistration.ChildFormDraftRepository
 import org.armman.sakhi.data.childregistration.ChildFormSubmitResult
+import org.armman.sakhi.data.delivery.DeliveryChildRegistrationDraftRepository
+import org.armman.sakhi.data.delivery.DeliveryChildRegistrationSubmitResult
+import org.armman.sakhi.data.delivery.DeliveryFormDraftRepository
+import org.armman.sakhi.data.delivery.DeliveryFormSubmitResult
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.EditableSubmissionInfo
@@ -29,11 +35,17 @@ class CombinedUploadRecordsSourceTest {
   private val motherRecords = MutableStateFlow<List<FormUploadRecord>>(emptyList())
   private val childRecords = MutableStateFlow<List<FormUploadRecord>>(emptyList())
   private val visitRecords = MutableStateFlow<List<FormUploadRecord>>(emptyList())
+  private val adHocRecords = MutableStateFlow<List<FormUploadRecord>>(emptyList())
+  private val deliveryRecords = MutableStateFlow<List<FormUploadRecord>>(emptyList())
+  private val deliveryChildRegistrationRecords = MutableStateFlow<List<FormUploadRecord>>(emptyList())
 
   private val source = CombinedUploadRecordsSource(
     dynamicFormDraftRepository = FakeMotherRepository(motherRecords),
     childFormDraftRepository = FakeChildRepository(childRecords),
     visitFormDraftRepository = FakeVisitRepository(visitRecords),
+    adHocFormDraftRepository = FakeAdHocRepository(adHocRecords),
+    deliveryFormDraftRepository = FakeDeliveryRepository(deliveryRecords),
+    deliveryChildRegistrationDraftRepository = FakeDeliveryChildRegistrationRepository(deliveryChildRegistrationRecords),
   )
 
   private fun record(id: String, formCode: String, createdAt: Long) = FormUploadRecord(
@@ -52,15 +64,31 @@ class CombinedUploadRecordsSourceTest {
   }
 
   @Test
-  fun `merges mother, child and visit drafts into one list`() = runTest {
+  fun `merges mother, child, visit and ad-hoc drafts into one list`() = runTest {
     motherRecords.value = listOf(record("m-1", "MOTHER_REGISTRATION", 100L))
     childRecords.value = listOf(record("c-1", "CHILD_REGISTRATION", 200L))
     visitRecords.value = listOf(record("v-1", "ANC_VISIT", 150L))
+    adHocRecords.value = listOf(record("a-1", "REFERRAL_FOLLOWUP_VISIT", 175L))
 
     val merged = source.observeAll().first()
 
-    assertEquals(3, merged.size)
-    assertEquals(setOf("m-1", "c-1", "v-1"), merged.map { it.localBeneficiaryId }.toSet())
+    assertEquals(4, merged.size)
+    assertEquals(setOf("m-1", "c-1", "v-1", "a-1"), merged.map { it.localBeneficiaryId }.toSet())
+  }
+
+  @Test
+  fun `a Referral Follow-up draft is visible on this queue even while still PENDING`() = runTest {
+    // bharath, 2026-09-10 -- the actual reported bug: this queue was entirely absent from the
+    // merge, so a Sakhi who submitted a Referral Follow-up offline and reopened the "Forms
+    // Uploaded" modal after coming back online saw no row for it at all, with no way to tell
+    // whether it was queued, uploading, or forgotten.
+    adHocRecords.value = listOf(record("a-1", "REFERRAL_FOLLOWUP_VISIT", 500L))
+
+    val merged = source.observeAll().first()
+
+    assertEquals(1, merged.size)
+    assertEquals("REFERRAL_FOLLOWUP_VISIT", merged.single().formCode)
+    assertEquals(EnrollmentSyncStatus.PENDING, merged.single().syncStatus)
   }
 
   @Test
@@ -96,8 +124,11 @@ class CombinedUploadRecordsSourceTest {
     visitRecords.value = listOf(record("v-1", "ANC_VISIT", 300L))
     assertEquals(3, source.observeAll().first().size)
 
+    adHocRecords.value = listOf(record("a-1", "REFERRAL_FOLLOWUP_VISIT", 350L))
+    assertEquals(4, source.observeAll().first().size)
+
     motherRecords.value = emptyList()
-    assertEquals(2, source.observeAll().first().size)
+    assertEquals(3, source.observeAll().first().size)
   }
 
   /** Only [observeUploadRecords] matters here; the write path is covered by each repository's own
@@ -192,5 +223,59 @@ class CombinedUploadRecordsSourceTest {
     override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = records
 
     override suspend fun getAnswers(localScheduleUuid: String): FormAnswers? = null
+  }
+
+  /** Only [observeUploadRecords] matters here; the write path is covered by
+   * [org.armman.sakhi.data.adhocform.RoomAdHocFormDraftRepositoryTest]. */
+  private class FakeAdHocRepository(
+    private val records: MutableStateFlow<List<FormUploadRecord>>,
+  ) : AdHocFormDraftRepository {
+    override suspend fun submitDraft(
+      localFormInstanceUuid: String,
+      localBeneficiaryId: String,
+      formCode: String,
+      formVersionId: String,
+      answers: FormAnswers,
+      referralId: String?,
+      capturedImagePaths: Map<String, String>,
+    ): AdHocFormSubmitResult = AdHocFormSubmitResult.Synced
+
+    override suspend fun countByFormCode(localBeneficiaryId: String, formCode: String): Int = 0
+
+    override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = records
+  }
+
+  /** Bharath, 2026-09-11: same "queue absent from the merge" gap as the ad-hoc queue's own fake
+   * above, this time for Delivery Form (CR-042). */
+  private class FakeDeliveryRepository(
+    private val records: MutableStateFlow<List<FormUploadRecord>>,
+  ) : DeliveryFormDraftRepository {
+    override suspend fun submitDraft(
+      localSubmissionUuid: String,
+      localSessionUuid: String,
+      localBeneficiaryId: String,
+      formVersionId: String,
+      answers: FormAnswers,
+      deliveryDate: LocalDate,
+      deliveryFormFilledOn: LocalDate,
+    ): DeliveryFormSubmitResult = DeliveryFormSubmitResult.Synced(childBeneficiaryIds = null)
+
+    override suspend fun getAnswers(localSubmissionUuid: String): FormAnswers? = null
+
+    override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = records
+  }
+
+  private class FakeDeliveryChildRegistrationRepository(
+    private val records: MutableStateFlow<List<FormUploadRecord>>,
+  ) : DeliveryChildRegistrationDraftRepository {
+    override suspend fun submitDraft(
+      localSubmissionUuid: String,
+      localSessionUuid: String,
+      serverBeneficiaryId: String,
+      formVersionId: String,
+      answers: FormAnswers,
+    ): DeliveryChildRegistrationSubmitResult = DeliveryChildRegistrationSubmitResult.Synced
+
+    override fun observeUploadRecords(): Flow<List<FormUploadRecord>> = records
   }
 }

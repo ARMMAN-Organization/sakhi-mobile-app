@@ -90,6 +90,9 @@ class DeliveryChildRegistrationViewModelTest {
       lastRequestedLocalSubmissionUuid = localSubmissionUuid
       return answersToReturn
     }
+
+    override fun observeUploadRecords(): kotlinx.coroutines.flow.Flow<List<org.armman.sakhi.data.forms.FormUploadRecord>> =
+      kotlinx.coroutines.flow.MutableStateFlow(emptyList())
   }
 
   private class FakeDeliveryChildRegistrationDraftRepository : DeliveryChildRegistrationDraftRepository {
@@ -108,6 +111,9 @@ class DeliveryChildRegistrationViewModelTest {
       lastServerBeneficiaryId = serverBeneficiaryId
       return resultToReturn
     }
+
+    override fun observeUploadRecords(): kotlinx.coroutines.flow.Flow<List<org.armman.sakhi.data.forms.FormUploadRecord>> =
+      kotlinx.coroutines.flow.MutableStateFlow(emptyList())
   }
 
   /** Mirrors [org.armman.sakhi.ui.childregistration.DynamicChildRegistrationViewModelTest]'s own

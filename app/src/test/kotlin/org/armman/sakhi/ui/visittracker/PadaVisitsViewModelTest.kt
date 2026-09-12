@@ -7,7 +7,17 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import org.armman.sakhi.data.adhocform.FakeAdHocFormDraftDao
+import org.armman.sakhi.data.auth.session.FakeSecureKeyValueStore
 import org.armman.sakhi.data.beneficiary.BeneficiaryType
+import org.armman.sakhi.data.beneficiary.LocalBeneficiaryStatusOverrideStore
+import org.armman.sakhi.data.beneficiary.LocalEnrolmentBeneficiarySource
+import org.armman.sakhi.data.childregistration.FakeChildFormDraftDao
+import org.armman.sakhi.data.forms.FakeDynamicFormDraftDao
+import org.armman.sakhi.data.forms.FakeFormsRepository
+import org.armman.sakhi.data.referral.FakeReferralLinkDao
+import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
+import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
 import org.armman.sakhi.data.beneficiary.RiskLevel
 import org.armman.sakhi.data.visit.PadaVisitsResult
 import org.armman.sakhi.data.visit.Visit
@@ -65,8 +75,21 @@ class PadaVisitsViewModelTest {
   }
 
   private fun createViewModel(padaId: String = "pada-jamsar", padaName: String = "Jamsar"): PadaVisitsViewModel {
+    // The local offline overlay is exercised in its own tests; these assert the server-backed
+    // path, so every local source here is empty and contributes nothing to the merged state.
     val viewModel = PadaVisitsViewModel(
       repository,
+      LocalEnrolmentBeneficiarySource(
+        FakeDynamicFormDraftDao(),
+        FakeChildFormDraftDao(),
+        FakeSecureKeyValueStore(),
+        RoomVisitScheduleRepository(FakeVisitScheduleDao()),
+        FakeFormsRepository(),
+        LocalBeneficiaryStatusOverrideStore(FakeSecureKeyValueStore()),
+      ),
+      RoomVisitScheduleRepository(FakeVisitScheduleDao()),
+      FakeReferralLinkDao(),
+      FakeAdHocFormDraftDao(),
       SavedStateHandle(
         mapOf(
           PadaVisitsViewModel.NAV_ARG_PADA_ID to padaId,

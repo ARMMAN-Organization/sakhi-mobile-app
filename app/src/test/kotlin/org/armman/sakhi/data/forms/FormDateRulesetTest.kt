@@ -944,6 +944,58 @@ class FormDateRulesetTest {
     assertNull(bounds.max)
   }
 
+  // Bug fix (2026-09-11, reported): repro was ANC1 with Hb 8.4 (moderate anaemia) triggering a
+  // referral, RV1, "Referral needed" = Yes, "Accompanied", then an arbitrarily far future
+  // "Planned facility visit date" (e.g. 15 Sep 2026) was accepted with no error. decided_visit_date
+  // had no upper bound at all — nextScheduledVisitDate now caps it at the beneficiary's next open
+  // visit, resolved by DynamicVisitFormViewModel from VisitScheduleRepository (see that ViewModel's
+  // own doc and DynamicVisitFormViewModelTest for the resolution side of this fix).
+
+  @Test
+  fun `decided visit date max is capped at the next scheduled visit`() {
+    val nextVisitDate = registrationDate.plusDays(20)
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(
+        questionCode = FormDateRuleset.DECIDED_VISIT_DATE_QUESTION_CODE,
+        answers = FormAnswers(),
+        registrationDate = registrationDate,
+        nextScheduledVisitDate = nextVisitDate,
+      ),
+    )
+    assertEquals(registrationDate, bounds.min)
+    assertEquals(nextVisitDate, bounds.max)
+  }
+
+  @Test
+  fun `decided visit date max is unbounded when there is no next scheduled visit`() {
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(
+        questionCode = FormDateRuleset.DECIDED_VISIT_DATE_QUESTION_CODE,
+        answers = FormAnswers(),
+        registrationDate = registrationDate,
+        nextScheduledVisitDate = null,
+      ),
+    )
+    assertNull(bounds.max)
+  }
+
+  @Test
+  fun `decided visit date min is unaffected by the new next-scheduled-visit max param`() {
+    // Regression guard on the 2026-09-04 floor fix: adding the max bound must not disturb the
+    // existing "later of today / answered referral_form_filled_date" floor logic.
+    val backdatedFilledDate = registrationDate.minusDays(1)
+    val bounds = requireNotNull(
+      FormDateRuleset.boundsFor(
+        questionCode = FormDateRuleset.DECIDED_VISIT_DATE_QUESTION_CODE,
+        answers = answers(FormDateRuleset.REFERRAL_FORM_FILLED_DATE_QUESTION_CODE to backdatedFilledDate.toString()),
+        registrationDate = registrationDate,
+        nextScheduledVisitDate = registrationDate.plusDays(20),
+      ),
+    )
+    assertEquals(registrationDate, bounds.min)
+    assertEquals(registrationDate.plusDays(20), bounds.max)
+  }
+
   // --- Referral Follow-up form: filled date / facility visit dates ------------------------------
 
   @Test

@@ -3,6 +3,7 @@ package org.armman.sakhi.data.visitform
 import org.armman.sakhi.R
 import org.armman.sakhi.data.beneficiary.RiskLevel
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.rules.RiskGrade
 
 /**
  * One row of the Summary tab's Tests review (CR-016c, re-wired onto [FormAnswers] on
@@ -30,6 +31,17 @@ data class VisitFormRiskFinding(
  * the retired code elevated Hb risk for a sickle-cell-positive answer using OLD 1-based Excel
  * option codes (`setOf(2, 3)`) that don't correspond to the live schema's string `value_code`s;
  * rather than guess the mapping, sickle-cell status isn't factored into Hb risk yet.
+ *
+ * Bug fix (2026-09-11, reported): this object only ever covers BP/Hb/BMI, by its own doc above —
+ * every other ANC risk condition (danger signs, urine analysis, blood glucose, temperature,
+ * fetal heart rate, fundal height, MUAC, gestational weight gain, age, stunting, bad obstetric
+ * history, APH/PPH...) is invisible to it. [DynamicVisitFormViewModel.overallRiskLevel] used to
+ * rely on THIS object alone for the Summary tab's risk banner, so a beneficiary whose only
+ * abnormal finding was one of those un-ported conditions showed "Low" on Summary even though the
+ * authoritative GoRules engine (the same one gating the referral step) correctly graded her
+ * higher. [fromGoRulesGrade] is the fix's mapping half — it lets that ViewModel fold a live
+ * GoRules-detected [RiskGrade] into this object's own worst-of [overall] aggregation, so the
+ * banner reflects what was actually detected, not just the 3 ported vitals.
  */
 object VisitFormRiskAssessment {
 
@@ -73,6 +85,27 @@ object VisitFormRiskAssessment {
   /** Worst-of aggregation - HIGH > MODERATE > MILD > LOW; empty list is LOW. */
   fun overall(levels: List<RiskLevel>): RiskLevel =
     RISK_SEVERITY_ORDER.firstOrNull { it in levels } ?: RiskLevel.LOW
+
+  /**
+   * Maps a live GoRules [RiskGrade] onto this Summary tab's own [RiskLevel] scale, so a
+   * GoRules-detected condition can be folded into [overall]'s worst-of aggregation alongside the
+   * ported per-vital findings — see this object's own 2026-09-11 doc above for why.
+   *
+   * Callers must filter the source [org.armman.sakhi.data.rules.RiskConditionFinding] list to
+   * `grade != RiskGrade.NORMAL && grade != RiskGrade.UNKNOWN` BEFORE calling this — same
+   * convention [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel.recheckGoRulesRisk]
+   * already uses before trusting a finding for field highlighting. [RiskGrade.NORMAL]/
+   * [RiskGrade.UNKNOWN] both map to [RiskLevel.LOW] here only as an inert default for a caller
+   * that forgets the filter — they must never be the reason a beneficiary's overall level reads
+   * as genuinely "Low", since "not evaluated" and "evaluated as normal" are different things
+   * ([org.armman.sakhi.data.rules.RiskGradingResult]'s own doc on that distinction).
+   */
+  fun fromGoRulesGrade(grade: RiskGrade): RiskLevel = when (grade) {
+    RiskGrade.SEVERE -> RiskLevel.HIGH
+    RiskGrade.MODERATE -> RiskLevel.MODERATE
+    RiskGrade.MILD -> RiskLevel.MILD
+    RiskGrade.NORMAL, RiskGrade.UNKNOWN -> RiskLevel.LOW
+  }
 
   private fun List<VisitFormRiskFinding>.sortedByRisk(): List<VisitFormRiskFinding> =
     sortedBy { RISK_SEVERITY_ORDER.indexOf(it.riskLevel) }

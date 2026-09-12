@@ -29,7 +29,9 @@ import org.armman.sakhi.data.riskassessment.RiskAssessmentDao
 import org.armman.sakhi.data.riskassessment.RiskAssessmentEntity
 import org.armman.sakhi.data.riskassessment.RiskFlagEntity
 import org.armman.sakhi.data.rules.RuleSetIds
+import org.armman.sakhi.data.schedule.ScheduleContext
 import org.armman.sakhi.data.schedule.VisitCodeType
+import org.armman.sakhi.data.schedule.VisitScheduleCoordinator
 import org.armman.sakhi.data.schedule.VisitScheduleEntity
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
 import org.armman.sakhi.data.schedule.SameSessionNnVisitResolver
@@ -151,6 +153,24 @@ sealed class VisitFormSubmissionException(message: String) : Exception(message) 
 data class VisitSubmitOutcome(
   val closureDeferredForExtension: Boolean? = null,
   val extensionVisit: org.armman.sakhi.data.forms.ExtensionVisitWindowDto? = null,
+  /**
+   * CR (ANC3 missed-referral gap, 2026-09-10): the id `POST /forms/:formCode/submissions`
+   * returned (null only if that call somehow succeeded without one — see [triggerRiskAssessment]'s
+   * own null-check). Persisted by [VisitFormSyncExecutor]/[RoomVisitFormDraftRepository] onto
+   * [VisitFormDraftEntity.serverSubmissionId] so [VisitFormSyncExecutor.retryRiskAssessments] can
+   * redo the risk-assessment step later without re-submitting the whole visit.
+   */
+  val serverSubmissionId: String? = null,
+  /**
+   * True once [triggerRiskAssessment] either had nothing to do (no risk phase for this form code)
+   * or got an actual `POST /risk-assessments` response (whether or not it flagged a referral).
+   * False means the call never completed after every retry — the caller should leave
+   * [VisitFormDraftEntity.riskAssessmentStatus] as PENDING/FAILED so
+   * [VisitFormSyncExecutor.retryRiskAssessments] tries again on the next sync pass. Defaults to
+   * true so every pre-existing caller of [submit] (which never read this field) keeps behaving
+   * exactly as before this field existed.
+   */
+  val riskAssessmentCompleted: Boolean = true,
 )
 
 /**
@@ -206,6 +226,12 @@ class VisitFormSubmissionCoordinator @Inject constructor(
    * that class's own doc for why this replaced this coordinator's own former copy of the same
    * lookup, which queried the wrong (mother's) beneficiary id. */
   private val sameSessionNnVisitResolver: SameSessionNnVisitResolver,
+  /** CR (2026-09-11, ANC1 missing-HR-visit fix): the seam into visit-schedule generation —
+   * see [triggerRiskAssessment]'s call to [VisitScheduleCoordinator.onHighRiskDetected] for
+   * why this coordinator, which already owns the risk-assessment response, is the single
+   * place that can react to `overallHighRiskFlag` for both the immediate online submit path
+   * and [retryRiskAssessment]'s background-sync re-entry. */
+  private val visitScheduleCoordinator: VisitScheduleCoordinator,
 ) {
 
   private val riskAssessmentJsonMapper = Gson()
@@ -361,14 +387,17 @@ class VisitFormSubmissionCoordinator @Inject constructor(
     // Phase 5 (CR — offline high-risk rule evaluation): only after the form submission above has
     // actually succeeded, same as advanceDeliverySessionIfDue — see triggerRiskAssessment's own
     // doc for why a failure here never fails this whole submit() call.
-    triggerRiskAssessment(
+    val riskAssessmentCompleted = triggerRiskAssessment(
       localScheduleUuid = localScheduleUuid,
       formCode = formCode,
       serverBeneficiaryId = serverBeneficiaryId,
+      localBeneficiaryId = schedule.localBeneficiaryId,
       visitId = visitId,
       serverSubmissionId = serverSubmissionId,
       answers = answers,
       referralCapture = referralCapture,
+      triggeringVisit = schedule,
+      actualCompletionDate = visitDate,
     )
 
     // CR-Closure-01 items #5/#6: carries the CCV per-visit HR re-evaluation signal back to the
@@ -378,6 +407,8 @@ class VisitFormSubmissionCoordinator @Inject constructor(
     VisitSubmitOutcome(
       closureDeferredForExtension = submissionData?.closureDeferredForExtension,
       extensionVisit = submissionData?.extensionVisit,
+      serverSubmissionId = serverSubmissionId,
+      riskAssessmentCompleted = riskAssessmentCompleted,
     )
   }
 
@@ -413,24 +444,52 @@ class VisitFormSubmissionCoordinator @Inject constructor(
    * completes it later just because time passed. A short, tight retry only helps catch a
    * transient failure in *this* request (a network blip); it is not "waiting for a queue to
    * drain", so the retry policy is short attempts close together, not a long backoff. If every
-   * attempt fails, this beneficiary simply has no risk assessment for this visit until her next
-   * visit happens to produce one — a known, accepted gap (no server-side self-healing exists),
-   * not a bug in this retry logic.
+   * attempt within *this* call fails, this call reports it (see the return value's doc) rather
+   * than silently accepting the loss — [VisitFormSyncExecutor.retryRiskAssessments] retries this
+   * exact step again on the next Data Upload via [retryRiskAssessment], so this is no longer a
+   * permanent gap (CR — ANC3 missed-referral gap, 2026-09-10; previously it was, see this
+   * function's git history for that version of this doc).
+   *
+   * @return true once a `POST /risk-assessments` response was actually obtained (whether or not
+   * it flagged a referral) or this form code/attempt has nothing to do (no risk phase, or no
+   * [serverSubmissionId] — both trivially "nothing left to retry"). False only when the request
+   * itself was attempted and every retry failed — the one case the caller should leave queued for
+   * another pass.
    */
   private suspend fun triggerRiskAssessment(
     localScheduleUuid: String,
     formCode: String,
     serverBeneficiaryId: String,
+    /**
+     * CR (2026-09-10, Visit Tracker referral-follow-up count/list gap analysis): this
+     * beneficiary's LOCAL id — needed only to cache [ReferralLinkEntity.beneficiaryId] as the id
+     * every reader of that column ([org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel
+     * .loadReferralFormIfNeeded]'s auto-numbering, [org.armman.sakhi.ui.visittracker
+     * .PadaVisitsViewModel.localOverlayVisits], [org.armman.sakhi.data.visittracker
+     * .LocalPadaSummaryOverlay.buildPadaSummaries]) actually matches against — all three key their
+     * own beneficiary maps by [org.armman.sakhi.data.beneficiary.Beneficiary.id], which is this
+     * local id, not [serverBeneficiaryId]. Never sent over the wire — [serverBeneficiaryId] alone
+     * is what `POST /risk-assessments`/`POST /referrals` need.
+     */
+    localBeneficiaryId: String,
     visitId: String,
     serverSubmissionId: String?,
     answers: FormAnswers,
     referralCapture: ReferralCapture?,
-  ) {
-    val riskPhase = riskPhaseFor(formCode) ?: return
-    val ruleSetId = riskRuleSetIdFor(formCode) ?: return
+    /** CR (2026-09-11): the just-submitted visit's own schedule row — needed as
+     * [VisitScheduleCoordinator.onHighRiskDetected]'s `triggeringVisit` so a same-visit ANC-HR/
+     * INC-HR follow-up can be anchored back to it. */
+    triggeringVisit: VisitScheduleEntity,
+    /** CR (2026-09-11): the date this visit was actually completed (FR-S-3.4's anchor for the
+     * HR follow-up's 15-day offset) — the immediate submit path passes the Sakhi-entered
+     * [submit] `visitDate`; [retryRiskAssessment] passes the draft's own persisted visit date. */
+    actualCompletionDate: LocalDate,
+  ): Boolean {
+    val riskPhase = riskPhaseFor(formCode) ?: return true
+    val ruleSetId = riskRuleSetIdFor(formCode) ?: return true
     if (serverSubmissionId == null) {
       Log.w(TAG, "triggerRiskAssessment($formCode): no server submissionId returned, skipping")
-      return
+      return true
     }
 
     val request = CreateRiskAssessmentRequestDto(
@@ -441,17 +500,76 @@ class VisitFormSubmissionCoordinator @Inject constructor(
       riskPhase = riskPhase,
       answers = answers.singleValues + answers.multiValues,
     )
-    val data = createRiskAssessmentWithRetry(request, formCode) ?: return
+    val data = createRiskAssessmentWithRetry(request, formCode) ?: return false
 
     cacheRiskAssessment(localScheduleUuid, data)
+
+    maybeGenerateHrVisit(
+      localBeneficiaryId = localBeneficiaryId,
+      triggeringVisit = triggeringVisit,
+      actualCompletionDate = actualCompletionDate,
+      overallHighRiskFlag = data.overallHighRiskFlag,
+    )
 
     maybeCreateReferral(
       localScheduleUuid = localScheduleUuid,
       visitId = visitId,
       beneficiaryId = serverBeneficiaryId,
+      localBeneficiaryId = localBeneficiaryId,
       submissionId = serverSubmissionId,
       referralCapture = referralCapture,
       riskFlags = data.riskFlags,
+    )
+    return true
+  }
+
+  /**
+   * Standalone re-entry point for [triggerRiskAssessment] — used only by
+   * [VisitFormSyncExecutor.retryRiskAssessments] to redo the best-effort risk-assessment/referral
+   * step for a draft whose main submission already succeeded (schedule already COMPLETED,
+   * [VisitFormDraftEntity.syncStatus] already SYNCED) on a *previous* [submit] attempt, but whose
+   * [triggerRiskAssessment] call inside that attempt never got a response (see
+   * [VisitFormDraftEntity.riskAssessmentStatus]'s own doc for how a draft ends up in this state —
+   * the ANC3 case that motivated this: the connection dropped between the form-submission call
+   * succeeding and the risk-assessment call that follows it).
+   *
+   * Never re-POSTs the visit or the form submission — only re-fetches the schedule (for its
+   * current `serverBeneficiaryId`; the schedule itself doesn't change after the visit synced) and
+   * calls straight through to [triggerRiskAssessment] with the [serverSubmissionId]/[visitId]
+   * already persisted on the draft. `POST /risk-assessments` is idempotent by submissionId and
+   * `POST /referrals` is one-per-visit server-side, so a repeated call here after a prior partial
+   * success (e.g. the risk-assessment call succeeded but the local cache write failed) is safe.
+   *
+   * Returns false (meaning "still not done, try again next sync pass") if the schedule or its
+   * `serverBeneficiaryId` can no longer be found — both should be impossible for a draft that
+   * already reached SYNCED, but this is defensive rather than a crash if it somehow happens.
+   */
+  suspend fun retryRiskAssessment(
+    localScheduleUuid: String,
+    formCode: String,
+    serverSubmissionId: String,
+    visitId: String,
+    answers: FormAnswers,
+    referralCapture: ReferralCapture?,
+    /** CR (2026-09-11): see [triggerRiskAssessment]'s own param of the same name — this retry
+     * path needs it too, so a risk assessment that only completes on a later sync pass still
+     * generates its HR follow-up anchored to the visit's real completion date, not the retry's. */
+    actualCompletionDate: LocalDate,
+  ): Boolean {
+    val schedule = visitScheduleRepository.getByLocalScheduleUuid(localScheduleUuid) ?: return false
+    val serverBeneficiaryId = schedule.serverBeneficiaryId ?: return false
+
+    return triggerRiskAssessment(
+      localScheduleUuid = localScheduleUuid,
+      formCode = formCode,
+      serverBeneficiaryId = serverBeneficiaryId,
+      localBeneficiaryId = schedule.localBeneficiaryId,
+      visitId = visitId,
+      serverSubmissionId = serverSubmissionId,
+      answers = answers,
+      referralCapture = referralCapture,
+      triggeringVisit = schedule,
+      actualCompletionDate = actualCompletionDate,
     )
   }
 
@@ -570,6 +688,48 @@ class VisitFormSubmissionCoordinator @Inject constructor(
   }
 
   /**
+   * CR (2026-09-11, ANC1 missing-HR-visit fix): the other half of what a `POST /risk-assessments`
+   * response flagging high risk must do (SRS FR-S-5.2) — [VisitScheduleCoordinator.onHighRiskDetected]
+   * existed and was fully implemented (15-day FR-S-3.4 anchor, idempotent per beneficiary/hrType)
+   * but had no caller anywhere in the app, so a flagged ANC1/INC visit never produced its ANC-HR1/
+   * INC-HR1 follow-up. This is the missing wiring.
+   *
+   * Best-effort and non-blocking, exactly like [maybeCreateReferral] and [triggerRiskAssessment]
+   * itself: a failure here must never flip an otherwise-successful visit submission to
+   * Failed/retryable — the risk-assessment response has already been obtained and cached by the
+   * time this runs.
+   *
+   * `registrationDate` on the [ScheduleContext] built here is unused by the ANC-HR/INC-HR
+   * generators (same convention already established at [org.armman.sakhi.data.delivery
+   * .DeliveryFormSubmissionCoordinator]'s own `onDeliveryRecorded` call site) — [actualCompletionDate]
+   * is passed there purely to satisfy the non-null contract.
+   */
+  private suspend fun maybeGenerateHrVisit(
+    localBeneficiaryId: String,
+    triggeringVisit: VisitScheduleEntity,
+    actualCompletionDate: LocalDate,
+    overallHighRiskFlag: Boolean,
+  ) {
+    if (!overallHighRiskFlag) return
+    runCatching {
+      visitScheduleCoordinator.onHighRiskDetected(
+        context = ScheduleContext(
+          localBeneficiaryId = localBeneficiaryId,
+          registrationDate = actualCompletionDate,
+        ),
+        triggeringVisit = triggeringVisit,
+        actualCompletionDate = actualCompletionDate,
+      )
+    }.onFailure { error ->
+      Log.w(
+        TAG,
+        "maybeGenerateHrVisit(visitType=${triggeringVisit.visitType}) failed — visit submission still succeeded",
+        error,
+      )
+    }
+  }
+
+  /**
    * CR-Referral-01: creates exactly one referral for this visit, using the SERVER's own
    * authoritative `isReferralTrigger` flags from the just-completed `POST /risk-assessments` call
    * (not the on-device GoRules result — the server re-evaluates from raw answers independently,
@@ -593,6 +753,11 @@ class VisitFormSubmissionCoordinator @Inject constructor(
     localScheduleUuid: String,
     visitId: String,
     beneficiaryId: String,
+    /** CR (2026-09-10) — see [triggerRiskAssessment]'s own param of the same name: cached onto
+     * [ReferralLinkEntity.beneficiaryId] instead of [beneficiaryId] (server id), since every
+     * reader of that column matches against the LOCAL id. [beneficiaryId] itself is still what
+     * [ReferralRepository.createReferral] sends over the wire below — unchanged. */
+    localBeneficiaryId: String,
     submissionId: String?,
     referralCapture: ReferralCapture?,
     riskFlags: List<RiskAssessmentFlagDto>,
@@ -628,7 +793,7 @@ class VisitFormSubmissionCoordinator @Inject constructor(
       when (outcome) {
         is CreateReferralOutcome.Created -> {
           Log.i(TAG, "maybeCreateReferral(visitId=$visitId): created referral ${outcome.referral.referralId}")
-          cacheReferralLink(localScheduleUuid, beneficiaryId, outcome.referral, referralCapture.referralVisitName)
+          cacheReferralLink(localScheduleUuid, localBeneficiaryId, outcome.referral, referralCapture.referralVisitName)
         }
         is CreateReferralOutcome.AlreadyExists -> {
           // Idempotent per backend's #197 fix: this visit already had a referral (e.g. a resumed
@@ -636,7 +801,7 @@ class VisitFormSubmissionCoordinator @Inject constructor(
           // attempt) — the existing one is returned untouched, not a new one, so this is the
           // one-referral-per-visit rule working correctly, not a warning-worthy condition.
           Log.i(TAG, "maybeCreateReferral(visitId=$visitId): referral already existed (${outcome.referral.referralId}), one-per-visit held")
-          cacheReferralLink(localScheduleUuid, beneficiaryId, outcome.referral, referralCapture.referralVisitName)
+          cacheReferralLink(localScheduleUuid, localBeneficiaryId, outcome.referral, referralCapture.referralVisitName)
         }
       }
     }
@@ -649,9 +814,18 @@ class VisitFormSubmissionCoordinator @Inject constructor(
    * otherwise-successful visit submission to Failed/retryable, so it is swallowed the same way
    * [maybeCreateReferral]'s own network call is.
    *
-   * [beneficiaryId] is stamped onto the cached row (CR-Referral-01, in-visit autopopulation fix)
-   * purely so [ReferralLinkDao.countByBeneficiaryId] can later count this beneficiary's referrals
-   * for the in-visit capture step's own "RV{n+1}" auto-numbering — not used for anything else here.
+   * [localBeneficiaryId] is stamped onto the cached row (CR-Referral-01, in-visit autopopulation
+   * fix) as this beneficiary's LOCAL id, purely so [ReferralLinkDao.countByBeneficiaryId] can
+   * later count this beneficiary's referrals for the in-visit capture step's own "RV{n+1}"
+   * auto-numbering, and so [org.armman.sakhi.ui.visittracker.PadaVisitsViewModel
+   * .localOverlayVisits]/[org.armman.sakhi.data.visittracker.LocalPadaSummaryOverlay] can match
+   * a pending-follow-up row back to this device's own beneficiary list. Bharath, 2026-09-10: this
+   * used to be stamped with the SERVER beneficiary id (the same value sent to
+   * `POST /referrals`), which silently broke all three of those readers — they all key their own
+   * beneficiary maps by the local id, so the match against a server id never succeeded (the
+   * auto-numbering also never worked, always seeing 0). Fixed by threading the local id in here
+   * separately from [maybeCreateReferral]'s own `beneficiaryId` param, which stays the server id
+   * for the actual API call.
    *
    * [referralVisitName] comes from the just-submitted [ReferralCapture], NOT [referral] itself —
    * `POST /referrals`'s response has no such field (it's a request-only, backend-unaware concept,
@@ -660,7 +834,7 @@ class VisitFormSubmissionCoordinator @Inject constructor(
    */
   private suspend fun cacheReferralLink(
     localScheduleUuid: String,
-    beneficiaryId: String,
+    localBeneficiaryId: String,
     referral: Referral,
     referralVisitName: String?,
   ) {
@@ -677,7 +851,7 @@ class VisitFormSubmissionCoordinator @Inject constructor(
           facilityName = referral.facilityName,
           facilityType = referral.facilityType.name,
           referralVisitName = referralVisitName.orEmpty(),
-          beneficiaryId = beneficiaryId,
+          beneficiaryId = localBeneficiaryId,
         ),
       )
     }.onFailure { error ->

@@ -3,8 +3,11 @@ package org.armman.sakhi.data.adhocform
 import org.armman.sakhi.data.audit.FormAuditRepository
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.connectivity.ConnectivityChecker
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.forms.SubmitErrorCopy
 import java.time.Instant
 import javax.inject.Inject
@@ -49,6 +52,20 @@ class RoomAdHocFormDraftRepository @Inject constructor(
 
   override suspend fun countByFormCode(localBeneficiaryId: String, formCode: String): Int =
     dao.getAll().count { it.localBeneficiaryId == localBeneficiaryId && it.formCode == formCode }
+
+  override fun observeUploadRecords(): Flow<List<FormUploadRecord>> =
+    dao.observeAll().map { entities -> entities.map { it.toUploadRecord() } }
+
+  private fun AdHocFormDraftEntity.toUploadRecord() = FormUploadRecord(
+    localBeneficiaryId = localBeneficiaryId,
+    formCode = formCode,
+    syncStatus = syncStatus,
+    createdAtEpochMillis = createdAtEpochMillis,
+    // Ad-hoc forms have no "is this a new pregnancy?" duplicate-review step (that's Mother
+    // Registration-only, DUPLICATE_CONFLICT never occurs on this queue) -- always null here,
+    // same as VisitFormDraftEntity.toUploadRecord()'s own equivalent field.
+    pendingNewPregnancyBeneficiaryId = null,
+  )
 
   private fun AdHocFormSyncItemResult?.toSubmitResult(): AdHocFormSubmitResult = when (this) {
     is AdHocFormSyncItemResult.Synced -> AdHocFormSubmitResult.Synced

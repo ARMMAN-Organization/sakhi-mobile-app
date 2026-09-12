@@ -1,6 +1,8 @@
 package org.armman.sakhi.data.adhocform
 
+import kotlinx.coroutines.flow.Flow
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormUploadRecord
 
 /**
  * Offline-first persistence boundary for one ad-hoc-form submission (Referral, Referral
@@ -45,4 +47,18 @@ interface AdHocFormDraftRepository {
    * elsewhere.
    */
   suspend fun countByFormCode(localBeneficiaryId: String, formCode: String): Int
+
+  /**
+   * Bharath, 2026-09-10 ("submitted the referral follow-up offline, turned data back on, Data
+   * Upload pill shows no indication at all"): [org.armman.sakhi.data.sync.CombinedUploadRecordsSource]
+   * — the read model behind the Home "Forms Uploaded" badge/modal — only ever merged the Mother
+   * Registration, Children Register and ANC Visit Form queues; this fifth-and-sixth-form queue
+   * (Referral, Referral Follow-up, ANC/Child Closure, Beneficiary Reopen) was submitting and
+   * syncing correctly the whole time (see [org.armman.sakhi.data.sync.ManualSyncTrigger] — its
+   * `adHocFormSyncScheduler.syncNow()` call was never missing), it just had no visible row in the
+   * UI a Sakhi could watch move from "Uploading" to "Uploaded". This is what fixes that: same
+   * `observeAll().map { toUploadRecord() }` shape as [org.armman.sakhi.data.visitform
+   * .VisitFormDraftRepository.observeUploadRecords].
+   */
+  fun observeUploadRecords(): Flow<List<FormUploadRecord>>
 }

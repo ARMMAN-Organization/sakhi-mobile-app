@@ -53,6 +53,14 @@ interface VisitScheduleRepository {
   /** Rows awaiting upload whose beneficiary has already synced. */
   suspend fun getUnsynced(): List<VisitScheduleEntity>
 
+  /** Every currently-open schedule never uploaded, beneficiary-sync-state notwithstanding — see
+   * [VisitScheduleDao.getActiveUnsynced]'s doc for why this is distinct from [getUnsynced]. */
+  suspend fun getActiveUnsynced(): List<VisitScheduleEntity>
+
+  /** Every currently-open schedule, synced or not — see [VisitScheduleDao.getAllActive]'s doc for
+   * when this is the correct one to use instead of [getActiveUnsynced]. */
+  suspend fun getAllActive(): List<VisitScheduleEntity>
+
   fun observeUnsyncedCount(): Flow<Int>
 
   suspend fun markSynced(localScheduleUuid: String, serverScheduleId: String)

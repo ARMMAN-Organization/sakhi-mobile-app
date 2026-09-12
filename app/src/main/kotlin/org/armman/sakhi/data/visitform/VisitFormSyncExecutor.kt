@@ -39,20 +39,62 @@ class VisitFormSyncExecutor @Inject constructor(
     // would otherwise be invisible to getPendingSync() forever.
     dao.reclaimStaleSyncing()
 
-    val pending = dao.getPendingSync()
-    if (pending.isEmpty()) return EnrollmentSyncOutcome.COMPLETED
-
     var anyRetryableFailure = false
-    for (draft in pending) {
+    for (draft in dao.getPendingSync()) {
       if (attemptSync(draft) is VisitFormSyncItemResult.Retryable) {
         anyRetryableFailure = true
       }
     }
 
+    // CR (ANC3 missed-referral gap, 2026-09-10): a separate pass over already-SYNCED drafts whose
+    // best-effort risk-assessment/referral step never completed — see
+    // VisitFormDraftEntity.riskAssessmentStatus's own doc. Deliberately unconditional (not gated
+    // on getPendingSync() being non-empty above): the whole point is these rows are otherwise
+    // never looked at again once syncStatus flips to SYNCED.
+    retryRiskAssessments()
+
     return if (anyRetryableFailure) {
       EnrollmentSyncOutcome.RETRYABLE_FAILURE
     } else {
       EnrollmentSyncOutcome.COMPLETED
+    }
+  }
+
+  /**
+   * Re-runs [VisitFormSubmissionCoordinator.retryRiskAssessment] for every draft whose main
+   * submission already succeeded but whose risk-assessment/referral-creation step didn't — see
+   * [VisitFormDraftEntity.riskAssessmentStatus]'s doc. Called from both [run] (background worker,
+   * so this also self-heals without the Sakhi needing to notice and manually retry) and
+   * indirectly from a manual Data Upload tap (which enqueues the same worker via
+   * [VisitFormSyncScheduler]).
+   */
+  suspend fun retryRiskAssessments() {
+    for (draft in dao.getRiskAssessmentPending()) {
+      val serverVisitId = draft.serverVisitId
+      val serverSubmissionId = draft.serverSubmissionId
+      // Defensive only: both are set unconditionally by attemptSync() the moment syncStatus
+      // flips to SYNCED (see that success branch below), which is this query's own filter.
+      if (serverVisitId == null || serverSubmissionId == null) continue
+
+      val payload = loadPayload(draft.localScheduleUuid) ?: continue
+      val completed = coordinator.retryRiskAssessment(
+        localScheduleUuid = draft.localScheduleUuid,
+        formCode = draft.formCode,
+        serverSubmissionId = serverSubmissionId,
+        visitId = serverVisitId,
+        answers = payload.answers,
+        referralCapture = payload.referralCapture,
+        actualCompletionDate = parseVisitDate(draft.visitDateIso),
+      )
+      dao.upsert(
+        draft.copy(
+          riskAssessmentStatus = if (completed) {
+            EnrollmentSyncStatus.SYNCED
+          } else {
+            EnrollmentSyncStatus.FAILED
+          },
+        ),
+      )
     }
   }
 
@@ -112,6 +154,12 @@ class VisitFormSyncExecutor @Inject constructor(
               lastAttemptAtEpochMillis = Instant.now().toEpochMilli(),
               lastErrorMessage = null,
               serverVisitId = capturedVisitId,
+              serverSubmissionId = outcome.serverSubmissionId ?: draft.serverSubmissionId,
+              riskAssessmentStatus = if (outcome.riskAssessmentCompleted) {
+                EnrollmentSyncStatus.SYNCED
+              } else {
+                EnrollmentSyncStatus.PENDING
+              },
             ),
           )
           VisitFormSyncItemResult.Synced(outcome)

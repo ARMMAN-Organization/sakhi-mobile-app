@@ -424,6 +424,36 @@ class AdHocFormSubmissionCoordinatorTest {
     assertEquals("OPD and given medications", call.outcome)
   }
 
+  /**
+   * bharath, 2026-09-11: a referral follow-up form filled while the device clock was set forward
+   * (QA testing a future-dated scenario, or a genuinely drifted/misconfigured device clock in the
+   * field) stayed stuck failing sync forever, even after the clock was corrected and the device
+   * came back online — because `submitReferralFollowUp` used to trust the stored `form_filled_date`
+   * answer verbatim, and every retry resent that same future date, which the backend rejects.
+   * `form_filled_date` clamps to `LocalDate.now()` at SUBMIT time now — this locks that in.
+   */
+  @Test
+  fun `REFERRAL_FOLLOWUP_VISIT clamps a stale future form_filled_date to today at submit time`() = runTest {
+    seedSyncedBeneficiary()
+    formSubmissionApi.response = successfulSubmissionResponse()
+    referralRepository.submitFollowUpResult = successfulFollowUpResult()
+
+    val farFutureDate = LocalDate.now().plusDays(30)
+    val result = submitFollowUpForm(
+      FormAnswers(
+        singleValues = mapOf(
+          "form_filled_date" to farFutureDate.toString(),
+          "visited_health_facility" to "yes",
+        ),
+        multiValues = emptyMap(),
+      ),
+    )
+
+    assertTrue(result.isSuccess)
+    val call = referralRepository.submitFollowUpCalls.single()
+    assertEquals(LocalDate.now(), call.followupDate)
+  }
+
   @Test
   fun `REFERRAL_FOLLOWUP_VISIT not-visited path maps the not_visited_reason label and sends visitedFacilityFlag false`() = runTest {
     seedSyncedBeneficiary()

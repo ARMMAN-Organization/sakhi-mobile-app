@@ -3,39 +3,29 @@ package org.armman.sakhi.data.schedule
 /**
  * Gates [VisitScheduleCoordinator]'s use of [GoRulesScheduleAdapter] (CR-032).
  *
- * Mirrors the `RemoteBeneficiaryListFeatureFlag`/`ScheduleRuleSource` M2→M3 swap-point pattern
+ * Mirrors the `RemoteBeneficiaryListFeatureFlag`/`ScheduleRuleSource` M2->M3 swap-point pattern
  * already used elsewhere in this codebase: one flag, one place, a trivial revert.
  *
- * **Keep `false` until:**
- * 1. The Step 1 ngrok trial has confirmed the on-device GoRules engine ([io.gorules.zen_engine]
- *    binding, see `data/rules/ZenRuleEvaluator.kt`) actually runs on a real low-end device.
- * 2. Each pack's real request-field names have been confirmed against the running rules-service
- *    (see [GoRulesScheduleAdapter]'s per-method doc for which fields are still best-effort).
- * 3. The differential test suite (GoRules vs [HardcodedRuleSource] over a seeded corpus) passes.
+ * ### History
+ * - **2026-08-13:** enabled for dev/internal-testing only, ahead of a real low-end-device check.
+ * - **2026-08-27:** reverted — that real-device check failed on a release build. R8 had no keep
+ *   rules for `io.gorules.**`, renamed the JNI-bound ZenEngine classes, and every release-build
+ *   enrolment silently generated zero visits (`UnsatisfiedLinkError`/`NoSuchMethodError`, a
+ *   `java.lang.Error` that skipped the `catch (e: Exception)` blocks in `ZenRuleEvaluator` and
+ *   `GoRulesScheduleAdapter`, only caught silently one layer up).
+ * - **2026-08-31:** `com.sun.jna.**` keep rules added (the native engine's transitive JNA
+ *   dependency, missed by the first fix) — confirmed via a real release-build device log for the
+ *   RISK-grading call path (`GoRulesRiskAdapter`).
+ * - **2026-09-09:** re-enabled and verified end-to-end on a real release-build device
+ *   (Bharath) — enrollment, child registration, delivery, and visit-form submission all
+ *   exercised on-device with this flag on; forms and submissions confirmed working correctly, no
+ *   `GoRulesScheduleAdapter: evaluate(...) threw` warnings in `SakhiSync` Logcat. **Permanently
+ *   enabled** — this is no longer a swap-in-progress flag pending verification.
  *
- * Until all three hold, [VisitScheduleCoordinator] always falls back to the existing Kotlin
- * generators — flipping this on prematurely risks generating wrong schedules for real
- * beneficiaries, not just a failed test.
- *
- * **Enabled 2026-08-13 — dev/internal-testing only.** Bharath confirmed this build is not being
- * distributed to real Sakhis yet, so items 2 and 3 above being satisfied (field names confirmed
- * by backend, mapping/differential tests passing — see [org.armman.sakhi.data.schedule.GoRulesScheduleAdapterMappingTest])
- * is enough to test internally. Item 1 (a real low-end-device run) is STILL OPEN — no
- * emulator/device was connected at the moment this flag was flipped. Before this build (or any
- * build with this flag on) reaches a real Sakhi: connect a device, register a real test
- * beneficiary end-to-end, and check Logcat (tag `SakhiSync`) for any GoRules evaluation warnings.
- * If that check fails, revert this to `false` immediately.
+ * Kept as a named constant (rather than deleted outright) purely as a fast, single-place revert
+ * switch, matching this codebase's existing feature-flag convention — not because GoRules
+ * scheduling is still considered provisional.
  */
 internal object GoRulesScheduleFeatureFlag {
-  // REVERTED 2026-08-27: the "real low-end/release-build check" this flag's own doc called out as
-  // STILL OPEN just failed. Release builds have zero ProGuard/R8 keep rules for io.gorules.** — R8
-  // renames the JNI-bound ZenEngine classes, breaking native linkage, throwing an
-  // UnsatisfiedLinkError/NoSuchMethodError (java.lang.Error, not Exception — so it skips both
-  // ZenRuleEvaluator's and GoRulesScheduleAdapter's `catch (e: Exception)` blocks) that only gets
-  // caught (silently, pre-2026-08-27) by MotherEnrolmentScheduleTrigger's outer runCatching. Net
-  // effect: every release-build enrolment silently generated zero visits, debug builds unaffected
-  // (isMinifyEnabled = false there). Per this flag's own rollback rule ("if that check fails,
-  // revert to false immediately") — do not re-enable until proguard-rules.pro has real io.gorules
-  // keep rules AND this has been re-verified on an actual release build on a real device.
-  const val ENABLED = false
+  const val ENABLED = true
 }

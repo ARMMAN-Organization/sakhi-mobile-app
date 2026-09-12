@@ -18,7 +18,11 @@ import kotlinx.coroutines.launch
 import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import org.armman.sakhi.data.dashboard.DashboardRepository
 import org.armman.sakhi.data.dashboard.DashboardSummary
+import org.armman.sakhi.data.dashboard.LocalVisitCounts
+import org.armman.sakhi.data.dashboard.LocalReferralFollowUpOverlay
+import org.armman.sakhi.data.dashboard.LocalVisitOverlay
 import org.armman.sakhi.data.dashboard.NoDashboardCacheAvailableException
+import org.armman.sakhi.data.dashboard.toLocalVisitCounts
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.DynamicFormDraftRepository
 import org.armman.sakhi.data.forms.FormUploadRecord
@@ -27,6 +31,7 @@ import org.armman.sakhi.data.notification.NOTIFICATION_CTA_FILL_REFERRAL_FORM
 import org.armman.sakhi.data.notification.NOTIFICATION_TYPE_REFERRAL_INCOMPLETE_UPDATE
 import org.armman.sakhi.data.notification.NotificationRepository
 import org.armman.sakhi.data.referral.ReferralRepository
+import org.armman.sakhi.data.schedule.VisitScheduleRepository
 import org.armman.sakhi.data.sync.ManualSyncTrigger
 import org.armman.sakhi.data.sync.UploadRecordsSource
 import javax.inject.Inject
@@ -116,6 +121,8 @@ class HomeViewModel @Inject constructor(
   private val connectivityChecker: ConnectivityChecker,
   private val notificationRepository: NotificationRepository,
   private val referralRepository: ReferralRepository,
+  private val visitScheduleRepository: VisitScheduleRepository,
+  private val localReferralFollowUpOverlay: LocalReferralFollowUpOverlay,
 ) : ViewModel() {
 
   private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
@@ -168,6 +175,63 @@ class HomeViewModel @Inject constructor(
     }
 
   /**
+   * Locally-generated open visits never uploaded (SR-ANC-01 post-EDD visit, a delivery/enrolment
+   * schedule for a beneficiary who hasn't synced yet, an LMP/EDD-change regeneration, etc.) —
+   * see [org.armman.sakhi.data.dashboard.LocalVisitCounts]'s doc for why counting only the
+   * `serverScheduleId == null` set can never double-count what the server already reports.
+   * Refreshed alongside [loadSummary]/[refreshSummaryQuietly] rather than kept as a live Room
+   * [Flow] — there is no existing "observe active unsynced schedules" query, and this is a
+   * best-effort overlay, not the primary count.
+   */
+  private val _localVisitOverlay = MutableStateFlow(LocalVisitOverlay())
+
+  /**
+   * Computes BOTH overlay variants up front rather than picking one here — [overlayPendingCounts]
+   * is the one place that actually knows whether [DashboardSummary.lastSyncedAt] is null, which is
+   * what decides which variant is safe to apply (see [LocalVisitOverlay]'s own doc: a schedule that
+   * already synced, e.g. via an earlier successful Data Upload, is invisible to the
+   * unsynced-only count, but a `lastSyncedAt == null` summary has no real server number for that
+   * count to protect against double-counting in the first place).
+   */
+  private fun refreshLocalVisitOverlay() {
+    viewModelScope.launch {
+      _localVisitOverlay.value = try {
+        val unsynced = visitScheduleRepository.getActiveUnsynced().toLocalVisitCounts()
+        val all = visitScheduleRepository.getAllActive().toLocalVisitCounts()
+        LocalVisitOverlay(unsyncedOnly = unsynced, all = all)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        LocalVisitOverlay()
+      }
+    }
+  }
+
+  /**
+   * This device's own pending-referral-follow-up count, from [LocalReferralFollowUpOverlay] — see
+   * that class's doc for why referral counts need beneficiary-based local mapping (bharath,
+   * 2026-09-10: "the referral count also need to work in offline too, like the visit count — do
+   * the mapping based on the beneficiary, not only from the api call"). Kept as its own
+   * [MutableStateFlow], refreshed alongside [_localVisitOverlay], rather than folded into
+   * [LocalVisitOverlay] itself since it comes from an entirely different local source (referral
+   * links + ad-hoc drafts, not visit schedules) and is merged into [overlayPendingCounts] with a
+   * different strategy (max, not additive — see [LocalReferralFollowUpOverlay]'s doc).
+   */
+  private val _localReferralFollowUpCount = MutableStateFlow(0)
+
+  private fun refreshLocalReferralFollowUpOverlay() {
+    viewModelScope.launch {
+      _localReferralFollowUpCount.value = try {
+        localReferralFollowUpOverlay.pendingCount()
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        0
+      }
+    }
+  }
+
+  /**
    * Public dashboard state consumed by [HomeScreen]: [_uiState]'s raw server snapshot with
    * [pendingMotherCount]/[pendingChildCount] added onto the three beneficiary-count fields
    * ([DashboardSummary.activeMothersCount], [DashboardSummary.activeChildrenCount],
@@ -188,8 +252,14 @@ class HomeViewModel @Inject constructor(
    * contract the plain `_uiState.asStateFlow()` this replaces already had.
    */
   val uiState: StateFlow<HomeUiState> =
-    combine(_uiState, pendingMotherCount, pendingChildCount) { state, motherPending, childPending ->
-      overlayPendingCounts(state, motherPending, childPending)
+    combine(
+      _uiState,
+      pendingMotherCount,
+      pendingChildCount,
+      _localVisitOverlay,
+      _localReferralFollowUpCount,
+    ) { state, motherPending, childPending, visitOverlay, localReferralCount ->
+      overlayPendingCounts(state, motherPending, childPending, visitOverlay, localReferralCount)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, HomeUiState.Loading)
 
   /**
@@ -238,6 +308,11 @@ class HomeViewModel @Inject constructor(
       return
     }
     _uiState.value = HomeUiState.Success(refreshed)
+    // A completed sync may have pushed some previously-unsynced schedules to the server (their
+    // serverScheduleId is now set), so the overlay must shrink back down to whatever is still
+    // genuinely unsynced rather than double-counting against the freshly refreshed server total.
+    refreshLocalVisitOverlay()
+    refreshLocalReferralFollowUpOverlay()
   }
 
   /** Adds [motherPending]/[childPending] onto a [HomeUiState.Success]'s beneficiary-count fields;
@@ -248,15 +323,37 @@ class HomeViewModel @Inject constructor(
     state: HomeUiState,
     motherPending: Int,
     childPending: Int,
+    visitOverlay: LocalVisitOverlay,
+    localReferralCount: Int,
   ): HomeUiState {
     if (state !is HomeUiState.Success) return state
-    if (motherPending == 0 && childPending == 0) return state
     val summary = state.summary
+    // See LocalVisitOverlay's doc: a summary the backend has never actually computed for this
+    // Sakhi (lastSyncedAt null — a fresh/test account, or a genuinely first-ever load served from
+    // a persisted cache seeded at zero) has no real due/overdue/ending-soon numbers to protect
+    // from double-counting, so every currently open local visit counts; once there IS a real
+    // synced summary, only never-uploaded schedules are safe to add on top of it.
+    val counts = if (summary.lastSyncedAt == null) visitOverlay.all else visitOverlay.unsyncedOnly
+    // See LocalReferralFollowUpOverlay's doc: unlike visit schedules, a referral link only ever
+    // exists locally after the server already created it, so this can never be an over-count for
+    // this Sakhi's own caseload — take the max with the server's number rather than adding, which
+    // both closes the gap when the dashboard aggregate hasn't caught up yet and self-corrects once
+    // it does (never gets stuck permanently inflated the way an additive overlay would).
+    val referralFollowUpsCount = maxOf(summary.pendingFollowUpsCount, localReferralCount)
+    if (motherPending == 0 && childPending == 0 && counts.isEmpty &&
+      referralFollowUpsCount == summary.pendingFollowUpsCount
+    ) {
+      return state
+    }
     return state.copy(
       summary = summary.copy(
         activeMothersCount = summary.activeMothersCount + motherPending,
         activeChildrenCount = summary.activeChildrenCount + childPending,
         totalActiveBeneficiaries = summary.totalActiveBeneficiaries + motherPending + childPending,
+        dueVisitsCount = summary.dueVisitsCount + counts.due,
+        overdueVisitsCount = summary.overdueVisitsCount + counts.overdue,
+        endingSoonVisitsCount = summary.endingSoonVisitsCount + counts.endingSoon,
+        pendingFollowUpsCount = referralFollowUpsCount,
       ),
     )
   }
@@ -370,6 +467,8 @@ class HomeViewModel @Inject constructor(
 
   init {
     loadSummary()
+    refreshLocalVisitOverlay()
+    refreshLocalReferralFollowUpOverlay()
     observeSyncCompletion()
     loadNotifications()
   }
@@ -377,6 +476,8 @@ class HomeViewModel @Inject constructor(
   /** Loads (or reloads after an error) the dashboard summary. */
   fun loadSummary() {
     _uiState.value = HomeUiState.Loading
+    refreshLocalVisitOverlay()
+    refreshLocalReferralFollowUpOverlay()
     viewModelScope.launch {
       _uiState.value = try {
         HomeUiState.Success(dashboardRepository.getSummary())

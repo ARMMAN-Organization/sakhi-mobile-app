@@ -15,6 +15,18 @@ interface AdHocFormDraftDao {
   @Query("SELECT * FROM ad_hoc_form_drafts WHERE localFormInstanceUuid = :localFormInstanceUuid")
   suspend fun getByLocalFormInstanceUuid(localFormInstanceUuid: String): AdHocFormDraftEntity?
 
+  /** [org.armman.sakhi.data.beneficiaryprofile.ScheduleBackedBeneficiaryProfileRepository]'s
+   * "Submitted, Not yet synced" lookup for Referral Follow-up (bharath, 2026-09-10) — mirrors
+   * [org.armman.sakhi.data.visitform.VisitFormDraftDao.getByLocalScheduleUuids]'s bulk-by-ids
+   * shape, keyed by [AdHocFormDraftEntity.referralId] instead since a referral-follow-up draft has
+   * no [org.armman.sakhi.data.schedule.VisitScheduleEntity.localScheduleUuid] of its own — it is
+   * filed against the referral it follows up on, not a schedule row. */
+  @Query(
+    "SELECT * FROM ad_hoc_form_drafts WHERE formCode = 'REFERRAL_FOLLOWUP_VISIT' " +
+      "AND referralId IN (:referralIds)",
+  )
+  suspend fun getReferralFollowUpDraftsByReferralIds(referralIds: List<String>): List<AdHocFormDraftEntity>
+
   /** Never-synced or previously-failed — same semantics as every other queue's `getPendingSync`. */
   @Query(
     "SELECT * FROM ad_hoc_form_drafts WHERE syncStatus IN ('PENDING', 'FAILED') " +

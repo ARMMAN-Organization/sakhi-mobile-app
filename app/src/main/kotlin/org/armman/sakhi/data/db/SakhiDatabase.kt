@@ -34,6 +34,8 @@ import org.armman.sakhi.data.riskassessment.RiskAssessmentEntity
 import org.armman.sakhi.data.riskassessment.RiskFlagEntity
 import org.armman.sakhi.data.referral.ReferralLinkEntity
 import org.armman.sakhi.data.referral.ReferralEvidenceDao
+import org.armman.sakhi.data.previsithealth.PreVisitHealthHistoryCacheDao
+import org.armman.sakhi.data.previsithealth.PreVisitHealthHistoryCacheEntity
 import org.armman.sakhi.data.referral.ReferralEvidenceMediaEntity
 
 /**
@@ -178,6 +180,24 @@ import org.armman.sakhi.data.referral.ReferralEvidenceMediaEntity
  *    already does. Additive [MIGRATION_22_23] — one `ALTER TABLE`, one NOT NULL TEXT column
  *    defaulting to `''` (same blank-not-null convention as v18/v21). No automated migration test
  *    (same convention as v4-v22).
+ *  - v24: [PreVisitHealthHistoryCacheEntity] (offline fallback for the Pre-Visit Health History
+ *    screen, FR-S-4.6 -- reported gap: once a beneficiary passes her first visit, this screen made
+ *    a live-only network call with nothing cached, so going offline hard-blocked every later
+ *    visit behind a Retry-only error). Additive [MIGRATION_23_24] -- creates
+ *    `pre_visit_health_history_cache` only, touches no existing table. Same
+ *    no-automated-migration-test convention as v4-v23.
+ *  - v25: adds `serverSubmissionId`/`riskAssessmentStatus` to the existing `visit_form_drafts`
+ *    table (CR — ANC3 missed-referral gap analysis, 2026-09-10): the best-effort risk-assessment
+ *    call that decides whether a visit's in-visit referral capture actually creates a referral
+ *    runs as a separate network call right after the main submission succeeds, so a dropped
+ *    connection between the two left the visit correctly Completed but its referral silently
+ *    never created, with no way to retry. These two columns let [VisitFormSyncExecutor
+ *    .retryRiskAssessments] find and re-run just that step on a later sync pass. Additive
+ *    [MIGRATION_24_25] -- two `ALTER TABLE`s: a nullable TEXT column and a NOT NULL TEXT column
+ *    defaulting to `'SYNCED'` (existing rows are pre-CR-026b/pre-this-fix history with no
+ *    meaningful risk-assessment state to retry, so they default to the no-op value rather than
+ *    being swept into the new retry pass). No automated migration test (same convention as
+ *    v4-v24).
  */
 @Database(
   entities = [
@@ -196,8 +216,9 @@ import org.armman.sakhi.data.referral.ReferralEvidenceMediaEntity
     RiskFlagEntity::class,
     EnrollmentRiskBaselineEntity::class,
     ReferralEvidenceMediaEntity::class,
+    PreVisitHealthHistoryCacheEntity::class,
   ],
-  version = 23,
+  version = 25,
   exportSchema = true,
 )
 @TypeConverters(ScheduleTypeConverters::class)
@@ -216,6 +237,7 @@ abstract class SakhiDatabase : RoomDatabase() {
   abstract fun riskAssessmentDao(): RiskAssessmentDao
   abstract fun enrollmentRiskBaselineDao(): EnrollmentRiskBaselineDao
   abstract fun referralEvidenceDao(): ReferralEvidenceDao
+  abstract fun preVisitHealthHistoryCacheDao(): PreVisitHealthHistoryCacheDao
 
   companion object {
     /**
@@ -706,6 +728,37 @@ abstract class SakhiDatabase : RoomDatabase() {
     val MIGRATION_22_23: Migration = object : Migration(22, 23) {
       override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE `referral_links` ADD COLUMN `beneficiaryId` TEXT NOT NULL DEFAULT ''")
+      }
+    }
+
+    /**
+     * v23 -> v24: adds the `pre_visit_health_history_cache` table (offline fallback for the
+     * Pre-Visit Health History screen). Purely additive -- no existing table is touched.
+     */
+    val MIGRATION_23_24: Migration = object : Migration(23, 24) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `pre_visit_health_history_cache` (" +
+            "`serverBeneficiaryId` TEXT NOT NULL, " +
+            "`visitsJson` TEXT NOT NULL, " +
+            "`cachedAtEpochMillis` INTEGER NOT NULL, " +
+            "PRIMARY KEY(`serverBeneficiaryId`))",
+        )
+      }
+    }
+
+    /**
+     * v24 -> v25: adds `serverSubmissionId`/`riskAssessmentStatus` to `visit_form_drafts` (see
+     * this class's own v25 doc above). Both nullable-or-defaulted, no existing column touched, no
+     * other table affected.
+     */
+    val MIGRATION_24_25: Migration = object : Migration(24, 25) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `visit_form_drafts` ADD COLUMN `serverSubmissionId` TEXT")
+        db.execSQL(
+          "ALTER TABLE `visit_form_drafts` ADD COLUMN `riskAssessmentStatus` TEXT NOT NULL " +
+            "DEFAULT 'SYNCED'",
+        )
       }
     }
 

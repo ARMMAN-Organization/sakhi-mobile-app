@@ -1,10 +1,13 @@
 package org.armman.sakhi.data.delivery
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import org.armman.sakhi.data.audit.FormAuditRepository
 import org.armman.sakhi.data.auth.session.SecureKeyValueStore
 import org.armman.sakhi.data.connectivity.ConnectivityChecker
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormUploadRecord
 import org.armman.sakhi.data.forms.SubmitErrorCopy
 import java.time.Instant
 import javax.inject.Inject
@@ -95,4 +98,19 @@ class RoomDeliveryChildRegistrationDraftRepository @Inject constructor(
       ),
     )
   }
+
+  override fun observeUploadRecords(): Flow<List<FormUploadRecord>> =
+    dao.observeAll().map { entities -> entities.map { it.toUploadRecord() } }
+
+  private fun DeliveryChildRegistrationDraftEntity.toUploadRecord() = FormUploadRecord(
+    // No local beneficiary id exists on this entity -- the child already has a real server id by
+    // the time this draft is created (see this entity's own doc) -- reusing it here is the closest
+    // available identifier, and is not PII, same as FormUploadRecord's own doc for
+    // pendingNewPregnancyBeneficiaryId.
+    localBeneficiaryId = serverBeneficiaryId,
+    formCode = FORM_CODE_CHILD_REGISTRATION,
+    syncStatus = syncStatus,
+    createdAtEpochMillis = createdAtEpochMillis,
+    pendingNewPregnancyBeneficiaryId = null,
+  )
 }

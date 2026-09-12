@@ -54,6 +54,8 @@ class StaticVisitFormRepositoryTest {
     override suspend fun hasSchedule(localBeneficiaryId: String) = unsupported()
     override suspend fun hasScheduleOfType(localBeneficiaryId: String, visitType: VisitCodeType) = unsupported()
     override suspend fun getUnsynced() = unsupported()
+    override suspend fun getActiveUnsynced() = unsupported()
+    override suspend fun getAllActive() = unsupported()
     override fun observeUnsyncedCount() = unsupported()
     override suspend fun markSynced(localScheduleUuid: String, serverScheduleId: String) = unsupported()
     override suspend fun attachServerBeneficiaryId(localBeneficiaryId: String, serverBeneficiaryId: String) = unsupported()

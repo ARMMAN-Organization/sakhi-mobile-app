@@ -2,6 +2,8 @@ package org.armman.sakhi.data.sync
 
 import org.armman.sakhi.data.adhocform.AdHocFormSyncScheduler
 import org.armman.sakhi.data.childregistration.ChildFormSyncScheduler
+import org.armman.sakhi.data.delivery.DeliveryChildRegistrationSyncScheduler
+import org.armman.sakhi.data.delivery.DeliverySyncScheduler
 import org.armman.sakhi.data.enrollment.EnrollmentSyncScheduler
 import org.armman.sakhi.data.forms.DynamicFormSyncScheduler
 import org.armman.sakhi.data.referral.ReferralEvidenceSyncScheduler
@@ -14,7 +16,7 @@ import javax.inject.Singleton
  * The single entry point for starting a data upload, per SRS §3A.1 — *"Data Sync — Manual trigger.
  * Deferred with retry."*
  *
- * The app maintains seven independent offline queues, each with its own WorkManager unique work
+ * The app maintains nine independent offline queues, each with its own WorkManager unique work
  * name so they are scheduled and de-duplicated separately:
  *  - `dynamic_form_drafts` — Mother Registration (CR-018), the live flow
  *  - `child_registration_drafts` — Children Register (CR-020)
@@ -28,10 +30,18 @@ import javax.inject.Singleton
  *    [org.armman.sakhi.data.visitform.VisitFormSyncExecutor].
  *  - `ad_hoc_form_drafts` — ad-hoc form submissions (CR-026b). Same offline-queue shape as
  *    `visit_form_drafts` — see [org.armman.sakhi.data.adhocform.AdHocFormSyncExecutor].
+ *  - `delivery_form_drafts` — `DELIVERY_VISIT` submissions (CR-042). Bharath, 2026-09-11: this
+ *    queue's [org.armman.sakhi.data.delivery.DeliveryFormSyncExecutor] always had the correct
+ *    PENDING/SYNCING/FAILED/SYNCED lifecycle, but nothing ever called it again after the initial
+ *    online-at-submit-time attempt — a draft queued offline sat un-retried forever, contradicting
+ *    the Sakhi-facing "will sync once you have network" copy. This wiring is what actually makes
+ *    the retry happen, manually, same as every other queue here.
+ *  - `delivery_child_registration_drafts` — the CHILD_REGISTRATION submission that follows a
+ *    delivery (CR-042) — same gap and same fix as `delivery_form_drafts` just above.
  *
  * Since nothing else syncs any more (no periodic tick, no app-start schedule, no
  * connectivity-reconnect trigger), a manual trigger that covered only one queue would strand the
- * others on-device permanently. So this fans out to all six.
+ * others on-device permanently. So this fans out to every queue below.
  *
  * **Ordering between queues is not guaranteed** — each is a separate WorkManager item with its own
  * backoff. The schedule queue therefore skips rows whose beneficiary has not synced yet rather than
@@ -55,6 +65,8 @@ class ManualSyncTrigger @Inject constructor(
   private val visitFormSyncScheduler: VisitFormSyncScheduler,
   private val adHocFormSyncScheduler: AdHocFormSyncScheduler,
   private val referralEvidenceSyncScheduler: ReferralEvidenceSyncScheduler,
+  private val deliverySyncScheduler: DeliverySyncScheduler,
+  private val deliveryChildRegistrationSyncScheduler: DeliveryChildRegistrationSyncScheduler,
 ) {
   /** Starts one upload attempt across every offline queue. */
   fun syncAllQueues() {
@@ -66,7 +78,11 @@ class ManualSyncTrigger @Inject constructor(
     adHocFormSyncScheduler.syncNow()
     // CR-Referral-02 — referral evidence media, the seventh queue. See
     // ReferralEvidenceSyncScheduler's doc for why this queue is ALSO kicked off eagerly from
-    // capture time, unlike the other six which are manual-sync-only.
+    // capture time, unlike the others which are manual-sync-only.
     referralEvidenceSyncScheduler.syncNow()
+    // CR-042 — delivery (and its follow-on child registration) submissions, the eighth and ninth
+    // queues. See DeliverySyncScheduler's own doc for the gap this closes.
+    deliverySyncScheduler.syncNow()
+    deliveryChildRegistrationSyncScheduler.syncNow()
   }
 }

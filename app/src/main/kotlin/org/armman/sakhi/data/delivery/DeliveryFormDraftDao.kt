@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface DeliveryFormDraftDao {
@@ -28,4 +29,10 @@ interface DeliveryFormDraftDao {
 
   @Query("SELECT * FROM delivery_form_drafts ORDER BY createdAtEpochMillis DESC")
   suspend fun getAll(): List<DeliveryFormDraftEntity>
+
+  /** Observable stream, newest first — feeds the Home "Forms Uploaded" modal via
+   * [DeliveryFormDraftRepository.observeUploadRecords] (bharath, 2026-09-11: the Delivery queue
+   * had no card in that modal at all before this). */
+  @Query("SELECT * FROM delivery_form_drafts ORDER BY createdAtEpochMillis DESC")
+  fun observeAll(): Flow<List<DeliveryFormDraftEntity>>
 }

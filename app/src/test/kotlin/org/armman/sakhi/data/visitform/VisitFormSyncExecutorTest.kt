@@ -17,7 +17,13 @@ import org.armman.sakhi.data.forms.FormAnswers
 import org.armman.sakhi.data.forms.SubmissionResponseData
 import org.armman.sakhi.data.lookup.FakeLookupRepository
 import org.armman.sakhi.data.lookup.LookupValue
+import org.armman.sakhi.data.referral.CreateReferralOutcome
+import org.armman.sakhi.data.referral.FacilityType
 import org.armman.sakhi.data.referral.FakeReferralLinkDao
+import org.armman.sakhi.data.referral.Referral
+import org.armman.sakhi.data.referral.ReferralCapture
+import org.armman.sakhi.data.referral.ReferralStatus
+import org.armman.sakhi.data.referral.ReferralType
 import org.armman.sakhi.data.riskassessment.FakeRiskAssessmentDao
 import org.armman.sakhi.data.schedule.FakeVisitScheduleDao
 import org.armman.sakhi.data.schedule.RoomVisitScheduleRepository
@@ -64,6 +70,9 @@ class VisitFormSyncExecutorTest {
   private lateinit var lookupRepository: FakeLookupRepository
   private lateinit var coordinator: VisitFormSubmissionCoordinator
   private lateinit var executor: VisitFormSyncExecutor
+  private lateinit var riskAssessmentApi: FakeRiskAssessmentApi
+  private lateinit var referralRepository: FakeReferralRepository
+  private lateinit var referralLinkDao: FakeReferralLinkDao
 
   private val session = UserSession(
     username = "test.sakhi",
@@ -108,12 +117,23 @@ class VisitFormSyncExecutorTest {
         org.armman.sakhi.data.delivery.FakeDeliverySessionDao(),
       ),
       childFormDraftDao = org.armman.sakhi.data.childregistration.FakeChildFormDraftDao(),
-      riskAssessmentApi = FakeRiskAssessmentApi(),
-      referralRepository = FakeReferralRepository(),
-      referralLinkDao = FakeReferralLinkDao(),
+      riskAssessmentApi = FakeRiskAssessmentApi().also { riskAssessmentApi = it },
+      referralRepository = FakeReferralRepository().also { referralRepository = it },
+      referralLinkDao = FakeReferralLinkDao().also { referralLinkDao = it },
       riskAssessmentDao = FakeRiskAssessmentDao(),
       lmpChangeRepository = org.armman.sakhi.data.lmpchange.FakeLmpChangeRepository(),
       sameSessionNnVisitResolver = org.armman.sakhi.data.schedule.SameSessionNnVisitResolver(scheduleRepository),
+      visitScheduleCoordinator = run {
+        val rules = org.armman.sakhi.data.schedule.HardcodedRuleSource()
+        org.armman.sakhi.data.schedule.VisitScheduleCoordinator(
+          repository = scheduleRepository,
+          ancGenerator = org.armman.sakhi.data.schedule.AncScheduleGenerator(rules),
+          ppGenerator = org.armman.sakhi.data.schedule.PpScheduleGenerator(rules),
+          nnGenerator = org.armman.sakhi.data.schedule.NnScheduleGenerator(rules),
+          incGenerator = org.armman.sakhi.data.schedule.IncScheduleGenerator(rules),
+          ccvGenerator = org.armman.sakhi.data.schedule.CcvScheduleGenerator(rules),
+        )
+      },
     )
     executor = VisitFormSyncExecutor(dao, secureStore, coordinator)
   }
@@ -417,5 +437,146 @@ class VisitFormSyncExecutorTest {
 
     assertEquals("version-1", formSubmissionApi.lastRequest?.formVersionId)
     assertEquals("server-beneficiary-1", formSubmissionApi.lastRequest?.beneficiaryId)
+  }
+
+  // --- CR (ANC3 missed-referral gap, 2026-09-10): retrying a stalled risk-assessment/referral
+  // step on a draft whose main submission already succeeded — see
+  // VisitFormDraftEntity.riskAssessmentStatus's own doc for the scenario this reproduces. -------
+
+  private fun referralCapture() = ReferralCapture(
+    referralType = ReferralType.STANDARD,
+    facilityName = "Civil Hospital",
+    facilityType = "phc",
+    referralDate = java.time.LocalDate.of(2026, 9, 9),
+  )
+
+  private fun riskAssessmentResponse(referralTriggered: Boolean) = Response.success(
+    CreateRiskAssessmentResponseDto(
+      success = true,
+      message = null,
+      data = RiskAssessmentResponseData(
+        id = "assessment-1",
+        beneficiaryId = "server-beneficiary-1",
+        visitId = "server-visit-42",
+        submissionId = "server-sub-1",
+        ruleVersionId = "rule-version-1",
+        evaluatedAt = "2026-09-09T00:00:00Z",
+        overallRiskCategory = "HIGH",
+        overallHighRiskFlag = referralTriggered,
+        hrDetectedFlag = referralTriggered,
+        riskFlags = listOf(
+          RiskAssessmentFlagDto(
+            id = "flag-1",
+            riskConditionId = "cond-anemia",
+            riskGradeLookupValueId = "grade-1",
+            isReferralTrigger = referralTriggered,
+          ),
+        ),
+      ),
+    ),
+  )
+
+  private suspend fun seedSyncedDraftWithReferralCapture(localScheduleUuid: String = "schedule-1") {
+    secureStore.putString(
+      visitFormDraftPayloadKey(localScheduleUuid),
+      visitFormDraftGson.toJson(VisitFormDraftPayload(answers(), referralCapture = referralCapture())),
+    )
+    dao.upsert(
+      VisitFormDraftEntity(
+        localScheduleUuid = localScheduleUuid,
+        formCode = "ANC_VISIT",
+        formVersionId = "version-1",
+        localSubmissionUuid = "submission-uuid-1",
+        visitDateIso = "2026-09-09",
+        syncStatus = EnrollmentSyncStatus.PENDING,
+        createdAtEpochMillis = Instant.now().toEpochMilli(),
+        lastAttemptAtEpochMillis = null,
+        retryCount = 0,
+        serverVisitId = null,
+        lastErrorMessage = null,
+      ),
+    )
+  }
+
+  @Test
+  fun `a visit whose main submission succeeds while the risk-assessment call fails still ends up SYNCED, with the referral step left pending`() = runTest {
+    seedSyncedSchedule()
+    seedSyncedDraftWithReferralCapture()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+    // Default FakeRiskAssessmentApi response: HTTP success but data = null — reads as "no
+    // response", exactly the ANC3 case (connection dropped between the two calls).
+
+    val outcome = executor.run()
+
+    assertEquals(EnrollmentSyncOutcome.COMPLETED, outcome)
+    val entity = requireNotNull(dao.getByLocalScheduleUuid("schedule-1"))
+    // The visit form itself is genuinely, correctly synced — this must read exactly like before
+    // this fix: the card shows Completed, not stuck "Not yet synced".
+    assertEquals(EnrollmentSyncStatus.SYNCED, entity.syncStatus)
+    assertEquals("server-visit-42", entity.serverVisitId)
+    assertEquals("server-sub-1", entity.serverSubmissionId)
+    // But the referral step never got a response, so it's left for the next pass rather than
+    // silently forgotten forever.
+    assertEquals(EnrollmentSyncStatus.FAILED, entity.riskAssessmentStatus)
+    assertNull(referralLinkDao.getByLocalScheduleUuid("schedule-1"))
+  }
+
+  @Test
+  fun `the next manual sync retries only the risk-assessment step and creates the referral, without re-submitting the visit`() = runTest {
+    seedSyncedSchedule()
+    seedSyncedDraftWithReferralCapture()
+    visitApi.response = successfulVisitResponse(id = "server-visit-42")
+    formSubmissionApi.response = successfulSubmissionResponse(id = "server-sub-1")
+
+    // First Data Upload: main submission succeeds, risk assessment call fails (default fake).
+    executor.run()
+    assertEquals(1, visitApi.callCount)
+    assertEquals(1, formSubmissionApi.callCount)
+
+    // Sakhi is back online properly and taps Data Upload again — this time the risk-assessment
+    // call succeeds and flags a referral.
+    riskAssessmentApi.responseToReturn = riskAssessmentResponse(referralTriggered = true)
+    referralRepository.resultToReturn = Result.success(
+      CreateReferralOutcome.Created(
+        Referral(
+          referralId = "ref-1",
+          visitId = "server-visit-42",
+          sourceSubmissionId = "server-sub-1",
+          beneficiaryId = "server-beneficiary-1",
+          referralTypeLookupValueId = "lookup-standard-1",
+          status = ReferralStatus.PENDING_FOLLOWUP,
+          facilityName = "Civil Hospital",
+          facilityType = FacilityType.PHC,
+          triggeringConditionIds = listOf("cond-anemia"),
+          createdAt = null,
+          validTill = null,
+        ),
+      ),
+    )
+
+    val secondOutcome = executor.run()
+
+    assertEquals(EnrollmentSyncOutcome.COMPLETED, secondOutcome)
+    // Neither the visit nor the form submission is re-sent — only the risk-assessment/referral
+    // step is retried.
+    assertEquals(1, visitApi.callCount)
+    assertEquals(1, formSubmissionApi.callCount)
+    // 3 calls, not 1: within the FIRST run the main submission attempts the risk step once and
+    // marks it FAILED, then that same run's unconditional retryRiskAssessments() self-heal pass
+    // retries it immediately (2 calls, both against the null-data default). The second run's pass
+    // is the third call — the one that finally succeeds. The point of this test is that only the
+    // risk step repeats: visitApi/formSubmissionApi above stay at exactly 1.
+    assertEquals(3, riskAssessmentApi.requests.size)
+
+    val entity = requireNotNull(dao.getByLocalScheduleUuid("schedule-1"))
+    assertEquals(EnrollmentSyncStatus.SYNCED, entity.riskAssessmentStatus)
+    val referralLink = requireNotNull(referralLinkDao.getByLocalScheduleUuid("schedule-1"))
+    assertEquals("ref-1", referralLink.referralId)
+    assertEquals(ReferralStatus.PENDING_FOLLOWUP.name, referralLink.status)
+    // CR (2026-09-10, Visit Tracker referral-follow-up count/list gap analysis): the retry path
+    // must cache the LOCAL beneficiary id too, same as the immediate-submit path — this is what
+    // PadaVisitsViewModel/LocalPadaSummaryOverlay actually match against.
+    assertEquals("ben-1", referralLink.beneficiaryId)
   }
 }

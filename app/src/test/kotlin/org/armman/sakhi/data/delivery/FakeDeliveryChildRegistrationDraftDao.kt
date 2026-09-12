@@ -1,5 +1,7 @@
 package org.armman.sakhi.data.delivery
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.armman.sakhi.data.enrollment.EnrollmentSyncStatus
 
 /** In-memory [DeliveryChildRegistrationDraftDao], same convention as [FakeDeliverySessionDao] —
@@ -29,4 +31,7 @@ class FakeDeliveryChildRegistrationDraftDao : DeliveryChildRegistrationDraftDao 
 
   override suspend fun getAll(): List<DeliveryChildRegistrationDraftEntity> =
     rows.values.sortedByDescending { it.createdAtEpochMillis }
+
+  override fun observeAll(): Flow<List<DeliveryChildRegistrationDraftEntity>> =
+    MutableStateFlow(rows.values.sortedByDescending { it.createdAtEpochMillis })
 }

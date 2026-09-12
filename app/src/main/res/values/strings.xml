@@ -25,6 +25,13 @@
   <string name="home_upload_modal_empty">No forms submitted yet.</string>
   <string name="home_upload_modal_registration_form_label">Registration</string>
   <string name="home_upload_modal_visit_form_label">Visit Form</string>
+  <!-- bharath, 2026-09-10: ad-hoc form categories, previously fell into categoryLabelRes'
+       "else" branch and were mislabeled as "Registration" once CombinedUploadRecordsSource
+       started merging this queue in. -->
+  <string name="home_upload_modal_referral_form_label">Referral</string>
+  <string name="home_upload_modal_referral_followup_form_label">Referral Follow-up</string>
+  <string name="home_upload_modal_closure_form_label">Closure</string>
+  <string name="home_upload_modal_reopen_form_label">Beneficiary Reopen</string>
   <string name="home_upload_modal_category_forms">%1$d/%2$d Forms</string>
   <string name="home_upload_status_synced">Uploaded</string>
   <string name="home_upload_status_pending">Pending</string>
@@ -182,6 +189,11 @@
        build. Distinct from a loading state, and never a silent blank section. -->
   <string name="beneficiary_profile_no_visits">No visits scheduled yet</string>
   <string name="beneficiary_profile_visit_open">Open</string>
+  <!-- Bharath, 2026-09-10: this visit form was saved to this device but has not yet reached
+       the server, distinct from "Open" (nothing submitted yet), so a Sakhi can tell the two
+       apart and isn't tempted to tap Start Visit again for something already submitted. -->
+  <string name="beneficiary_profile_visit_pending_sync">Submitted</string>
+  <string name="beneficiary_profile_pending_sync_chip">Not yet synced</string>
   <string name="beneficiary_profile_visit_complete">Completed</string>
   <string name="beneficiary_profile_visit_complete_short">Complete</string>
   <string name="beneficiary_profile_schedule_date">Schedule Date : %1$s</string>
@@ -432,7 +444,7 @@
        doc for why they're shown as-is rather than reformatted). -->
   <string name="visit_form_ccv_hr_extension_deferred">High risk detected. An extension visit will be due between %1$s and %2$s — closure is deferred until then.</string>
   <string name="visit_form_referral_details_title">Please fill referral details</string>
-  <string name="visit_form_referral_step_explainer">This visit was flagged high-risk. Fill in the referral details below, or skip if no referral is needed.</string>
+  <string name="visit_form_referral_step_explainer">A referral is being recommended based on a condition identified during this visit. This can happen even if the overall risk level shown in Summary is Low or Moderate. Fill in the referral details below, or skip if no referral is needed.</string>
   <string name="visit_form_referral_skip">Skip</string>
   <!-- CR-Referral-01 (2026-08-31): question set rebuilt verbatim from GET /forms/REFERRAL_VISIT/
        active-version's schemaJson, so labels below match the backend's `label` field exactly. -->

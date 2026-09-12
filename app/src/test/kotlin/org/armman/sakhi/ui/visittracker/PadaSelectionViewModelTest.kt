@@ -6,6 +6,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import org.armman.sakhi.data.visittracker.LocalPadaSummaryOverlay
 import org.armman.sakhi.data.visittracker.PadaRepository
 import org.armman.sakhi.data.visittracker.PadaSummary
 import org.armman.sakhi.data.visittracker.PadaVisitBucket
@@ -15,6 +16,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.IOException
+import java.time.LocalDate
 
 /**
  * M3: [PadaSelectionViewModel] now consumes [PadaRepository]'s pre-aggregated per-pada counts
@@ -35,6 +37,19 @@ class PadaSelectionViewModelTest {
     }
   }
 
+  /** Controllable fake for the offline pada overlay (bharath, 2026-09-10) — see
+   * [LocalPadaSummaryOverlay]'s doc for why this is an interface purely so tests don't need to
+   * construct a real [org.armman.sakhi.data.beneficiary.LocalEnrolmentBeneficiarySource]. These
+   * tests all exercise the server-backed path, so the overlay contributes nothing. */
+  private class FakeLocalPadaSummaryOverlay : LocalPadaSummaryOverlay {
+    override suspend fun buildPadaSummaries(today: LocalDate): List<PadaSummary> = emptyList()
+
+    override suspend fun mergeWithLocal(
+      serverSummaries: List<PadaSummary>,
+      today: LocalDate,
+    ): List<PadaSummary> = serverSummaries
+  }
+
   private lateinit var repository: FakePadaRepository
 
   @Before
@@ -49,7 +64,7 @@ class PadaSelectionViewModelTest {
   }
 
   private fun createViewModel(): PadaSelectionViewModel {
-    val viewModel = PadaSelectionViewModel(repository)
+    val viewModel = PadaSelectionViewModel(repository, FakeLocalPadaSummaryOverlay())
     dispatcher.scheduler.advanceUntilIdle()
     return viewModel
   }

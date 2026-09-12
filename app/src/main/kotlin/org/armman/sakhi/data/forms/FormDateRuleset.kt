@@ -229,6 +229,20 @@ object FormDateRuleset {
    * day, so the backdated-answer path this guards against should no longer be reachable through the
    * UI — this floor is kept anyway as a defensive second layer, and its own bounds check still
    * defaults correctly to today if that field is ever unanswered.
+   *
+   * Bug fix (2026-09-11, reported): the backend's `dateRule` for this field is floor-only — no
+   * `notAfter` at all — and neither was this file's own bound, so a Sakhi could pick an
+   * arbitrarily far future date here (repro: ANC1 with Hb 8.4 triggering a referral, then a
+   * "Planned facility visit date" set months out, submitted with no error). That directly
+   * contradicts the Referral form spec's own intent — the follow-up is meant to happen "before the
+   * next visit" — so the picker now also caps at [nextScheduledVisitDate], the beneficiary's next
+   * open visit after this one (resolved in [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel]
+   * from [org.armman.sakhi.data.schedule.VisitScheduleRepository], since this file has no schedule
+   * access of its own — see that ViewModel's own doc on the field). Null (unbounded, unchanged
+   * behavior) when there's no next scheduled visit yet, same "missing data gap" convention as
+   * [beneficiaryRegistrationDate]/[motherLmpDate]/[deliveryDate] elsewhere in this file. The
+   * backend itself still only enforces the floor, so this is a client-side-only tightening, same
+   * as every other bug fix in this file — it narrows what the app offers, never what it submits.
    */
   const val DECIDED_VISIT_DATE_QUESTION_CODE = "decided_visit_date"
 
@@ -390,6 +404,13 @@ object FormDateRuleset {
      * Child Registration flow (no delivery event to floor against), same "missing data gap"
      * convention as [beneficiaryRegistrationDate]/[motherLmpDate] above. */
     deliveryDate: LocalDate? = null,
+    /** The beneficiary's next scheduled (open) visit date after the one this form is for — only
+     * meaningful for [DECIDED_VISIT_DATE_QUESTION_CODE], see that constant's 2026-09-11 doc.
+     * Sourced from [org.armman.sakhi.data.schedule.VisitScheduleRepository] by
+     * [org.armman.sakhi.ui.visitform.DynamicVisitFormViewModel]; null (unbounded) for every other
+     * caller and for this one too when no next visit is resolvable yet, same "missing data gap"
+     * convention as [beneficiaryRegistrationDate]/[motherLmpDate]/[deliveryDate] above. */
+    nextScheduledVisitDate: LocalDate? = null,
   ): Bounds? {
     val reference = referenceDate(answers, registrationDate)
     return when (questionCode) {
@@ -415,7 +436,7 @@ object FormDateRuleset {
       // today or later, but registrationDate (today) always wins as the hard floor otherwise.
       DECIDED_VISIT_DATE_QUESTION_CODE -> Bounds(
         min = maxOfNullable(referralFormFilledDateAnswer(answers), registrationDate),
-        max = null,
+        max = nextScheduledVisitDate,
       )
 
       FOLLOWUP_FORM_FILLED_DATE_QUESTION_CODE -> Bounds(min = null, max = registrationDate)
@@ -446,10 +467,21 @@ object FormDateRuleset {
       // "Cannot be future" (this constant's own KDoc) is the only picker-level ceiling; the
       // >30-day recency rule stays enforced, just as a post-pick validation message
       // ([Violation.LMP_TOO_RECENT] below) rather than blocking the date from being selected at all.
-      LMP_DATE_QUESTION_CODE, LMP_VISIT_ENTRY_QUESTION_CODE -> Bounds(
+      LMP_DATE_QUESTION_CODE -> Bounds(
         min = reference.minusDays(LMP_MAX_DAYS_BEFORE_REGISTRATION),
         max = reference,
       )
+
+      // Bug fix (2026-10-10): this shared LMP_DATE_QUESTION_CODE's picker floor
+      // (reference.minusDays(LMP_MAX_DAYS_BEFORE_REGISTRATION), i.e. "today minus 239 days"),
+      // which is fine for the ONE-TIME registration-time entry but wrong for this field — a later
+      // visit's re-confirmation of the SAME already-answered, fixed historical LMP. `reference`
+      // here is the VISIT date, which keeps advancing every visit, so the floor kept sliding
+      // forward and would eventually exclude her own real (and correct) LMP from the picker
+      // entirely as the pregnancy progressed past 239 days. No lower bound at all — this field is
+      // re-displaying a known date, not bounding a fresh guess — "not future" (below) is the only
+      // real constraint that still makes sense here.
+      LMP_VISIT_ENTRY_QUESTION_CODE -> Bounds(min = null, max = reference)
 
       // "After LMP" with no LMP answer yet has nothing to bound against — leave the lower end
       // open rather than guessing; violationFor is likewise a no-op until LMP is answered (parse()
@@ -642,7 +674,7 @@ object FormDateRuleset {
 
       MOTHER_DOB_QUESTION_CODE -> adultDobViolation(value, reference)
 
-      LMP_DATE_QUESTION_CODE, LMP_VISIT_ENTRY_QUESTION_CODE -> {
+      LMP_DATE_QUESTION_CODE -> {
         val daysBefore = ChronoUnit.DAYS.between(value, reference)
         // Same floor-to-whole-weeks the GESTATIONAL_AGE_AT_REGISTRATION computed field uses, so
         // this rule and the number displayed on the form always agree.
@@ -653,6 +685,28 @@ object FormDateRuleset {
           gestationalAgeWeeks > GESTATIONAL_AGE_CEILING_WEEKS ->
             Violation.GESTATIONAL_AGE_BEYOND_ENROLLMENT_WINDOW
           daysBefore > LMP_MAX_DAYS_BEFORE_REGISTRATION -> Violation.LMP_TOO_OLD
+          else -> null
+        }
+      }
+
+      // Bug fix (2026-10-10, reported): ANC6 (and any later visit) showed "This pregnancy is
+      // beyond 6 months (24 weeks) and cannot be enrolled" against a perfectly valid, already-
+      // enrolled beneficiary's unchanged LMP. Root cause: this question code shared
+      // LMP_DATE_QUESTION_CODE's branch above wholesale, including the one-time enrollment-
+      // eligibility ceiling (GESTATIONAL_AGE_BEYOND_ENROLLMENT_WINDOW) and the 239-day "too old"
+      // sanity bound — both measured against `reference` (the CURRENT VISIT's date), which keeps
+      // advancing every visit while the real LMP stays fixed, so gestational age crosses both
+      // thresholds by design as a normal pregnancy progresses (24 weeks by roughly ANC6, 239 days
+      // not far behind). Those two checks only make sense once, at the enrollment decision
+      // (LMP_DATE_QUESTION_CODE) — this field just re-confirms the SAME already-accepted LMP on a
+      // later visit, so the only thing worth still catching here is a future date (a genuine typo)
+      // or an implausibly recent one; how far the pregnancy has since progressed is not this
+      // field's concern.
+      LMP_VISIT_ENTRY_QUESTION_CODE -> {
+        val daysBefore = ChronoUnit.DAYS.between(value, reference)
+        when {
+          daysBefore < 0 -> Violation.LMP_FUTURE
+          daysBefore < LMP_MIN_DAYS_BEFORE_REGISTRATION -> Violation.LMP_TOO_RECENT
           else -> null
         }
       }

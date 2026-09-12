@@ -2,6 +2,8 @@ package org.armman.sakhi.data.sync
 
 import org.armman.sakhi.data.adhocform.FakeAdHocFormSyncScheduler
 import org.armman.sakhi.data.childregistration.FakeChildFormSyncScheduler
+import org.armman.sakhi.data.delivery.FakeDeliveryChildRegistrationSyncScheduler
+import org.armman.sakhi.data.delivery.FakeDeliverySyncScheduler
 import org.armman.sakhi.data.enrollment.FakeEnrollmentSyncScheduler
 import org.armman.sakhi.data.forms.FakeDynamicFormSyncScheduler
 import org.armman.sakhi.data.referral.FakeReferralEvidenceSyncScheduler
@@ -24,8 +26,20 @@ class ManualSyncTriggerTest {
   private val visitFormDrafts = FakeVisitFormSyncScheduler()
   private val adHocFormDrafts = FakeAdHocFormSyncScheduler()
   private val referralEvidence = FakeReferralEvidenceSyncScheduler()
+  private val deliveryFormDrafts = FakeDeliverySyncScheduler()
+  private val deliveryChildRegistrationDrafts = FakeDeliveryChildRegistrationSyncScheduler()
   private val trigger =
-    ManualSyncTrigger(dynamic, child, enrollment, visitSchedules, visitFormDrafts, adHocFormDrafts, referralEvidence)
+    ManualSyncTrigger(
+      dynamic,
+      child,
+      enrollment,
+      visitSchedules,
+      visitFormDrafts,
+      adHocFormDrafts,
+      referralEvidence,
+      deliveryFormDrafts,
+      deliveryChildRegistrationDrafts,
+    )
 
   @Test
   fun `syncAllQueues nudges every offline queue exactly once`() {
@@ -38,6 +52,8 @@ class ManualSyncTriggerTest {
     assertEquals(1, visitFormDrafts.syncNowCallCount)
     assertEquals(1, adHocFormDrafts.syncNowCallCount)
     assertEquals(1, referralEvidence.syncNowCallCount)
+    assertEquals(1, deliveryFormDrafts.syncNowCallCount)
+    assertEquals(1, deliveryChildRegistrationDrafts.syncNowCallCount)
   }
 
   /**
@@ -77,5 +93,7 @@ class ManualSyncTriggerTest {
     assertEquals(3, visitFormDrafts.syncNowCallCount)
     assertEquals(3, adHocFormDrafts.syncNowCallCount)
     assertEquals(3, referralEvidence.syncNowCallCount)
+    assertEquals(3, deliveryFormDrafts.syncNowCallCount)
+    assertEquals(3, deliveryChildRegistrationDrafts.syncNowCallCount)
   }
 }

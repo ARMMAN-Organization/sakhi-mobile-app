@@ -48,6 +48,10 @@ class RoomVisitScheduleRepository @Inject constructor(
 
   override suspend fun getUnsynced(): List<VisitScheduleEntity> = dao.getUnsynced()
 
+  override suspend fun getActiveUnsynced(): List<VisitScheduleEntity> = dao.getActiveUnsynced()
+
+  override suspend fun getAllActive(): List<VisitScheduleEntity> = dao.getAllActive()
+
   override fun observeUnsyncedCount(): Flow<Int> = dao.observeUnsyncedCount()
 
   override suspend fun markSynced(localScheduleUuid: String, serverScheduleId: String) {

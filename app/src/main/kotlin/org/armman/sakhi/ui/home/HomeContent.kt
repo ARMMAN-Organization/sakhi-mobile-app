@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -42,6 +43,7 @@ import org.armman.sakhi.ui.components.SecondaryButton
 import org.armman.sakhi.ui.components.StatTile
 import org.armman.sakhi.ui.components.SummaryCard
 import org.armman.sakhi.ui.theme.Dimens
+import org.armman.sakhi.ui.theme.KpiNumberSecondary
 import org.armman.sakhi.ui.theme.NeutralG200
 import org.armman.sakhi.ui.theme.NeutralG400
 import org.armman.sakhi.ui.theme.NeutralG50
@@ -51,6 +53,7 @@ import org.armman.sakhi.ui.theme.RiskHigh
 import org.armman.sakhi.ui.theme.StatusSuccess
 import org.armman.sakhi.ui.theme.White
 import org.armman.sakhi.ui.theme.softShadow
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -201,7 +204,16 @@ private fun ActiveVisitsCard(summary: DashboardSummary, onSeeVisitTracker: () ->
   val isTablet = LocalConfiguration.current.screenWidthDp >= Dimens.TabletMinWidthDp
   val openVisitsCount = summary.overdueVisitsCount + summary.dueVisitsCount
   val endingSoonCount = summary.endingSoonVisitsCount
-  SummaryCard(title = stringResource(R.string.home_active_visits)) {
+  // Current month/year, e.g. "Jan 2026" — matches the design's Active Visits trailing label.
+  // Locale-formatted directly (no string resource needed): unlike home_updated_on/
+  // home_active_beneficiaries_total this carries no surrounding phrase to localize, just a
+  // date already rendered in the device locale. SummaryCard renders it in labelSmall (12sp),
+  // smaller than the "Updated {date}" caption under the Data Upload pill (bodyMedium/bodyLarge,
+  // 14/16sp) per the confirmed design (CR: Home UI issues, 2026-09-10).
+  val currentMonthYear = remember {
+    DateTimeFormatter.ofPattern("MMM yyyy", Locale.getDefault()).format(LocalDate.now())
+  }
+  SummaryCard(title = stringResource(R.string.home_active_visits), trailingLabel = currentMonthYear) {
     Row(
       horizontalArrangement = Arrangement.spacedBy(Dimens.ItemSpacing),
       modifier = Modifier.fillMaxWidth().padding(top = Dimens.ItemSpacing),
@@ -265,12 +277,14 @@ private fun ActiveBeneficiariesCard(summary: DashboardSummary) {
         value = countWithHighRisk(summary.activeMothersCount, summary.activeMothersHighRiskCount),
         caption = buildAnnotatedString { append(stringResource(R.string.home_mothers)) },
         modifier = Modifier.weight(1f),
+        valueStyle = KpiNumberSecondary,
       )
       StatTile(
         icon = painterResource(R.drawable.ic_baby),
         value = countWithHighRisk(summary.activeChildrenCount, summary.activeChildrenHighRiskCount),
         caption = buildAnnotatedString { append(stringResource(R.string.home_infants)) },
         modifier = Modifier.weight(1f),
+        valueStyle = KpiNumberSecondary,
       )
     }
   }

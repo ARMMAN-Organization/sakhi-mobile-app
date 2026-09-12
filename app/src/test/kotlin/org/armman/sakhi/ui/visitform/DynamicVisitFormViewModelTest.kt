@@ -93,7 +93,12 @@ class DynamicVisitFormViewModelTest {
     override suspend fun saveGenerated(schedules: List<VisitScheduleEntity>) {}
     override suspend fun getForBeneficiary(localBeneficiaryId: String): List<VisitScheduleEntity> = emptyList()
     override suspend fun getByLocalScheduleUuid(localScheduleUuid: String): VisitScheduleEntity? = scheduleByUuid
-    override suspend fun getActiveForBeneficiary(localBeneficiaryId: String): List<VisitScheduleEntity> = emptyList()
+    /** Bug fix (2026-09-11, reported): keyed by localBeneficiaryId, mirroring [openByType]'s
+     * "empty unless a test opts in" contract -- backs [DynamicVisitFormViewModel.load]'s
+     * nextScheduledVisitDate resolution. */
+    var activeForBeneficiary: MutableMap<String, List<VisitScheduleEntity>> = mutableMapOf()
+    override suspend fun getActiveForBeneficiary(localBeneficiaryId: String): List<VisitScheduleEntity> =
+      activeForBeneficiary[localBeneficiaryId].orEmpty()
     override fun observeActiveForBeneficiary(localBeneficiaryId: String): Flow<List<VisitScheduleEntity>> =
       MutableStateFlow(emptyList())
     /** CR-Delivery-01: keyed by (localBeneficiaryId, visitType) so a test can hand back a
@@ -108,6 +113,8 @@ class DynamicVisitFormViewModelTest {
     override suspend fun hasSchedule(localBeneficiaryId: String): Boolean = false
     override suspend fun hasScheduleOfType(localBeneficiaryId: String, visitType: VisitCodeType): Boolean = false
     override suspend fun getUnsynced(): List<VisitScheduleEntity> = emptyList()
+    override suspend fun getActiveUnsynced(): List<VisitScheduleEntity> = emptyList()
+    override suspend fun getAllActive(): List<VisitScheduleEntity> = emptyList()
     override fun observeUnsyncedCount(): Flow<Int> = MutableStateFlow(0)
     override suspend fun markSynced(localScheduleUuid: String, serverScheduleId: String) {}
     override suspend fun attachServerBeneficiaryId(localBeneficiaryId: String, serverBeneficiaryId: String) {}
@@ -151,6 +158,9 @@ class DynamicVisitFormViewModelTest {
     ): DeliveryFormSubmitResult = throw NotImplementedError("not exercised by these tests")
 
     override suspend fun getAnswers(localSubmissionUuid: String): FormAnswers? = null
+
+    override fun observeUploadRecords(): kotlinx.coroutines.flow.Flow<List<org.armman.sakhi.data.forms.FormUploadRecord>> =
+      kotlinx.coroutines.flow.MutableStateFlow(emptyList())
   }
 
   /** No cached risk pack, so [org.armman.sakhi.data.rules.GoRulesRiskAdapter] returns null
@@ -272,20 +282,28 @@ class DynamicVisitFormViewModelTest {
   /** Returns a fixed on-device grading result regardless of the real input — [onFinish]'s
    * referral-trigger gating only cares about [org.armman.sakhi.data.rules.RiskConditionFinding
    * .isReferralTrigger], so the rest of the response shape is minimal but valid. */
-  private class ScriptedRuleEvaluator(private val isReferralTrigger: Boolean) : org.armman.sakhi.data.rules.RuleEvaluator {
+  private class ScriptedRuleEvaluator(
+    private val isReferralTrigger: Boolean,
+    /** Bug fix (2026-09-11, reported) test support: lets a test decouple the STATIC
+     * isReferralTrigger flag from the per-visit [grade] -- matching the real repro (a
+     * NORMAL-graded, referral-eligible condition type must NOT fire the step). Defaults preserve
+     * every pre-existing caller's original coupled shape (SEVERE+true / NORMAL+false). */
+    private val grade: String = if (isReferralTrigger) "SEVERE" else "NORMAL",
+    private val gradeRank: Int = if (isReferralTrigger) 3 else 0,
+  ) : org.armman.sakhi.data.rules.RuleEvaluator {
     override suspend fun evaluate(
       rulesJson: com.google.gson.JsonObject,
       context: com.google.gson.JsonObject,
     ): com.google.gson.JsonObject = com.google.gson.JsonObject().apply {
-      addProperty("overallRiskCategory", if (isReferralTrigger) "HIGH" else "NORMAL")
+      addProperty("overallRiskCategory", if (grade == "NORMAL") "NORMAL" else "HIGH")
       add(
         "conditions",
         com.google.gson.JsonArray().apply {
           add(
             com.google.gson.JsonObject().apply {
               addProperty("riskConditionId", "condition-1")
-              addProperty("grade", if (isReferralTrigger) "SEVERE" else "NORMAL")
-              addProperty("gradeRank", if (isReferralTrigger) 3 else 0)
+              addProperty("grade", grade)
+              addProperty("gradeRank", gradeRank)
               addProperty("isReferralTrigger", isReferralTrigger)
               addProperty("isEducationTrigger", false)
               addProperty("isHrVisitTrigger", false)
@@ -896,6 +914,109 @@ class DynamicVisitFormViewModelTest {
     assertNull(viewModel.uiState.value.sameSessionNnHandoff)
   }
 
+  // Bug fix (2026-09-11, reported): decided_visit_date on the Referral step had no upper bound --
+  // nextScheduledVisitDate is the resolution half of that fix (FormDateRulesetTest covers the
+  // bounds-math half). Repro: ANC1 with Hb 8.4 triggering a referral, an arbitrarily far future
+  // "Planned facility visit date" was accepted with no error.
+
+  @Test
+  fun `load() populates nextScheduledVisitDate from the beneficiary's earliest later open visit`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    val currentVisitDate = LocalDate.of(2026, 8, 4)
+    // PP (not ANC/INC/CCV): resolves to POSTPARTUM_VISIT, which needs no extra visit-context or
+    // child-registration stubbing beyond schedule + profile -- same "cheapest safe visit family"
+    // choice the sameSessionNnHandoff tests above already make.
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "PP2",
+      visitType = VisitCodeType.PP,
+      sequenceNo = 2,
+      scheduledDate = currentVisitDate,
+    )
+    visitScheduleRepository.activeForBeneficiary["beneficiary-1"] = listOf(
+      visitScheduleRepository.scheduleByUuid!!,
+      // Further out -- must lose to PP3 below.
+      schedule(
+        localScheduleUuid = "visit-4",
+        localBeneficiaryId = "beneficiary-1",
+        visitCode = "PP4",
+        visitType = VisitCodeType.PP,
+        sequenceNo = 4,
+        scheduledDate = currentVisitDate.plusDays(40),
+      ),
+      // Earliest visit strictly after the current one -- the expected answer.
+      schedule(
+        localScheduleUuid = "visit-3",
+        localBeneficiaryId = "beneficiary-1",
+        visitCode = "PP3",
+        visitType = VisitCodeType.PP,
+        sequenceNo = 3,
+        scheduledDate = currentVisitDate.plusDays(20),
+      ),
+    )
+    formsRepository.version = versionWithFields(listOf(dateField(VisitFormQuestionCodes.ACTUAL_VISIT_DATE)))
+
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertEquals(currentVisitDate.plusDays(20), viewModel.uiState.value.nextScheduledVisitDate)
+  }
+
+  @Test
+  fun `load() leaves nextScheduledVisitDate null when no later visit is scheduled yet`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    val currentVisitDate = LocalDate.of(2026, 8, 4)
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "PP2",
+      visitType = VisitCodeType.PP,
+      sequenceNo = 2,
+      scheduledDate = currentVisitDate,
+    )
+    // Only the current visit itself is active -- nothing scheduled after it yet.
+    visitScheduleRepository.activeForBeneficiary["beneficiary-1"] = listOf(visitScheduleRepository.scheduleByUuid!!)
+    formsRepository.version = versionWithFields(listOf(dateField(VisitFormQuestionCodes.ACTUAL_VISIT_DATE)))
+
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertNull(viewModel.uiState.value.nextScheduledVisitDate)
+  }
+
+  @Test
+  fun `load() ignores an already-completed later visit when resolving nextScheduledVisitDate`() {
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    val currentVisitDate = LocalDate.of(2026, 8, 4)
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "PP2",
+      visitType = VisitCodeType.PP,
+      sequenceNo = 2,
+      scheduledDate = currentVisitDate,
+    )
+    visitScheduleRepository.activeForBeneficiary["beneficiary-1"] = listOf(
+      visitScheduleRepository.scheduleByUuid!!,
+      schedule(
+        localScheduleUuid = "visit-3",
+        localBeneficiaryId = "beneficiary-1",
+        visitCode = "PP3",
+        visitType = VisitCodeType.PP,
+        sequenceNo = 3,
+        scheduledDate = currentVisitDate.plusDays(20),
+        status = VisitScheduleStatus.COMPLETED,
+      ),
+    )
+    formsRepository.version = versionWithFields(listOf(dateField(VisitFormQuestionCodes.ACTUAL_VISIT_DATE)))
+
+    val viewModel = buildViewModel()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertNull(viewModel.uiState.value.nextScheduledVisitDate)
+  }
+
   @Test
   fun `load() auto-fills actual_visit_date with today for NEONATAL_VISIT`() {
     beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
@@ -1093,6 +1214,23 @@ class DynamicVisitFormViewModelTest {
     ScriptedRuleEvaluator(isReferralTrigger = false),
   )
 
+  /** Bug fix (2026-09-11, reported) repro fixture: a condition whose STATIC isReferralTrigger
+   * flag is true but whose grade THIS VISIT is NORMAL -- the real shape of the bug (a control
+   * beneficiary with zero abnormal findings still had referral-eligible entries in `conditions`,
+   * see RiskGradingResult's own doc on why absence != NORMAL). Must NOT trigger the step. */
+  private fun normalGradeReferralEligibleAdapter() = org.armman.sakhi.data.rules.GoRulesRiskAdapter(
+    AlwaysCachedRuleSetRepository(),
+    ScriptedRuleEvaluator(isReferralTrigger = true, grade = "NORMAL", gradeRank = 0),
+  )
+
+  /** Bug 2 (2026-09-11, reported) fixture: a MODERATE-graded condition that is NOT itself a
+   * referral trigger (e.g. gestational weight gain) -- exercises overallRiskLevel()'s GoRules
+   * fold independent of the referral-gating check bug 1 already covers. */
+  private fun moderateGoRulesAdapter() = org.armman.sakhi.data.rules.GoRulesRiskAdapter(
+    AlwaysCachedRuleSetRepository(),
+    ScriptedRuleEvaluator(isReferralTrigger = false, grade = "MODERATE", gradeRank = 2),
+  )
+
   @Test
   fun `onFinish sets triggersChildClosurePrompt when the submission reports no HR at the last CCV visit`() {
     beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
@@ -1174,6 +1312,110 @@ class DynamicVisitFormViewModelTest {
 
     assertTrue(viewModel.uiState.value.showReferralCaptureStep)
     assertTrue("submitDraft must not be called on the first onFinish() that discovers a trigger", draftRepository.calls.isEmpty())
+  }
+
+  @Test
+  fun `onFinish does not show the referral capture step when the only referral-eligible condition is graded NORMAL`() {
+    // Bug fix (2026-09-11, reported): repro was ANC1 with all-normal values on a control
+    // beneficiary -- the Referral screen and "Referral needed as this is a new condition"
+    // appeared anyway, because onFinish() used to check isReferralTrigger alone with no grade
+    // filter. This is the exact shape: isReferralTrigger=true, grade=NORMAL -- must proceed
+    // straight to submission instead of showing the step.
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    formsRepository.version = infantVersion()
+    val draftRepository = RecordingVisitFormDraftRepository()
+
+    val viewModel = buildViewModel(
+      visitFormDraftRepository = draftRepository,
+      goRulesRiskAdapter = normalGradeReferralEligibleAdapter(),
+    )
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.onFinish()
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertFalse(viewModel.uiState.value.showReferralCaptureStep)
+    // A NORMAL-graded condition must not block submission even though it is referral-eligible
+    // in the abstract -- proceeds straight through to submitDraft.
+    assertEquals(1, draftRepository.calls.size)
+  }
+
+  // --- Bug 2 (2026-09-11, reported): overallRiskLevel() (Summary tab's risk banner) ---
+
+  @Test
+  fun `overallRiskLevel reflects a GoRules-detected condition even when the ported per-vital findings are all normal`() {
+    // Repro: high/moderate risk detected in the ANC form (by GoRules, the same engine that
+    // correctly gates the referral step) still showed "Low" on the Summary tab, because
+    // overallRiskLevel() only ever considered BP/Hb/BMI via the legacy, hand-ported
+    // VisitFormRiskAssessment path -- see that class's own doc on what it does NOT cover (danger
+    // signs, urine, glucose, temperature, MUAC, gestational weight gain, age, stunting, bad
+    // obstetric history, and more). Here BP/Hb/weight are never answered at all (testsFindings()
+    // stays empty) -- the SEVERE grade must still surface through the new GoRules fold.
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "ANC1",
+      visitType = VisitCodeType.ANC,
+      sequenceNo = 1,
+    )
+    formsRepository.version = versionWithFields(listOf(dateField(VisitFormQuestionCodes.DATE_OF_VISIT)))
+
+    val viewModel = buildViewModel(goRulesRiskAdapter = triggeringGoRulesAdapter())
+    testDispatcher.scheduler.advanceUntilIdle()
+    assertEquals("ANC_VISIT", viewModel.uiState.value.formCode)
+
+    // Any answer triggers recheckGoRulesRisk() -- see setAnswer's own doc.
+    viewModel.setAnswer(VisitFormQuestionCodes.DATE_OF_VISIT, LocalDate.now().toString())
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertTrue("the legacy per-vital path alone sees nothing here", viewModel.testsFindings().isEmpty())
+    assertEquals(org.armman.sakhi.data.beneficiary.RiskLevel.HIGH, viewModel.overallRiskLevel())
+  }
+
+  @Test
+  fun `overallRiskLevel surfaces a MODERATE GoRules grade that is not itself a referral trigger`() {
+    // Distinguishes this fix from bug 1's fix -- a condition can raise the Summary banner without
+    // ever being isReferralTrigger, so this must not depend on that flag at all.
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "ANC1",
+      visitType = VisitCodeType.ANC,
+      sequenceNo = 1,
+    )
+    formsRepository.version = versionWithFields(listOf(dateField(VisitFormQuestionCodes.DATE_OF_VISIT)))
+
+    val viewModel = buildViewModel(goRulesRiskAdapter = moderateGoRulesAdapter())
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    viewModel.setAnswer(VisitFormQuestionCodes.DATE_OF_VISIT, LocalDate.now().toString())
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertFalse("a MODERATE, non-referral-trigger grade must not show the referral step", viewModel.uiState.value.showReferralCaptureStep)
+    assertEquals(org.armman.sakhi.data.beneficiary.RiskLevel.MODERATE, viewModel.overallRiskLevel())
+  }
+
+  @Test
+  fun `overallRiskLevel stays LOW when GoRules has graded nothing yet`() {
+    // Regression guard: before any answer has run recheckGoRulesRisk(), goRulesRiskResult is
+    // still null -- must not crash or default to anything other than the pre-fix LOW baseline.
+    beneficiaryProfileRepository.put("beneficiary-1", infantProfile())
+    visitScheduleRepository.scheduleByUuid = schedule(
+      localScheduleUuid = "visit-1",
+      localBeneficiaryId = "beneficiary-1",
+      visitCode = "ANC1",
+      visitType = VisitCodeType.ANC,
+      sequenceNo = 1,
+    )
+    formsRepository.version = versionWithFields(listOf(dateField(VisitFormQuestionCodes.DATE_OF_VISIT)))
+
+    val viewModel = buildViewModel(goRulesRiskAdapter = triggeringGoRulesAdapter())
+    testDispatcher.scheduler.advanceUntilIdle()
+
+    assertNull(viewModel.uiState.value.goRulesRiskResult)
+    assertEquals(org.armman.sakhi.data.beneficiary.RiskLevel.LOW, viewModel.overallRiskLevel())
   }
 
   @Test

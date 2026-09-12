@@ -42,6 +42,7 @@ import org.armman.sakhi.data.schedule.SameSessionNnVisitResolver
 import org.armman.sakhi.data.schedule.ScheduleContext
 import org.armman.sakhi.data.schedule.VisitCodeType
 import org.armman.sakhi.data.schedule.VisitScheduleRepository
+import org.armman.sakhi.data.schedule.VisitScheduleStatus
 import org.armman.sakhi.data.visitform.CriticalCondition
 import org.armman.sakhi.data.visitform.InfantVisitFormComputedFieldEvaluator
 import org.armman.sakhi.data.visitform.InfantVisitRiskAssessment
@@ -230,6 +231,18 @@ data class DynamicVisitFormUiState(
    * Profile with no automatic way back into it (the CR-Delivery-01 bug this closes).
    */
   val sameSessionNnHandoff: SameSessionNnHandoff? = null,
+  /**
+   * Bug fix (2026-09-11, reported): the earliest OPEN/MISSED/GENERATED visit's [scheduledDate]
+   * after THIS visit's own, or null when none exists yet. Set once at
+   * [DynamicVisitFormViewModel.load] time from [org.armman.sakhi.data.schedule
+   * .VisitScheduleRepository.getActiveForBeneficiary], same "knowable from schedule state alone"
+   * convention as [sameSessionNnHandoff]/[triggersClosurePrompt]. Forwarded into
+   * [org.armman.sakhi.data.forms.FormDateRuleset.boundsFor] as the referral step's
+   * `decided_visit_date` upper bound -- previously unbounded, which let a Sakhi pick a referral
+   * visit date arbitrarily far in the future regardless of when the beneficiary is actually next
+   * due, contradicting the Referral form's "follow up before the next visit" intent.
+   */
+  val nextScheduledVisitDate: LocalDate? = null,
   /**
    * CR-Closure-01 items #5/#6: true only right after a LAST `CCV_VISIT` submission whose response
    * came back with `closureDeferredForExtension == false` (no HR at this, the last scheduled CCV
@@ -478,6 +491,30 @@ class DynamicVisitFormViewModel @Inject constructor(
       } else {
         null
       }
+      // Bug fix (2026-09-11, reported): the Referral step's "Decided date for visit to health
+      // facility" (FormDateRuleset.DECIDED_VISIT_DATE_QUESTION_CODE) had no upper bound at all,
+      // so a Sakhi could pick an arbitrarily far future date -- e.g. months out -- for a referral
+      // raised off THIS visit's own findings, contradicting the Referral form's own intent
+      // (spec: "Referral follow up to be filled before the next visit"). Resolved here, not in
+      // FormDateRuleset itself, because only the ViewModel has schedule access
+      // (VisitScheduleRepository, already injected for the sameSessionNnHandoff lookup above) --
+      // FormDateRuleset stays a pure function of what's passed in, same convention as
+      // beneficiaryRegistrationDate/motherLmpDate/deliveryDate.
+      // Earliest OPEN/MISSED/GENERATED visit strictly after THIS visit's own scheduledDate;
+      // COMPLETED/SUPERSEDED/CANCELLED rows are excluded (nothing to cap against once a visit is
+      // done or retired). getActiveForBeneficiary() already excludes SUPERSEDED/CANCELLED; the
+      // COMPLETED filter here additionally drops a same-day already-done visit from consideration.
+      // Null (unbounded) when there's no next visit yet -- same "missing data gap" convention as
+      // every other optional bound in FormDateRuleset.
+      val nextScheduledVisitDate = schedule?.let { current ->
+        visitScheduleRepository.getActiveForBeneficiary(beneficiaryId)
+          .asSequence()
+          .filter { it.localScheduleUuid != current.localScheduleUuid }
+          .filter { it.status != VisitScheduleStatus.COMPLETED }
+          .filter { it.scheduledDate.isAfter(current.scheduledDate) }
+          .minByOrNull { it.scheduledDate }
+          ?.scheduledDate
+      }
       _uiState.update {
         it.copy(
           isLoading = false,
@@ -485,6 +522,7 @@ class DynamicVisitFormViewModel @Inject constructor(
           version = version,
           triggersClosurePrompt = triggersClosurePrompt,
           sameSessionNnHandoff = sameSessionNnHandoff,
+          nextScheduledVisitDate = nextScheduledVisitDate,
         )
       }
       // CR-035: logged only once the form has genuinely loaded (version confirmed non-null) —
@@ -951,14 +989,31 @@ class DynamicVisitFormViewModel @Inject constructor(
   /** Worst-of [testsFindings] and any recorded comorbidity - comorbidities alone don't have a
    * graded tier, so their mere presence counts as at least [org.armman.sakhi.data.beneficiary
    * .RiskLevel.MODERATE] rather than the top-of-list HIGH, unless a vital reading is itself HIGH. */
+  /**
+   * Bug fix (2026-09-11, reported): used to be worst-of([testsFindings] + comorbidities) only —
+   * [VisitFormRiskAssessment] covers just BP/Hb/BMI (see its own doc), so a beneficiary whose
+   * only abnormal finding was any OTHER ANC risk condition (danger signs, urine, glucose,
+   * temperature, MUAC, gestational weight gain, age, stunting, bad obstetric history, APH/PPH...)
+   * showed "Low" here even though [state.goRulesRiskResult] — the same authoritative engine that
+   * gates the referral step in [onFinish] — had already graded her higher. Now also folds in
+   * every currently-graded, non-NORMAL/non-UNKNOWN GoRules condition via
+   * [VisitFormRiskAssessment.fromGoRulesGrade], same filter [recheckGoRulesRisk] already applies
+   * before trusting a finding. [state.goRulesRiskResult] is populated live per keystroke (see
+   * [recheckGoRulesRisk]), so this stays current without waiting for [onFinish]'s own final
+   * recompute.
+   */
   fun overallRiskLevel(): RiskLevel {
+    val state = _uiState.value
     val findingLevels = testsFindings().map { it.riskLevel }
-    val comorbidityLevel = if (_uiState.value.comorbidities.isNotEmpty()) {
+    val goRulesLevels = state.goRulesRiskResult?.conditions.orEmpty()
+      .filter { it.grade != RiskGrade.NORMAL && it.grade != RiskGrade.UNKNOWN }
+      .map { VisitFormRiskAssessment.fromGoRulesGrade(it.grade) }
+    val comorbidityLevel = if (state.comorbidities.isNotEmpty()) {
       listOf(RiskLevel.MODERATE)
     } else {
       emptyList()
     }
-    return VisitFormRiskAssessment.overall(findingLevels + comorbidityLevel)
+    return VisitFormRiskAssessment.overall(findingLevels + goRulesLevels + comorbidityLevel)
   }
 
   /** Summary tab's known-risk chips for INFANT_VISIT (2026-08-08) - see
@@ -1308,7 +1363,20 @@ class DynamicVisitFormViewModel @Inject constructor(
       // rather than waiting for the server's own risk-assessment call. Only fires once per visit
       // (state.showReferralCaptureStep already true means she's already been through this step
       // this submit attempt, whether she filled it in or skipped it).
-      val referralTriggered = finalRiskResult?.conditions.orEmpty().any { it.isReferralTrigger }
+      //
+      // Bug fix (2026-09-11, reported): this used to check isReferralTrigger alone. Per
+      // RiskGradingResult's own doc, [conditions] includes an entry for every EVALUATED
+      // condition, including ones graded NORMAL — isReferralTrigger is a static per-condition-type
+      // flag ("does this condition type refer when abnormal"), not "this finding IS abnormal right
+      // now". So a control beneficiary with zero abnormal findings still had normal-graded,
+      // referral-eligible entries in [conditions], and the step fired on every ANC submission
+      // regardless of what was actually detected. Now also requires the condition's own [grade]
+      // to be non-NORMAL/non-UNKNOWN — the exact same filter [recheckGoRulesRisk] already applies
+      // before trusting a trigger flag for field highlighting (see that function's own
+      // `.filter { it.grade != RiskGrade.NORMAL && it.grade != RiskGrade.UNKNOWN }`), just never
+      // applied here too.
+      val referralTriggered = finalRiskResult?.conditions.orEmpty()
+        .any { it.isReferralTrigger && it.grade != RiskGrade.NORMAL && it.grade != RiskGrade.UNKNOWN }
       if (referralTriggered && !state.showReferralCaptureStep) {
         // Pass 6: fetch the real schema before showing the step, so its fields are never stale —
         // see loadReferralFormIfNeeded's doc.

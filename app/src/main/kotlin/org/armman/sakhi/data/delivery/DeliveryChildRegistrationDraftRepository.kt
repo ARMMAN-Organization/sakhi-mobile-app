@@ -1,6 +1,8 @@
 package org.armman.sakhi.data.delivery
 
+import kotlinx.coroutines.flow.Flow
 import org.armman.sakhi.data.forms.FormAnswers
+import org.armman.sakhi.data.forms.FormUploadRecord
 
 /**
  * Offline-first persistence boundary for one delivery-session `CHILD_REGISTRATION` submission —
@@ -25,4 +27,10 @@ interface DeliveryChildRegistrationDraftRepository {
     formVersionId: String,
     answers: FormAnswers,
   ): DeliveryChildRegistrationSubmitResult
+
+  /** Bharath, 2026-09-11: same Home "Forms Uploaded" modal gap as [DeliveryFormDraftRepository
+   * .observeUploadRecords] — folds into the existing "Registration" card since this submission's
+   * own formCode is CHILD_REGISTRATION, the same category a standalone Children Register draft
+   * already displays under. */
+  fun observeUploadRecords(): Flow<List<FormUploadRecord>>
 }

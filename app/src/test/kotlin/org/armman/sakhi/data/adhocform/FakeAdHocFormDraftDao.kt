@@ -20,6 +20,9 @@ class FakeAdHocFormDraftDao : AdHocFormDraftDao {
   override suspend fun getByLocalFormInstanceUuid(localFormInstanceUuid: String): AdHocFormDraftEntity? =
     rows[localFormInstanceUuid]
 
+  override suspend fun getReferralFollowUpDraftsByReferralIds(referralIds: List<String>): List<AdHocFormDraftEntity> =
+    rows.values.filter { it.formCode == "REFERRAL_FOLLOWUP_VISIT" && it.referralId in referralIds }
+
   override suspend fun getPendingSync(): List<AdHocFormDraftEntity> =
     rows.values
       .filter { it.syncStatus == EnrollmentSyncStatus.PENDING || it.syncStatus == EnrollmentSyncStatus.FAILED }

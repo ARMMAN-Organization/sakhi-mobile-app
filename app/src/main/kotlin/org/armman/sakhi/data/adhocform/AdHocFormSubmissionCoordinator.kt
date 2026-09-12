@@ -247,8 +247,32 @@ class AdHocFormSubmissionCoordinator @Inject constructor(
    */
   private suspend fun submitReferralFollowUp(referralId: String, answers: FormAnswers) {
     val visited = answers.valueOf(QUESTION_CODE_VISITED_HEALTH_FACILITY) == VALUE_YES
-    val followupDate = answers.valueOf(FormDateRuleset.FOLLOWUP_FORM_FILLED_DATE_QUESTION_CODE)
-      ?: LocalDate.now().toString()
+    // Clamped to LocalDate.now() at SUBMIT time, not just trusted verbatim from the stored answer
+    // — bharath, 2026-09-11 ("referral follow-up form filled while the device clock was set
+    // forward stays stuck failing sync forever, even after the clock is corrected and the device
+    // is back online").
+    //
+    // `form_filled_date`'s own picker (FormDateRuleset.boundsFor's FOLLOWUP_FORM_FILLED_DATE_
+    // QUESTION_CODE case) bounds this to "today" as the DEVICE'S clock saw it at fill time — the
+    // only "today" a fully offline picker can ever know. If that clock was wrong (set forward for
+    // testing, or genuinely drifted/misconfigured in the field), the Sakhi could pick a date that
+    // is honestly "today" by the device's own (wrong) clock but lands in the FUTURE once the
+    // backend validates it against ITS clock — `POST /referrals/{referralId}/follow-up` rejects a
+    // future followupDate, `submitReferralFollowUp` throws `ReferralFollowUpSubmissionFailed`, and
+    // `AdHocFormSyncExecutor.attemptSync` marks the whole draft FAILED. FAILED rows DO stay in
+    // `getPendingSync()`'s retry set (unlike a stuck-SYNCING row), so the next Data Upload tap
+    // retries — but every retry resent this exact same stale future date from the persisted answer
+    // payload, so it failed identically forever, even once the clock (and thus the real "now") had
+    // long since caught up to it or passed it.
+    //
+    // Clamping at submit time to whichever is EARLIER — the answered date, or the device's current
+    // clock right now — means a corrected clock self-heals the very next retry with no Sakhi
+    // action needed, while an honestly-backdated answer (the Sakhi filling this in a day or two
+    // late) is left completely untouched, since in that ordinary case the answered date is already
+    // <= today and `minOf` is a no-op.
+    val answeredFollowupDate = answers.valueOf(FormDateRuleset.FOLLOWUP_FORM_FILLED_DATE_QUESTION_CODE)
+      ?.let { LocalDate.parse(it) }
+    val followupDate = listOfNotNull(answeredFollowupDate, LocalDate.now()).min()
 
     val notVisitedReason = answers.valueOf(QUESTION_CODE_NOT_VISITED_REASON)
       ?.let { NOT_VISITED_REASON_LABELS[it] ?: it }
@@ -283,7 +307,7 @@ class AdHocFormSubmissionCoordinator @Inject constructor(
     val result = referralRepository.submitFollowUp(
       referralId = referralId,
       visitedFacilityFlag = visited,
-      followupDate = LocalDate.parse(followupDate),
+      followupDate = followupDate,
       notVisitedReason = notVisitedReason,
       diagnosis = diagnosis,
       treatmentGiven = treatmentGiven,

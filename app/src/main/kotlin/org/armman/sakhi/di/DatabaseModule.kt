@@ -18,6 +18,7 @@ import org.armman.sakhi.data.db.SakhiDatabase
 import org.armman.sakhi.data.enrollment.EnrollmentDraftDao
 import org.armman.sakhi.data.enrollment.EnrollmentRiskBaselineDao
 import org.armman.sakhi.data.forms.DynamicFormDraftDao
+import org.armman.sakhi.data.previsithealth.PreVisitHealthHistoryCacheDao
 import org.armman.sakhi.data.referral.ReferralLinkDao
 import org.armman.sakhi.data.referral.ReferralEvidenceDao
 import org.armman.sakhi.data.riskassessment.RiskAssessmentDao
@@ -72,6 +73,8 @@ object DatabaseModule {
         SakhiDatabase.MIGRATION_20_21,
         SakhiDatabase.MIGRATION_21_22,
         SakhiDatabase.MIGRATION_22_23,
+        SakhiDatabase.MIGRATION_23_24,
+        SakhiDatabase.MIGRATION_24_25,
       )
       .fallbackToDestructiveMigration()
       .build()
@@ -145,6 +148,11 @@ object DatabaseModule {
   @Singleton
   fun provideEnrollmentRiskBaselineDao(database: SakhiDatabase): EnrollmentRiskBaselineDao =
     database.enrollmentRiskBaselineDao()
+
+  @Provides
+  @Singleton
+  fun providePreVisitHealthHistoryCacheDao(database: SakhiDatabase): PreVisitHealthHistoryCacheDao =
+    database.preVisitHealthHistoryCacheDao()
 
   @Provides
   @Singleton

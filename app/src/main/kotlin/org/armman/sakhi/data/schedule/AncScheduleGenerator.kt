@@ -25,9 +25,11 @@ import javax.inject.Singleton
  *  - [generateSeries] — at enrolment, the whole regular ANC chain.
  *  - [generatePostEddVisit] — later, only if no delivery form exists by EDD + 7 (SR-ANC-01).
  *  - [generateHrVisit] — on demand, when a visit is completed and a high-risk condition is found.
- *  - [generateBaselineHrVisit] — at enrolment itself, when a baseline (pre-visit) obstetric
- *    condition is already HIGH risk (e.g. Sickle Cell Disease) — see that function's own doc
- *    for why it needs a separate entry point rather than reusing [generateHrVisit].
+ *
+ * (2026-09-11: [generateBaselineHrVisit] — a fourth entry point that pre-generated an
+ * ANC-HR1 visit straight from enrolment/registration answers, before any ANC visit was
+ * attended — was removed per explicit product decision. See MotherEnrolmentScheduleTrigger's
+ * class doc and delivery-log.md 2026-09-11.)
  */
 @Singleton
 class AncScheduleGenerator @Inject constructor(
@@ -185,48 +187,9 @@ class AncScheduleGenerator @Inject constructor(
     )
   }
 
-  /**
-   * A single ANC-HR follow-up generated at enrolment itself, when [EnrollmentRiskAssessment]
-   * (the baseline, obstetric-history risk check — Sickle Cell Disease, high gravidity, previous
-   * still birth, etc.) already resolves to [org.armman.sakhi.data.beneficiary.RiskLevel.HIGH]
-   * before the woman has attended a single ANC visit.
-   *
-   * Bug fix (2026-09-02): [generateHrVisit] cannot be reused here — it requires an actual
-   * [VisitScheduleEntity] the risk was found *during*, which does not exist yet at enrolment (ANC1
-   * is only just being generated in the same call). This uses the same 15-day HR cadence
-   * ([ScheduleRuleSource.hrOffsetDays] — FR-S-3.4) but anchors it to [ScheduleContext
-   * .registrationDate] instead, with [AnchorType.REGISTRATION] and no [VisitScheduleEntity
-   * .anchorVisitLocalUuid] to point at.
-   *
-   * Always sequence 1 — [VisitScheduleCoordinator.onEnrollmentHighRiskDetected] guards this with
-   * [VisitScheduleRepository.hasScheduleOfType] so it only ever runs once per beneficiary, the
-   * same idempotency convention as every other family in that coordinator.
-   */
-  fun generateBaselineHrVisit(
-    context: ScheduleContext,
-    newUuid: () -> String = { UUID.randomUUID().toString() },
-    createdAt: Instant = Instant.now(),
-  ): VisitScheduleEntity {
-    val scheduledDate = context.registrationDate.plusDays(rules.hrOffsetDays(VisitCodeType.ANC).toLong())
-    val window = rules.window(VisitCodeType.ANC_HR, BASELINE_HR_SEQUENCE_NO, scheduledDate)
-
-    return VisitScheduleEntity(
-      localScheduleUuid = newUuid(),
-      localBeneficiaryId = context.localBeneficiaryId,
-      visitCode = "$ANC_HR_CODE_PREFIX$BASELINE_HR_SEQUENCE_NO",
-      visitType = VisitCodeType.ANC_HR,
-      sequenceNo = BASELINE_HR_SEQUENCE_NO,
-      scheduledDate = scheduledDate,
-      windowStartDate = window.start,
-      windowEndDate = window.end,
-      anchorType = AnchorType.REGISTRATION,
-      anchorDate = context.registrationDate,
-      anchorVisitLocalUuid = null,
-      generatedByRuleVersion = rules.ruleVersion(VisitCodeType.ANC_HR),
-      escalationPolicy = rules.escalationPolicy(VisitCodeType.ANC_HR),
-      createdAtEpochMillis = createdAt.toEpochMilli(),
-    )
-  }
+  // 2026-09-11: generateBaselineHrVisit() (enrolment-time baseline HR visit, added
+  // 2026-09-02) removed per explicit product decision — see MotherEnrolmentScheduleTrigger's
+  // class doc and delivery-log.md 2026-09-11 for the full reasoning.
 
   private companion object {
     /**
@@ -243,7 +206,5 @@ class AncScheduleGenerator @Inject constructor(
     /** The post-EDD visit is always a singleton — only one is ever generated per pregnancy. */
     const val POST_EDD_SEQUENCE_NO = 1
 
-    /** [generateBaselineHrVisit] never generates a second one — see that function's own doc. */
-    const val BASELINE_HR_SEQUENCE_NO = 1
   }
 }

@@ -61,6 +61,31 @@ data class ProfileVisit(
    * Visit Form. Only meaningful when [action] is START_VISIT or FILL_FORM.
    */
   val hasPreVisitHistory: Boolean = false,
+  /**
+   * Bharath, 2026-09-10 ("submitted while offline still shows Open/Start Visit"): true when a
+   * [org.armman.sakhi.data.visitform.VisitFormDraftEntity] exists for this visit whose
+   * [org.armman.sakhi.data.enrollment.EnrollmentSyncStatus] isn't yet SYNCED — i.e. the Sakhi
+   * already filled and saved this visit's form, but it hasn't reached the server. The schedule
+   * itself only flips to [org.armman.sakhi.data.schedule.VisitScheduleStatus.COMPLETED] once
+   * [org.armman.sakhi.data.visitform.VisitFormSubmissionCoordinator.submit] actually runs
+   * online, so without this flag an offline-queued submission looked identical to a visit
+   * nothing had been done for. Only meaningful while [state] is OPEN — a visit that has already
+   * synced through to COMPLETED has no draft left to be pending.
+   */
+  val pendingSync: Boolean = false,
+  /**
+   * Bharath, 2026-09-10 (same report as [pendingSync] above, extended to the Referral Follow-up
+   * form): true when a [org.armman.sakhi.data.adhocform.AdHocFormDraftEntity] exists for this
+   * visit's [referralId] whose sync status isn't yet SYNCED — the Sakhi already filled and saved
+   * the Referral Follow-up, but the paired `POST /referrals/{id}/follow-up` status-transition call
+   * only runs from [org.armman.sakhi.data.adhocform.AdHocFormSubmissionCoordinator.submit]'s
+   * online-only success path, so the cached [org.armman.sakhi.data.referral.ReferralLinkEntity]
+   * this visit's [referralIncomplete]/[referralStatus] were built from is still stuck on
+   * PENDING_FOLLOWUP until that sync happens. Only meaningful when [referralIncomplete] is true;
+   * lets the card show "Not yet synced" instead of "Referral Followup Incomplete" and disables
+   * re-tapping Fill Form on a follow-up already submitted.
+   */
+  val referralPendingSync: Boolean = false,
 )
 
 /**

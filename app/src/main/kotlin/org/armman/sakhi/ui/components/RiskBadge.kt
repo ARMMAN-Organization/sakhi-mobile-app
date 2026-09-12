@@ -46,8 +46,11 @@ private fun RiskLevel.style(): RiskStyle = when (this) {
   RiskLevel.HIGH ->
     RiskStyle(RiskHigh, White, Icons.Filled.Warning, null, R.string.risk_high, R.string.risk_high_short)
   RiskLevel.MODERATE ->
+    // Dark text on the orange container, same treatment as MILD below — orange (like MILD's
+    // yellow) doesn't carry white text as legibly as HIGH's red does (CR: Visit Tracker UI
+    // issues, 2026-09-10).
     RiskStyle(
-      RiskModerate, White, Icons.Filled.Warning, null, R.string.risk_moderate, R.string.risk_moderate_short,
+      RiskModerate, NeutralG400, Icons.Filled.Warning, null, R.string.risk_moderate, R.string.risk_moderate_short,
     )
   RiskLevel.MILD ->
     RiskStyle(RiskMild, NeutralG400, Icons.Filled.Warning, null, R.string.risk_mild, R.string.risk_mild_short)
